@@ -1,0 +1,273 @@
+"""Telegram Bot Ingestion Service for StreamX.
+
+Provides asynchronous HTTP-based Telegram Bot polling, access control, command
+handling (/start, /help, /status), and media ingestion directly into SQLite.
+"""
+
+import asyncio
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional, Tuple
+import httpx
+from sqlalchemy import select
+
+from app.config.settings import settings
+from app.db.database import AsyncSessionLocal
+from app.db.models import TelegramTransfer, TransferStatus
+from app.utils.filenames import format_bytes, sanitize_filename
+from app.utils.logging import log_event, logger
+
+
+class TelegramBotService:
+    def __init__(self, bot_token: Optional[str] = None):
+        self.bot_token = bot_token or settings.TELEGRAM_BOT_TOKEN
+        self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
+        self.running = False
+        self.last_update_id = 0
+        self.task: Optional[asyncio.Task] = None
+
+    def is_configured(self) -> bool:
+        return bool(self.bot_token and self.bot_token.strip())
+
+    async def send_message(self, chat_id: int, text: str, reply_to_message_id: Optional[int] = None) -> bool:
+        """Send a message to a Telegram chat."""
+        if not self.is_configured():
+            return False
+
+        payload: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }
+        if reply_to_message_id:
+            payload["reply_to_message_id"] = reply_to_message_id
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                res = await client.post(f"{self.base_url}/sendMessage", json=payload)
+                return res.status_code == 200
+        except Exception as e:
+            logger.error(f"Failed to send Telegram message to {chat_id}: {e}")
+            return False
+
+    def is_user_allowed(self, user_id: int) -> bool:
+        """Check if user is authorized to use this bot."""
+        allowed = settings.allowed_telegram_users
+        if not allowed:
+            # If no allowed users explicitly configured, allow (or default open for owner)
+            return True
+        return user_id in allowed
+
+    async def process_update(self, update: Dict[str, Any]) -> None:
+        """Process an individual Telegram update."""
+        message = update.get("message")
+        if not message:
+            return
+
+        chat = message.get("chat", {})
+        chat_id = chat.get("id")
+        user = message.get("from", {})
+        user_id = user.get("id")
+        message_id = message.get("message_id")
+
+        if not chat_id or not user_id:
+            return
+
+        # Security check: User authorization
+        if not self.is_user_allowed(user_id):
+            log_event("UNAUTHORIZED_BOT_ACCESS", user_id=user_id, chat_id=chat_id)
+            await self.send_message(
+                chat_id=chat_id,
+                text="⛔ <b>Access Denied</b>\nThis StreamX Bot instance is private.",
+                reply_to_message_id=message_id,
+            )
+            return
+
+        text = message.get("text", "").strip()
+
+        # Handle Commands
+        if text.startswith("/start"):
+            await self._handle_start(chat_id, user.get("first_name", "there"))
+            return
+        elif text.startswith("/help"):
+            await self._handle_help(chat_id)
+            return
+        elif text.startswith("/status"):
+            await self._handle_status(chat_id)
+            return
+
+        # Check for media attachment
+        media_info = self._extract_media_info(message)
+        if media_info:
+            file_id, filename, file_size = media_info
+            await self._handle_media(chat_id, message_id, file_id, filename, file_size)
+            return
+
+        # Fallback for plain messages
+        await self.send_message(
+            chat_id=chat_id,
+            text=(
+                "💡 <b>Forward a media file to start</b>\n\n"
+                "Send or forward any video, movie, episode, or document directly to this bot to transfer it to Google Drive.\n"
+                "Type /help for instructions or /status for current queue."
+            ),
+            reply_to_message_id=message_id,
+        )
+
+    def _extract_media_info(self, message: Dict[str, Any]) -> Optional[Tuple[str, str, int]]:
+        """Extract file_id, filename, and size from video, document, or audio messages."""
+        if "document" in message:
+            doc = message["document"]
+            filename = sanitize_filename(doc.get("file_name", "document.bin"))
+            return doc.get("file_id"), filename, doc.get("file_size", 0)
+
+        if "video" in message:
+            vid = message["video"]
+            filename = sanitize_filename(vid.get("file_name", f"video_{int(datetime.now(timezone.utc).timestamp())}.mp4"))
+            return vid.get("file_id"), filename, vid.get("file_size", 0)
+
+        if "audio" in message:
+            aud = message["audio"]
+            filename = sanitize_filename(aud.get("file_name", f"audio_{int(datetime.now(timezone.utc).timestamp())}.mp3"))
+            return aud.get("file_id"), filename, aud.get("file_size", 0)
+
+        return None
+
+    async def _handle_start(self, chat_id: int, user_first_name: str) -> None:
+        msg = (
+            f"👋 <b>Welcome to StreamX, {user_first_name}!</b>\n\n"
+            "StreamX is your personal media pipeline connecting Telegram to Google Drive and offline Android playback.\n\n"
+            "<b>How to use:</b>\n"
+            "1. Forward any video, movie, or file to this bot.\n"
+            "2. StreamX enqueues the transfer to your Google Drive master library.\n"
+            "3. You can close Telegram immediately — transfers execute in the cloud.\n\n"
+            "<b>Available Commands:</b>\n"
+            "• /status — Check recent transfers and progress\n"
+            "• /help — Detailed usage & instructions"
+        )
+        await self.send_message(chat_id, msg)
+
+    async def _handle_help(self, chat_id: int) -> None:
+        msg = (
+            "📖 <b>StreamX Help & Usage Guide</b>\n\n"
+            "• <b>Ingestion:</b> Forward large files (movies, series, media) to this bot.\n"
+            "• <b>Cloud Transfer:</b> The worker streams chunks into Google Drive without using local device storage.\n"
+            "• <b>Android App:</b> Browse your Google Drive media library in the StreamX app, download for offline use, or play locally.\n"
+            "• <b>Queue Status:</b> Use /status at any time to monitor active and past transfers."
+        )
+        await self.send_message(chat_id, msg)
+
+    async def _handle_status(self, chat_id: int) -> None:
+        async with AsyncSessionLocal() as session:
+            stmt = select(TelegramTransfer).order_by(TelegramTransfer.id.desc()).limit(5)
+            result = await session.execute(stmt)
+            transfers = result.scalars().all()
+
+        if not transfers:
+            await self.send_message(chat_id, "ℹ️ No recent transfers in the queue.")
+            return
+
+        lines = ["📊 <b>Recent Cloud Transfers:</b>\n"]
+        for t in transfers:
+            status_emoji = {
+                TransferStatus.QUEUED: "⏳",
+                TransferStatus.FETCHING_TELEGRAM: "📥",
+                TransferStatus.UPLOADING_DRIVE: "☁️",
+                TransferStatus.VERIFYING: "🔍",
+                TransferStatus.COMPLETED: "✅",
+                TransferStatus.FAILED: "❌",
+                TransferStatus.CANCELLED: "🚫",
+                TransferStatus.RETRYING: "🔄",
+            }.get(t.status, "•")
+
+            pct = 0
+            if t.size > 0 and t.bytes_transferred:
+                pct = int((t.bytes_transferred / t.size) * 100)
+
+            line = f"{status_emoji} <b>#{t.id}</b> {t.filename}\n   Status: <code>{t.status.value}</code> ({format_bytes(t.size)})"
+            if t.status in (TransferStatus.UPLOADING_DRIVE, TransferStatus.FETCHING_TELEGRAM):
+                line += f" — {pct}%"
+            lines.append(line)
+
+        await self.send_message(chat_id, "\n\n".join(lines))
+
+    async def _handle_media(
+        self, chat_id: int, message_id: int, file_id: str, filename: str, file_size: int
+    ) -> None:
+        log_event("TELEGRAM_MEDIA_RECEIVED", filename=filename, size=file_size, chat_id=chat_id)
+
+        # Record in SQLite
+        async with AsyncSessionLocal() as session:
+            transfer = TelegramTransfer(
+                telegram_chat_id=chat_id,
+                telegram_message_id=message_id,
+                telegram_file_id=file_id,
+                filename=filename,
+                size=file_size,
+                status=TransferStatus.QUEUED,
+                bytes_transferred=0,
+            )
+            session.add(transfer)
+            await session.commit()
+            await session.refresh(transfer)
+            transfer_id = transfer.id
+
+        log_event("TRANSFER_RECORD_CREATED", transfer_id=transfer_id, filename=filename)
+
+        # Immediate acknowledgement to user
+        msg = (
+            "🎬 <b>StreamX — Media Received</b>\n\n"
+            f"📁 <b>File:</b> <code>{filename}</code>\n"
+            f"📦 <b>Size:</b> {format_bytes(file_size)}\n"
+            f"⚡ <b>Status:</b> <code>Queued for cloud transfer</code>\n"
+            f"🏷️ <b>Transfer ID:</b> <code>#{transfer_id}</code>\n\n"
+            "<i>You can now safely close Telegram. Your file will be processed in the background.</i>"
+        )
+        await self.send_message(chat_id, msg, reply_to_message_id=message_id)
+
+    async def start_polling(self) -> None:
+        """Start polling loop for incoming Telegram updates."""
+        if not self.is_configured():
+            logger.warning("Telegram Bot Token is not configured. Polling not started.")
+            return
+
+        self.running = True
+        log_event("TELEGRAM_POLLING_STARTED")
+
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            while self.running:
+                try:
+                    params: Dict[str, Any] = {"timeout": 30}
+                    if self.last_update_id:
+                        params["offset"] = self.last_update_id + 1
+
+                    res = await client.get(f"{self.base_url}/getUpdates", params=params)
+                    if res.status_code == 200:
+                        data = res.json()
+                        updates = data.get("result", [])
+                        for update in updates:
+                            update_id = update.get("update_id")
+                            if update_id:
+                                self.last_update_id = max(self.last_update_id, update_id)
+                            await self.process_update(update)
+                    else:
+                        logger.warning(f"Telegram getUpdates returned status {res.status_code}")
+                        await asyncio.sleep(5)
+                except httpx.TimeoutException:
+                    # Normal long-polling timeout, continue loop
+                    continue
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Error in Telegram bot polling: {e}")
+                    await asyncio.sleep(5)
+
+        log_event("TELEGRAM_POLLING_STOPPED")
+
+    def stop(self) -> None:
+        """Signal polling to stop."""
+        self.running = False
+        if self.task:
+            self.task.cancel()
+
+
+bot_service = TelegramBotService()
