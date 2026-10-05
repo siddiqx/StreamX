@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.db.models import Media
 from app.schemas.media import MediaResponse
 from app.services.drive_service import drive_service
+from app.utils.filenames import sanitize_filename
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
 
@@ -91,10 +92,11 @@ async def stream_media(
             await res.aclose()
             await client.aclose()
 
+    clean_name = sanitize_filename(item.filename)
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": item.mime_type or "video/mp4",
-        "Content-Disposition": f'inline; filename="{item.filename}"',
+        "Content-Disposition": f'inline; filename="{clean_name}"',
     }
     if "Content-Range" in res.headers:
         headers["Content-Range"] = res.headers["Content-Range"]
@@ -183,12 +185,13 @@ async def stream_compatible_media(
             except ProcessLookupError:
                 pass
 
+    clean_name = sanitize_filename(item.filename)
     return StreamingResponse(
         transcode_generator(),
         media_type="video/mp4",
         headers={
             "Content-Type": "video/mp4",
-            "Content-Disposition": f'inline; filename="{item.filename}.mp4"',
+            "Content-Disposition": f'inline; filename="{clean_name}.mp4"',
             "Accept-Ranges": "none",
             "Cache-Control": "no-cache",
         },
@@ -215,7 +218,9 @@ async def open_in_vlc(
     if not vlc_bin:
         raise HTTPException(status_code=404, detail="VLC Media Player was not found on this system.")
 
-    stream_url = f"http://127.0.0.1:8000/media/{media_id}/stream"
+    host = request.headers.get("host") or "127.0.0.1:8000"
+    scheme = request.url.scheme
+    stream_url = f"{scheme}://{host}/media/{media_id}/stream"
 
     try:
         if os.name == "nt":
@@ -243,17 +248,18 @@ async def get_m3u_playlist(
     if not item:
         raise HTTPException(status_code=404, detail="Media item not found")
 
+    clean_title = sanitize_filename(item.filename)
     host = request.headers.get("host") or "127.0.0.1:8000"
     scheme = request.url.scheme
     stream_url = f"{scheme}://{host}/media/{media_id}/stream"
 
-    m3u_content = f"#EXTM3U\n#EXTINF:-1,{item.filename}\n{stream_url}\n"
+    m3u_content = f"#EXTM3U\n#EXTINF:-1,{clean_title}\n{stream_url}\n"
 
     return Response(
         content=m3u_content,
         media_type="application/x-mpegurl",
         headers={
-            "Content-Disposition": f'attachment; filename="{item.filename}.m3u"',
+            "Content-Disposition": f'attachment; filename="{clean_title}.m3u"',
             "Cache-Control": "no-cache",
         },
     )
@@ -283,10 +289,11 @@ async def download_media(
             await res.aclose()
             await client.aclose()
 
+    clean_name = sanitize_filename(item.filename)
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": f'attachment; filename="{item.filename}"',
+        "Content-Disposition": f'attachment; filename="{clean_name}"',
     }
     if "Content-Range" in res.headers:
         headers["Content-Range"] = res.headers["Content-Range"]
