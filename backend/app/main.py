@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
+from app.api.media import router as media_router
 from app.api.transfers import router as transfers_router
 from app.config.settings import settings
 from app.db.database import init_db
@@ -81,3 +82,4 @@ app.add_middleware(
 # Routers
 app.include_router(health_router)
 app.include_router(transfers_router)
+app.include_router(media_router)

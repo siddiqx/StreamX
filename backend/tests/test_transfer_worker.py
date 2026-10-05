@@ -39,9 +39,9 @@ async def test_worker_process_transfer(clean_db):
         await session.refresh(t)
         t_id = t.id
 
-    # Mock execution of _execute_telegram_transfer
+    # Mock execution of _execute_transfer
     with patch.object(
-        worker, "_execute_telegram_transfer", new_callable=AsyncMock
+        worker, "_execute_transfer", new_callable=AsyncMock
     ) as mock_exec:
         processed = await worker.process_next_transfer()
         assert processed is True
