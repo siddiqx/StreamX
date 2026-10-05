@@ -3,7 +3,7 @@ import {
   Wifi, HardDrive, ExternalLink, Cloud, Bot,
   Sparkles, CheckCircle2, Trash2, RefreshCw, Tv
 } from 'lucide-react';
-import { formatBytes, fetchSystemStatus } from '../api';
+import { formatBytes, fetchSystemStatus, API_BASE, setCustomApiBase } from '../api';
 import type { SystemStatus } from '../api';
 
 interface SettingsViewProps {
@@ -28,6 +28,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [apiUrlInput, setApiUrlInput] = useState(API_BASE);
 
   const loadStatus = async () => {
     setIsRefreshing(true);
@@ -286,7 +287,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           icon={<Sparkles size={17} color="#c084fc" />}
           label="StreamX Cinema"
           sub={`Version 1.0.0 · ${systemStatus?.library.total_items || 0} media items (${formatBytes(systemStatus?.library.total_size_bytes || 0)})`}
-          last
           right={
             <span style={{
               background: 'rgba(16,185,129,0.12)', color: '#6ee7b7',
@@ -297,6 +297,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </span>
           }
         />
+
+        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)' }}>Cloud Backend URL</span>
+            <span style={{ fontSize: '0.68rem', color: '#a5b4fc', fontFamily: 'monospace' }}>
+              {API_BASE || 'Auto'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              value={apiUrlInput}
+              onChange={(e) => setApiUrlInput(e.target.value)}
+              placeholder="e.g. https://streamx-backend.onrender.com"
+              style={{
+                flex: 1, height: '38px', borderRadius: '8px',
+                background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-subtle)',
+                color: '#fff', fontSize: '0.78rem', padding: '0 10px', outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => {
+                setCustomApiBase(apiUrlInput);
+                window.location.reload();
+              }}
+              style={{
+                height: '38px', padding: '0 14px', borderRadius: '8px',
+                background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                border: 'none', color: '#fff', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
       </Section>
     </div>
   );
