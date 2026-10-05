@@ -127,13 +127,13 @@ class TransferWorker:
         """Stream chunks from Telegram via MTProto and verify retrieval."""
         client = await mtproto_service.get_client()
 
-        # Find the target media in the chat dialog with the bot
-        bot_id = 8782685139  # @Stream1_X_bot
+        # Resolve bot entity by username or ID
+        bot_entity = "Stream1_X_bot"
         target_message = None
 
         # 1. Try direct message ID in bot dialog
         try:
-            msg = await client.get_messages(bot_id, ids=message_id)
+            msg = await client.get_messages(bot_entity, ids=message_id)
             if msg and msg.media:
                 target_message = msg
         except Exception as e:
@@ -141,7 +141,7 @@ class TransferWorker:
 
         # 2. Search recent messages in bot dialog if direct ID didn't resolve
         if not target_message:
-            async for msg in client.iter_messages(bot_id, limit=10):
+            async for msg in client.iter_messages(bot_entity, limit=10):
                 if msg.media:
                     name = getattr(msg.file, "name", None)
                     size = getattr(msg.file, "size", 0)
