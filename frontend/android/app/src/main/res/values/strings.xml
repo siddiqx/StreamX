@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">StreamX</string>
+    <string name="title_activity_main">StreamX</string>
+    <string name="package_name">com.streamx.app</string>
+    <string name="custom_url_scheme">com.streamx.app</string>
+</resources>

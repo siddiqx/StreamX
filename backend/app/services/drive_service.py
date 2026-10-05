@@ -213,5 +213,19 @@ class GoogleDriveService:
                     return last_byte + 1
             return 0
 
+    async def get_download_stream(self, drive_file_id: str, range_header: Optional[str] = None):
+        """Yield chunks directly from Google Drive alt=media endpoint for streaming or ranged downloads."""
+        creds = await self.get_credentials()
+        headers = {"Authorization": f"Bearer {creds.token}"}
+        if range_header:
+            headers["Range"] = range_header
+
+        url = f"https://www.googleapis.com/drive/v3/files/{drive_file_id}?alt=media"
+        client = httpx.AsyncClient(timeout=300.0)
+        req = client.build_request("GET", url, headers=headers)
+        res = await client.send(req, stream=True)
+        return client, res
+
 
 drive_service = GoogleDriveService()
+

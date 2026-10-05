@@ -12,12 +12,18 @@ from app.main import app
 @pytest.fixture
 async def clean_media_db():
     await init_db()
-    yield
     async with AsyncSessionLocal() as session:
-        items = (await session.execute(select(Media))).scalars().all()
+        items = (await session.execute(select(Media).where(Media.drive_file_id.like("test_%")))).scalars().all()
         for item in items:
             await session.delete(item)
         await session.commit()
+    yield
+    async with AsyncSessionLocal() as session:
+        items = (await session.execute(select(Media).where(Media.drive_file_id.like("test_%")))).scalars().all()
+        for item in items:
+            await session.delete(item)
+        await session.commit()
+
 
 
 @pytest.mark.asyncio
@@ -25,14 +31,14 @@ async def test_media_catalog_and_search_api(clean_media_db):
     # Insert test media items
     async with AsyncSessionLocal() as session:
         m1 = Media(
-            drive_file_id="drive_file_interstellar",
+            drive_file_id="test_drive_file_interstellar",
             filename="Interstellar.2014.1080p.mkv",
             size=13314398621,
             mime_type="video/x-matroska",
             category="Movies",
         )
         m2 = Media(
-            drive_file_id="drive_file_frieren",
+            drive_file_id="test_drive_file_frieren",
             filename="Frieren.S01E01.1080p.mkv",
             size=1450000000,
             mime_type="video/x-matroska",
@@ -49,7 +55,7 @@ async def test_media_catalog_and_search_api(clean_media_db):
         res = await client.get("/media")
         assert res.status_code == 200
         data = res.json()
-        assert len(data) == 2
+        assert len(data) >= 2
 
         # Test filtering by category
         res_movies = await client.get("/media?category=Movies")
@@ -75,4 +81,4 @@ async def test_media_catalog_and_search_api(clean_media_db):
         # Test single item
         res_single = await client.get(f"/media/{m1_id}")
         assert res_single.status_code == 200
-        assert res_single.json()["drive_file_id"] == "drive_file_interstellar"
+        assert res_single.json()["drive_file_id"] == "test_drive_file_interstellar"

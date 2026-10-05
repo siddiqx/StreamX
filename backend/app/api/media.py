@@ -1,13 +1,15 @@
 """Media Library API Router for StreamX."""
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.db.models import Media
 from app.schemas.media import MediaResponse
+from app.services.drive_service import drive_service
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
 
@@ -64,3 +66,86 @@ async def get_media_item(
     if not item:
         raise HTTPException(status_code=404, detail="Media item not found")
     return item
+
+
+@router.get("/{media_id}/stream")
+async def stream_media(
+    media_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream media file directly from Google Drive with full HTTP Range (seek) support."""
+    stmt = select(Media).where(Media.id == media_id)
+    result = await db.execute(stmt)
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+
+    range_header = request.headers.get("Range")
+    client, res = await drive_service.get_download_stream(item.drive_file_id, range_header)
+
+    async def stream_generator():
+        try:
+            async for chunk in res.aiter_bytes(chunk_size=65536):
+                yield chunk
+        finally:
+            await res.aclose()
+            await client.aclose()
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": item.mime_type or "video/mp4",
+        "Content-Disposition": f'inline; filename="{item.filename}"',
+    }
+    if "Content-Range" in res.headers:
+        headers["Content-Range"] = res.headers["Content-Range"]
+    if "Content-Length" in res.headers:
+        headers["Content-Length"] = res.headers["Content-Length"]
+
+    return StreamingResponse(
+        stream_generator(),
+        status_code=res.status_code,
+        headers=headers,
+    )
+
+
+@router.get("/{media_id}/download")
+async def download_media(
+    media_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download media file directly from Google Drive with resumable Range header support."""
+    stmt = select(Media).where(Media.id == media_id)
+    result = await db.execute(stmt)
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+
+    range_header = request.headers.get("Range")
+    client, res = await drive_service.get_download_stream(item.drive_file_id, range_header)
+
+    async def stream_generator():
+        try:
+            async for chunk in res.aiter_bytes(chunk_size=131072):
+                yield chunk
+        finally:
+            await res.aclose()
+            await client.aclose()
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": f'attachment; filename="{item.filename}"',
+    }
+    if "Content-Range" in res.headers:
+        headers["Content-Range"] = res.headers["Content-Range"]
+    if "Content-Length" in res.headers:
+        headers["Content-Length"] = res.headers["Content-Length"]
+
+    return StreamingResponse(
+        stream_generator(),
+        status_code=res.status_code,
+        headers=headers,
+    )
+
