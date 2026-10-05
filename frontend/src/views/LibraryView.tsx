@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Film, ArrowUpDown } from 'lucide-react';
+import { Film } from 'lucide-react';
 import type { MediaItem } from '../types';
 import { MediaCard } from '../components/MediaCard';
 
@@ -11,20 +11,17 @@ interface LibraryViewProps {
   initialCategory?: string;
 }
 
-export const LibraryView: React.FC<LibraryViewProps> = ({
-  media,
-  offlineIds,
-  onSelectMedia,
-  onPlayMedia,
-  initialCategory = 'All',
-}) => {
-  const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory);
-  const [sortBy, setSortBy] = useState<'newest' | 'size' | 'name'>('newest');
+const CATS = ['All', 'Movies', 'TV Shows', 'Anime', 'Other'];
+type SortKey = 'newest' | 'size' | 'name';
 
-  const categories = ['All', 'Movies', 'TV Shows', 'Anime', 'Other'];
+export const LibraryView: React.FC<LibraryViewProps> = ({
+  media, offlineIds, onSelectMedia, onPlayMedia, initialCategory = 'All',
+}) => {
+  const [selectedCat, setSelectedCat] = useState(initialCategory);
+  const [sortBy, setSortBy] = useState<SortKey>('newest');
 
   const filteredMedia = media
-    .filter((item) => selectedCategory === 'All' || item.category.toLowerCase() === selectedCategory.toLowerCase())
+    .filter(item => selectedCat === 'All' || item.category.toLowerCase() === selectedCat.toLowerCase())
     .sort((a, b) => {
       if (sortBy === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       if (sortBy === 'size') return b.size - a.size;
@@ -32,79 +29,53 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '0 20px 40px' }}>
-      {/* Category Pills & Sort Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
-          {categories.map((cat) => {
-            const isSelected = selectedCategory === cat;
-            return (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                style={{
-                  background: isSelected ? '#6366f1' : 'rgba(255, 255, 255, 0.04)',
-                  border: isSelected ? '1px solid #818cf8' : '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-full)',
-                  padding: '6px 14px',
-                  color: isSelected ? '#fff' : 'var(--text-muted)',
-                  fontSize: '0.78rem',
-                  fontWeight: isSelected ? 700 : 500,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {cat}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ArrowUpDown size={14} color="var(--text-faint)" />
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '4px 8px',
-              color: 'var(--text-muted)',
-              fontSize: '0.75rem',
-              outline: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="newest" style={{ background: '#0f172a' }}>Recently Added</option>
-            <option value="size" style={{ background: '#0f172a' }}>File Size</option>
-            <option value="name" style={{ background: '#0f172a' }}>Name</option>
-          </select>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '0 16px 40px' }}>
+      {/* Filters row */}
+      <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '2px', scrollbarWidth: 'none' }}>
+        {CATS.map(cat => (
+          <button key={cat} className={`cat-pill${selectedCat === cat ? ' active' : ''}`}
+            onClick={() => setSelectedCat(cat)}>
+            {cat}
+          </button>
+        ))}
+        <div style={{ width: '1px', background: 'var(--border-subtle)', flexShrink: 0, margin: '4px 0' }} />
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value as SortKey)}
+          style={{
+            background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-full)', padding: '7px 12px',
+            color: 'var(--text-muted)', fontSize: '0.78rem', fontFamily: 'inherit',
+            outline: 'none', cursor: 'pointer', whiteSpace: 'nowrap', minHeight: '36px', flexShrink: 0,
+          }}
+        >
+          <option value="newest" style={{ background: '#0f172a' }}>Newest</option>
+          <option value="size" style={{ background: '#0f172a' }}>Largest</option>
+          <option value="name" style={{ background: '#0f172a' }}>A–Z</option>
+        </select>
       </div>
 
-      {/* Grid Display */}
+      {/* Grid */}
       {filteredMedia.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-faint)' }}>
-          <Film size={40} style={{ opacity: 0.3, marginBottom: '10px' }} />
-          <p style={{ fontSize: '0.9rem', fontWeight: 600 }}>No media items in this category</p>
+        <div style={{
+          padding: '60px 20px', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', gap: '10px', color: 'var(--text-faint)',
+        }}>
+          <Film size={40} style={{ opacity: 0.25 }} />
+          <p style={{ fontSize: '0.9rem', fontWeight: 600 }}>Nothing here yet</p>
         </div>
       ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-          gap: '16px',
-        }}>
-          {filteredMedia.map((item) => (
-            <MediaCard
-              key={item.id}
-              item={item}
-              isOffline={offlineIds.has(item.id)}
-              onSelect={onSelectMedia}
-              onPlay={onPlayMedia}
-            />
-          ))}
-        </div>
+        <>
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)', fontWeight: 500 }}>
+            {filteredMedia.length} {filteredMedia.length === 1 ? 'item' : 'items'}
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(105px, 1fr))', gap: '10px' }}>
+            {filteredMedia.map(item => (
+              <MediaCard key={item.id} item={item} isOffline={offlineIds.has(item.id)}
+                onSelect={onSelectMedia} onPlay={onPlayMedia} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

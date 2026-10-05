@@ -23,9 +23,9 @@ export const TransferModal: React.FC<TransferModalProps> = ({
       case 'COMPLETED':
         return { label: 'Completed', color: 'var(--accent-emerald)', icon: CheckCircle2, bg: 'rgba(16, 185, 129, 0.15)' };
       case 'UPLOADING_DRIVE':
-        return { label: 'Uploading to Drive', color: '#818cf8', icon: Cloud, bg: 'rgba(99, 102, 241, 0.15)' };
+        return { label: 'Uploading', color: '#818cf8', icon: Cloud, bg: 'rgba(99, 102, 241, 0.15)' };
       case 'FETCHING_TELEGRAM':
-        return { label: 'Fetching from Telegram', color: 'var(--accent-cyan)', icon: ArrowUpRight, bg: 'rgba(6, 182, 212, 0.15)' };
+        return { label: 'Downloading', color: 'var(--accent-cyan)', icon: ArrowUpRight, bg: 'rgba(6, 182, 212, 0.15)' };
       case 'QUEUED':
         return { label: 'Queued', color: 'var(--accent-amber)', icon: Clock, bg: 'rgba(245, 158, 11, 0.15)' };
       case 'FAILED':
@@ -38,103 +38,79 @@ export const TransferModal: React.FC<TransferModalProps> = ({
   };
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
-        zIndex: 50,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-      }}
-      onClick={onClose}
-    >
-      <div
-        className="glass-panel animate-fade-in"
-        style={{
-          width: '100%',
-          maxWidth: '560px',
-          maxHeight: '85vh',
-          borderRadius: 'var(--radius-lg)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          boxShadow: 'var(--shadow-card)',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
-          background: 'linear-gradient(180deg, #111726 0%, #090c14 100%)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="bottom-sheet-backdrop animate-fade-in" onClick={onClose}>
+      <div className="bottom-sheet" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '82dvh' }}>
+        <div className="bottom-sheet-handle" />
+
+        {/* Header */}
         <div style={{
-          padding: '18px 22px',
+          padding: '16px 20px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderBottom: '1px solid var(--border-subtle)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
               width: '32px',
               height: '32px',
-              borderRadius: '8px',
-              background: 'rgba(99, 102, 241, 0.2)',
+              borderRadius: '10px',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}>
-              <Cloud size={18} color="#818cf8" />
+              <Cloud size={17} color="#fff" />
             </div>
-            <div>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                Cloud Transfers
-              </h2>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-faint)' }}>
-                Telegram → Google Drive Background Worker
-              </p>
-            </div>
+            <h2 style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', fontFamily: 'var(--font-display)' }}>
+              Transfers ({transfers.length})
+            </h2>
           </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
               onClick={onRefresh}
               style={{
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '8px',
-                padding: '6px',
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 color: 'var(--text-muted)',
                 cursor: 'pointer',
               }}
-              title="Refresh"
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={14} />
             </button>
             <button
               onClick={onClose}
               style={{
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '8px',
-                padding: '6px',
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 color: 'var(--text-muted)',
                 cursor: 'pointer',
               }}
             >
-              <X size={16} />
+              <X size={15} />
             </button>
           </div>
         </div>
 
-        <div style={{ padding: '16px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* Transfers List */}
+        <div style={{ padding: '16px 20px 32px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
           {transfers.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-faint)' }}>
-              <Cloud size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
-              <p style={{ fontSize: '0.9rem', fontWeight: 500 }}>No active cloud transfers</p>
-              <p style={{ fontSize: '0.75rem', marginTop: '4px' }}>
-                Forward a video to <b>@Stream1_X_bot</b> on Telegram to enqueue a transfer.
-              </p>
+            <div style={{ textAlign: 'center', padding: '50px 20px', color: 'var(--text-faint)' }}>
+              <Cloud size={40} style={{ opacity: 0.25, marginBottom: '10px' }} />
+              <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>No transfers</p>
             </div>
           ) : (
             transfers.map((t) => {
@@ -146,45 +122,45 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                 <div
                   key={t.id}
                   style={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '14px 16px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.07)',
+                    borderRadius: '14px',
+                    padding: '12px 14px',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '10px',
+                    gap: '8px',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{
-                        fontSize: '0.88rem',
-                        fontWeight: 600,
-                        color: 'var(--text-main)',
+                        fontSize: '0.84rem',
+                        fontWeight: 700,
+                        color: '#fff',
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                       }}>
                         {t.filename}
                       </p>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-faint)' }}>
-                        {formatBytes(t.bytes_transferred)} of {formatBytes(t.size)}
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-faint)' }}>
+                        {formatBytes(t.bytes_transferred)} / {formatBytes(t.size)}
                       </span>
                     </div>
 
                     <div style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '5px',
+                      gap: '4px',
                       background: badge.bg,
                       color: badge.color,
-                      padding: '4px 8px',
+                      padding: '3px 8px',
                       borderRadius: 'var(--radius-full)',
-                      fontSize: '0.7rem',
-                      fontWeight: 700,
+                      fontSize: '0.68rem',
+                      fontWeight: 800,
                       whiteSpace: 'nowrap',
                     }}>
-                      <BadgeIcon size={12} />
+                      <BadgeIcon size={11} />
                       <span>{badge.label}</span>
                     </div>
                   </div>
@@ -192,7 +168,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                   {/* Progress bar */}
                   <div style={{
                     width: '100%',
-                    height: '6px',
+                    height: '4px',
                     backgroundColor: 'rgba(255, 255, 255, 0.08)',
                     borderRadius: 'var(--radius-full)',
                     overflow: 'hidden',
@@ -203,13 +179,12 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                         width: `${pct}%`,
                         backgroundColor: t.status === 'COMPLETED' ? 'var(--accent-emerald)' : '#818cf8',
                         borderRadius: 'var(--radius-full)',
-                        transition: 'width 0.4s ease',
+                        transition: 'width 0.3s ease',
                       }}
                     />
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-faint)' }}>
-                    <span>Transfer #{t.id}</span>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', fontSize: '0.68rem', color: 'var(--text-faint)' }}>
                     <span>{pct}%</span>
                   </div>
                 </div>

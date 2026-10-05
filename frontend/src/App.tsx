@@ -11,7 +11,6 @@ import { HomeView } from './views/HomeView';
 import { SearchView } from './views/SearchView';
 import { LibraryView } from './views/LibraryView';
 import { DownloadsView } from './views/DownloadsView';
-import { OfflineView } from './views/OfflineView';
 import { SettingsView } from './views/SettingsView';
 
 export const App: React.FC = () => {
@@ -31,7 +30,31 @@ export const App: React.FC = () => {
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [playingMedia, setPlayingMedia] = useState<MediaItem | null>(null);
   const [isTransfersOpen, setIsTransfersOpen] = useState(false);
-  const [isWifiOnly, setIsWifiOnly] = useState(true);
+  const [isWifiOnly, setIsWifiOnly] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('streamx_wifi_only');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleWifiOnly = () => {
+    setIsWifiOnly(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('streamx_wifi_only', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleClearAllDownloads = () => {
+    setDownloads([]);
+    try {
+      localStorage.removeItem('streamx_downloads');
+    } catch {}
+  };
 
   // Storage info (with fallback to 128 GB total, 64 GB free)
   const [deviceTotalBytes, setDeviceTotalBytes] = useState(128 * 1024 * 1024 * 1024);
@@ -184,15 +207,21 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Sticky Header */}
+    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <Navbar
         activeTransfers={transfers}
         onOpenTransfers={() => setIsTransfersOpen(true)}
       />
 
-      {/* Main Content Area */}
-      <main style={{ flex: 1, paddingTop: '16px', paddingBottom: '90px', maxWidth: '1200px', width: '100%', margin: '0 auto' }}>
+      <main style={{
+        flex: 1,
+        paddingTop: '12px',
+        paddingBottom: 'calc(var(--bottomnav-h) + max(env(safe-area-inset-bottom, 0px), 8px) + 16px)',
+        maxWidth: '800px',
+        width: '100%',
+        margin: '0 auto',
+        overflowX: 'hidden',
+      }}>
         {currentTab === 'home' && (
           <HomeView
             media={media}
@@ -233,39 +262,32 @@ export const App: React.FC = () => {
             onPause={handlePauseDownload}
             onResume={handleResumeDownload}
             onCancel={handleCancelDownload}
-            isWifiOnly={isWifiOnly}
-          />
-        )}
-
-        {currentTab === 'offline' && (
-          <OfflineView
-            offlineItems={offlineItems}
-            onPlay={(item) => setPlayingMedia(item)}
             onDeleteDownload={handleDeleteDownload}
+            onPlay={(item) => setPlayingMedia(item)}
             mediaMap={mediaMap}
+            isWifiOnly={isWifiOnly}
           />
         )}
 
         {currentTab === 'settings' && (
           <SettingsView
             isWifiOnly={isWifiOnly}
-            onToggleWifiOnly={() => setIsWifiOnly(!isWifiOnly)}
+            onToggleWifiOnly={handleToggleWifiOnly}
             deviceTotalBytes={deviceTotalBytes}
             deviceFreeBytes={deviceFreeBytes}
             offlineBytesTotal={offlineBytesTotal}
+            onClearDownloads={handleClearAllDownloads}
+            offlineCount={offlineItems.length}
           />
         )}
       </main>
 
-      {/* Mobile Sticky Navigation */}
       <BottomNav
         currentTab={currentTab}
         onSelectTab={(tab) => setCurrentTab(tab)}
         downloadCount={downloads.filter((d) => d.status === 'DOWNLOADING').length}
-        offlineCount={offlineItems.length}
       />
 
-      {/* Cloud Transfers Modal */}
       <TransferModal
         isOpen={isTransfersOpen}
         onClose={() => setIsTransfersOpen(false)}
@@ -273,7 +295,6 @@ export const App: React.FC = () => {
         onRefresh={refreshData}
       />
 
-      {/* Media Detail Sheet */}
       <MediaDetailModal
         item={selectedMedia}
         onClose={() => setSelectedMedia(null)}
@@ -287,7 +308,6 @@ export const App: React.FC = () => {
         deviceFreeBytes={deviceFreeBytes}
       />
 
-      {/* Embedded Fullscreen Video Player */}
       <VideoPlayerModal
         item={playingMedia}
         onClose={() => setPlayingMedia(null)}

@@ -262,17 +262,33 @@ class GoogleDriveService:
                 # Check if already cataloged
                 stmt = select(Media).where(Media.drive_file_id == drive_id)
                 existing = (await session.execute(stmt)).scalar_one_or_none()
+                category = detect_category(name)
+
                 if not existing:
-                    category = detect_category(name)
+                    from app.services.metadata_service import metadata_service
+                    import json
+                    poster, backdrop = await metadata_service.fetch_poster_and_backdrop(name, category)
                     item = Media(
                         drive_file_id=drive_id,
                         filename=name,
                         size=size,
                         mime_type=mime,
                         category=category,
+                        poster_url=poster,
+                        metadata_json=json.dumps({"backdrop_url": backdrop}) if backdrop else None,
                     )
                     session.add(item)
                     synced_count += 1
+                elif not existing.poster_url:
+                    from app.services.metadata_service import metadata_service
+                    import json
+                    poster, backdrop = await metadata_service.fetch_poster_and_backdrop(name, category)
+                    if poster:
+                        existing.poster_url = poster
+                    if backdrop:
+                        meta = json.loads(existing.metadata_json or "{}")
+                        meta["backdrop_url"] = backdrop
+                        existing.metadata_json = json.dumps(meta)
 
                 # Reconcile transfer if exists
                 stmt_t = select(TelegramTransfer).where(TelegramTransfer.filename == name)
@@ -299,6 +315,34 @@ class GoogleDriveService:
         req = client.build_request("GET", url, headers=headers)
         res = await client.send(req, stream=True)
         return client, res
+
+    async def get_storage_and_user_info(self) -> Dict[str, Any]:
+        """Fetch live Google Drive account display name, email, and storage quota."""
+        if not self.is_configured():
+            return {"configured": False, "connected": False}
+        try:
+            creds = await self.get_credentials()
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.get(
+                    "https://www.googleapis.com/drive/v3/about?fields=storageQuota,user",
+                    headers={"Authorization": f"Bearer {creds.token}"},
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    quota = data.get("storageQuota", {})
+                    user = data.get("user", {})
+                    return {
+                        "configured": True,
+                        "connected": True,
+                        "user_name": user.get("displayName", "User"),
+                        "email": user.get("emailAddress", ""),
+                        "limit_bytes": int(quota.get("limit", 0)),
+                        "usage_bytes": int(quota.get("usage", 0)),
+                        "drive_usage_bytes": int(quota.get("usageInDrive", 0)),
+                    }
+                return {"configured": True, "connected": False, "error": f"HTTP {res.status_code}"}
+        except Exception as e:
+            return {"configured": True, "connected": False, "error": str(e)}
 
 
 drive_service = GoogleDriveService()

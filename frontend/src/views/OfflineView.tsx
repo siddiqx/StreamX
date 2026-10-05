@@ -1,7 +1,7 @@
 import React from 'react';
 import { WifiOff, Play, Trash2, Film } from 'lucide-react';
 import type { DeviceDownload, MediaItem } from '../types';
-import { formatBytes } from '../api';
+import { formatBytes, parseMediaMetadata } from '../api';
 
 interface OfflineViewProps {
   offlineItems: DeviceDownload[];
@@ -10,160 +10,84 @@ interface OfflineViewProps {
   mediaMap: Map<number, MediaItem>;
 }
 
-export const OfflineView: React.FC<OfflineViewProps> = ({
-  offlineItems,
-  onPlay,
-  onDeleteDownload,
-  mediaMap,
-}) => {
+export const OfflineView: React.FC<OfflineViewProps> = ({ offlineItems, onPlay, onDeleteDownload, mediaMap }) => {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '0 20px 40px' }}>
-      {/* Offline Status Card */}
-      <div style={{
-        background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.1) 100%)',
-        border: '1px solid rgba(16, 185, 129, 0.3)',
-        borderRadius: 'var(--radius-md)',
-        padding: '16px 20px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '14px',
-      }}>
-        <div style={{
-          width: '38px',
-          height: '38px',
-          borderRadius: '50%',
-          background: 'rgba(16, 185, 129, 0.2)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <WifiOff size={20} color="var(--accent-emerald)" />
-        </div>
-        <div>
-          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff' }}>
-            Zero-Internet Offline Cache
-          </h3>
-          <p style={{ fontSize: '0.75rem', color: '#a7f3d0' }}>
-            These files are stored on this device. You can turn on Airplane mode and watch smoothly without internet.
-          </p>
-        </div>
-      </div>
-
-      {/* Offline Media List */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '0 16px 40px' }}>
       {offlineItems.length === 0 ? (
         <div style={{
-          textAlign: 'center',
-          padding: '80px 20px',
-          color: 'var(--text-faint)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '10px',
+          padding: '70px 20px', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', gap: '12px', color: 'var(--text-faint)',
         }}>
-          <Film size={44} style={{ opacity: 0.25 }} />
-          <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>No offline media available</p>
-          <p style={{ fontSize: '0.75rem', maxWidth: '300px' }}>
-            Download movies or episodes from your library to watch offline anytime.
+          <WifiOff size={44} style={{ opacity: 0.2 }} />
+          <p style={{ fontSize: '0.9rem', fontWeight: 600 }}>No offline content</p>
+          <p style={{ fontSize: '0.78rem', textAlign: 'center', maxWidth: '240px' }}>
+            Download titles from your library to watch without internet.
           </p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {offlineItems.map((item) => {
-            const mediaItem = mediaMap.get(item.media_id) || {
-              id: item.media_id,
-              drive_file_id: '',
-              filename: item.filename,
-              size: item.size,
-              mime_type: item.mime_type,
-              category: item.category,
-              created_at: '',
-              updated_at: '',
-            };
+        <>
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {offlineItems.length} {offlineItems.length === 1 ? 'item' : 'items'} available offline
+          </p>
 
-            const cleanTitle = item.filename.replace(/\.[^/.]+$/, '').replace(/[_.]/g, ' ');
-
+          {offlineItems.map(d => {
+            const mediaItem = mediaMap.get(d.media_id);
+            const meta = parseMediaMetadata(d.filename);
             return (
-              <div
-                key={item.id}
-                className="glass-card"
-                style={{
-                  padding: '14px 18px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '14px',
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
-                    <span style={{
-                      background: 'rgba(16, 185, 129, 0.2)',
-                      color: 'var(--accent-emerald)',
-                      borderRadius: 'var(--radius-full)',
-                      padding: '1px 6px',
-                      fontSize: '0.62rem',
-                      fontWeight: 800,
-                    }}>
-                      OFFLINE ✓
-                    </span>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-faint)' }}>{item.category}</span>
-                  </div>
-
-                  <h4 style={{
-                    fontSize: '0.9rem',
-                    fontWeight: 700,
-                    color: 'var(--text-main)',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}>
-                    {cleanTitle}
-                  </h4>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-faint)' }}>
-                    {formatBytes(item.size)} • {item.filename.split('.').pop()?.toUpperCase()}
-                  </span>
+              <div key={d.id} className="glass-card" style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '14px' }}>
+                {/* Poster mini */}
+                <div style={{
+                  width: '52px', height: '72px', borderRadius: '8px', flexShrink: 0, overflow: 'hidden',
+                  background: 'rgba(99,102,241,0.12)',
+                }}>
+                  {mediaItem?.poster_url ? (
+                    <img src={mediaItem.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Film size={20} color="#818cf8" />
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button
-                    onClick={() => onPlay(mediaItem)}
-                    style={{
-                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                      border: 'none',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '8px 14px',
-                      color: '#fff',
-                      fontWeight: 700,
-                      fontSize: '0.8rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Play size={14} fill="#fff" />
-                    <span>Watch</span>
-                  </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{
+                    fontSize: '0.85rem', fontWeight: 700, color: '#fff',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {meta.cleanTitle}
+                  </p>
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.68rem', color: '#6ee7b7', fontWeight: 700 }}>Offline</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--text-faint)' }}>·</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--text-faint)' }}>{formatBytes(d.size)}</span>
+                  </div>
+                </div>
 
-                  <button
-                    onClick={() => onDeleteDownload(mediaItem)}
-                    style={{
-                      background: 'rgba(244, 63, 94, 0.1)',
-                      border: '1px solid rgba(244, 63, 94, 0.3)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '8px',
-                      color: 'var(--accent-rose)',
-                      cursor: 'pointer',
-                    }}
-                    title="Delete local download only (Google Drive master remains untouched)"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                  {mediaItem && (
+                    <button onClick={() => onPlay(mediaItem)} style={{
+                      width: '38px', height: '38px', borderRadius: '50%', border: 'none',
+                      background: '#6366f1', display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', cursor: 'pointer', color: '#fff',
+                    }}>
+                      <Play size={15} fill="#fff" style={{ marginLeft: '1px' }} />
+                    </button>
+                  )}
+                  {mediaItem && (
+                    <button onClick={() => onDeleteDownload(mediaItem)} style={{
+                      width: '38px', height: '38px', borderRadius: '50%',
+                      background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', color: 'var(--accent-rose)',
+                    }}>
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </div>
               </div>
             );
           })}
-        </div>
+        </>
       )}
     </div>
   );

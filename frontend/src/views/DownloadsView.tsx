@@ -1,210 +1,329 @@
-import React from 'react';
-import { ArrowDownCircle, Pause, Play, X, Wifi, HardDrive } from 'lucide-react';
-import type { DeviceDownload } from '../types';
-import { formatBytes } from '../api';
+import React, { useState } from 'react';
+import {
+  ArrowDownCircle, Pause, Play, X, Wifi,
+  WifiOff, Trash2, ExternalLink, HardDrive
+} from 'lucide-react';
+import type { DeviceDownload, MediaItem } from '../types';
+import {
+  formatBytes, parseMediaMetadata,
+  getVlcIntentUrl, getVlcProtocolUrl, openVlcOnHost
+} from '../api';
 
 interface DownloadsViewProps {
   downloads: DeviceDownload[];
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onCancel: (id: string) => void;
+  onDeleteDownload: (item: MediaItem) => void;
+  onPlay: (item: MediaItem) => void;
+  mediaMap: Map<number, MediaItem>;
   isWifiOnly: boolean;
 }
 
 export const DownloadsView: React.FC<DownloadsViewProps> = ({
-  downloads,
-  onPause,
-  onResume,
-  onCancel,
-  isWifiOnly,
+  downloads, onPause, onResume, onCancel, onDeleteDownload, onPlay, mediaMap, isWifiOnly
 }) => {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '0 20px 40px' }}>
-      {/* Header Info Banner */}
-      <div style={{
-        background: 'rgba(255, 255, 255, 0.03)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-md)',
-        padding: '14px 18px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <HardDrive size={18} color="#818cf8" />
-          <div>
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-main)' }}>
-              Android Device Downloads
-            </h3>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)' }}>
-              Storage Access Framework: <code>StreamX/Downloads/</code>
-            </p>
-          </div>
-        </div>
+  const active = downloads.filter(d => d.status !== 'COMPLETED');
+  const completed = downloads.filter(d => d.status === 'COMPLETED');
 
-        {isWifiOnly && (
-          <div style={{
+  // Default to offline tab if no active downloads
+  const [subTab, setSubTab] = useState<'offline' | 'active'>(active.length > 0 ? 'active' : 'offline');
+
+  const statusColor = (s: string) => {
+    if (s === 'DOWNLOADING') return '#6366f1';
+    if (s === 'PAUSED') return '#f59e0b';
+    if (s === 'COMPLETED') return '#10b981';
+    return '#64748b';
+  };
+
+  const handleLaunchVlc = async (item: MediaItem) => {
+    const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (isMobile) {
+      const intentUrl = getVlcIntentUrl(item.id, item.filename);
+      const vlcProto = getVlcProtocolUrl(item.id);
+      const a = document.createElement('a');
+      a.href = /android/i.test(navigator.userAgent) ? intentUrl : vlcProto;
+      a.click();
+      return;
+    }
+    await openVlcOnHost(item.id);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '0 16px 40px' }}>
+      
+      {/* Top Segmented Pill Toggle */}
+      <div style={{
+        display: 'flex',
+        background: 'rgba(255,255,255,0.06)',
+        borderRadius: 'var(--radius-full)',
+        padding: '3px',
+        border: '1px solid rgba(255,255,255,0.08)',
+      }}>
+        <button
+          onClick={() => setSubTab('offline')}
+          style={{
+            flex: 1,
+            height: '38px',
+            borderRadius: 'var(--radius-full)',
+            border: 'none',
+            background: subTab === 'offline' ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'none',
+            color: subTab === 'offline' ? '#fff' : 'var(--text-muted)',
+            fontWeight: 700,
+            fontSize: '0.8rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
             display: 'flex',
             alignItems: 'center',
-            gap: '4px',
-            background: 'rgba(6, 182, 212, 0.15)',
-            border: '1px solid rgba(6, 182, 212, 0.3)',
+            justifyContent: 'center',
+            gap: '6px',
+            boxShadow: subTab === 'offline' ? '0 2px 10px rgba(99,102,241,0.4)' : 'none',
+          }}
+        >
+          <HardDrive size={15} />
+          Saved Offline ({completed.length})
+        </button>
+
+        <button
+          onClick={() => setSubTab('active')}
+          style={{
+            flex: 1,
+            height: '38px',
             borderRadius: 'var(--radius-full)',
-            padding: '3px 8px',
-            fontSize: '0.68rem',
+            border: 'none',
+            background: subTab === 'active' ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'none',
+            color: subTab === 'active' ? '#fff' : 'var(--text-muted)',
             fontWeight: 700,
-            color: 'var(--accent-cyan)',
-          }}>
-            <Wifi size={12} />
-            <span>Wi-Fi Only</span>
-          </div>
-        )}
+            fontSize: '0.8rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            boxShadow: subTab === 'active' ? '0 2px 10px rgba(99,102,241,0.4)' : 'none',
+          }}
+        >
+          <ArrowDownCircle size={15} />
+          In Progress ({active.length})
+        </button>
       </div>
 
-      {/* Downloads List */}
-      {downloads.length === 0 ? (
-        <div style={{
-          textAlign: 'center',
-          padding: '80px 20px',
-          color: 'var(--text-faint)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '10px',
-        }}>
-          <ArrowDownCircle size={44} style={{ opacity: 0.25 }} />
-          <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>No active downloads</p>
-          <p style={{ fontSize: '0.75rem', maxWidth: '300px' }}>
-            Select any movie or anime from your library and press Download to cache it for offline watching.
-          </p>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {downloads.map((d) => (
-            <div
-              key={d.id}
-              className="glass-card"
-              style={{
-                padding: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <h4 style={{
-                    fontSize: '0.88rem',
-                    fontWeight: 700,
-                    color: 'var(--text-main)',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}>
-                    {d.filename}
-                  </h4>
-                  <div style={{ display: 'flex', gap: '8px', fontSize: '0.72rem', color: 'var(--text-faint)', marginTop: '2px' }}>
-                    <span>{formatBytes(d.bytes_downloaded)} / {formatBytes(d.size)}</span>
-                    {d.status === 'DOWNLOADING' && (
-                      <>
-                        <span>•</span>
-                        <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>{d.speed_mbps.toFixed(1)} MB/s</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Control Action Buttons */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {d.status === 'DOWNLOADING' ? (
-                    <button
-                      onClick={() => onPause(d.id)}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.08)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: '50%',
-                        width: '32px',
-                        height: '32px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#fff',
-                        cursor: 'pointer',
-                      }}
-                      title="Pause"
-                    >
-                      <Pause size={14} />
-                    </button>
-                  ) : d.status === 'PAUSED' ? (
-                    <button
-                      onClick={() => onResume(d.id)}
-                      style={{
-                        background: '#6366f1',
-                        border: 'none',
-                        borderRadius: '50%',
-                        width: '32px',
-                        height: '32px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#fff',
-                        cursor: 'pointer',
-                      }}
-                      title="Resume"
-                    >
-                      <Play size={14} fill="#fff" style={{ marginLeft: '1px' }} />
-                    </button>
-                  ) : null}
-
-                  {d.status !== 'COMPLETED' && (
-                    <button
-                      onClick={() => onCancel(d.id)}
-                      style={{
-                        background: 'rgba(244, 63, 94, 0.1)',
-                        border: '1px solid rgba(244, 63, 94, 0.3)',
-                        borderRadius: '50%',
-                        width: '32px',
-                        height: '32px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'var(--accent-rose)',
-                        cursor: 'pointer',
-                      }}
-                      title="Cancel"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Progress Bar */}
-              <div style={{
-                width: '100%',
-                height: '6px',
-                backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                borderRadius: 'var(--radius-full)',
-                overflow: 'hidden',
-              }}>
-                <div
-                  style={{
-                    height: '100%',
-                    width: `${d.progress}%`,
-                    backgroundColor: d.status === 'COMPLETED' ? 'var(--accent-emerald)' : '#6366f1',
-                    borderRadius: 'var(--radius-full)',
-                    transition: 'width 0.3s ease',
-                  }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-faint)' }}>
-                <span style={{ textTransform: 'capitalize' }}>Status: {d.status.toLowerCase()}</span>
-                <span>{d.progress}%</span>
-              </div>
+      {/* Subtab 1: Saved Offline */}
+      {subTab === 'offline' && (
+        <>
+          {completed.length === 0 ? (
+            <div style={{
+              padding: '60px 20px', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', gap: '12px', color: 'var(--text-faint)',
+            }}>
+              <WifiOff size={44} style={{ opacity: 0.25 }} />
+              <p style={{ fontSize: '0.92rem', fontWeight: 700, color: '#fff' }}>No offline titles</p>
+              <p style={{ fontSize: '0.78rem', textAlign: 'center', maxWidth: '240px', lineHeight: 1.4 }}>
+                Download any video from your library to watch without an internet connection.
+              </p>
             </div>
-          ))}
-        </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {completed.map(d => {
+                const mediaItem = mediaMap.get(d.media_id);
+                const meta = parseMediaMetadata(d.filename);
+                return (
+                  <div
+                    key={d.id}
+                    className="glass-card"
+                    style={{
+                      padding: '12px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                    }}
+                  >
+                    {/* Thumbnail */}
+                    <div style={{
+                      width: '46px',
+                      height: '64px',
+                      borderRadius: '8px',
+                      flexShrink: 0,
+                      overflow: 'hidden',
+                      backgroundColor: '#131926',
+                    }}>
+                      {mediaItem?.poster_url ? (
+                        <img src={mediaItem.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <HardDrive size={18} color="#818cf8" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Metadata */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{
+                        fontSize: '0.84rem', fontWeight: 700, color: '#fff',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {meta.cleanTitle}
+                      </p>
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '2px', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.68rem', color: '#6ee7b7', fontWeight: 700 }}>Ready</span>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--text-faint)' }}>·</span>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{formatBytes(d.size)}</span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                      {mediaItem && (
+                        <button
+                          onClick={() => onPlay(mediaItem)}
+                          style={{
+                            width: '36px', height: '36px', borderRadius: '50%', border: 'none',
+                            background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', color: '#fff',
+                          }}
+                        >
+                          <Play size={14} fill="#fff" style={{ marginLeft: '1px' }} />
+                        </button>
+                      )}
+
+                      {mediaItem && (
+                        <button
+                          onClick={() => handleLaunchVlc(mediaItem)}
+                          style={{
+                            width: '36px', height: '36px', borderRadius: '50%',
+                            background: 'rgba(249,115,22,0.18)', border: '1px solid rgba(249,115,22,0.4)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', color: '#fdba74',
+                          }}
+                        >
+                          <ExternalLink size={14} />
+                        </button>
+                      )}
+
+                      {mediaItem && (
+                        <button
+                          onClick={() => onDeleteDownload(mediaItem)}
+                          style={{
+                            width: '36px', height: '36px', borderRadius: '50%',
+                            background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', color: 'var(--accent-rose)',
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Subtab 2: In Progress */}
+      {subTab === 'active' && (
+        <>
+          {active.length === 0 ? (
+            <div style={{
+              padding: '60px 20px', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', gap: '12px', color: 'var(--text-faint)',
+            }}>
+              <ArrowDownCircle size={44} style={{ opacity: 0.25 }} />
+              <p style={{ fontSize: '0.92rem', fontWeight: 700, color: '#fff' }}>No active downloads</p>
+              <p style={{ fontSize: '0.78rem', textAlign: 'center', maxWidth: '240px', lineHeight: 1.4 }}>
+                All queued files have finished downloading.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {isWifiOnly && (
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.25)',
+                  borderRadius: 'var(--radius-full)', padding: '5px 12px',
+                  fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-cyan)', alignSelf: 'flex-start',
+                }}>
+                  <Wifi size={13} />
+                  Wi-Fi Only Mode
+                </div>
+              )}
+
+              {active.map(d => {
+                const meta = parseMediaMetadata(d.filename);
+                return (
+                  <div
+                    key={d.id}
+                    className="glass-card"
+                    style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{
+                        width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0,
+                        background: `${statusColor(d.status)}22`, border: `1px solid ${statusColor(d.status)}44`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <ArrowDownCircle size={17} color={statusColor(d.status)} />
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{
+                          fontSize: '0.84rem', fontWeight: 700, color: '#fff',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}>
+                          {meta.cleanTitle}
+                        </p>
+                        <div style={{ display: 'flex', gap: '6px', fontSize: '0.7rem', color: 'var(--text-faint)', marginTop: '2px' }}>
+                          <span>{formatBytes(d.bytes_downloaded)} / {formatBytes(d.size)}</span>
+                          <span>·</span>
+                          {d.status === 'DOWNLOADING' && (
+                            <span style={{ color: '#67e8f9', fontWeight: 700 }}>{d.speed_mbps.toFixed(1)} MB/s</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                        {d.status === 'DOWNLOADING' && (
+                          <button onClick={() => onPause(d.id)} style={{
+                            width: '34px', height: '34px', borderRadius: '50%',
+                            border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.08)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer',
+                          }}>
+                            <Pause size={13} />
+                          </button>
+                        )}
+                        {d.status === 'PAUSED' && (
+                          <button onClick={() => onResume(d.id)} style={{
+                            width: '34px', height: '34px', borderRadius: '50%', border: 'none',
+                            background: '#6366f1', display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', color: '#fff', cursor: 'pointer',
+                          }}>
+                            <Play size={13} fill="#fff" style={{ marginLeft: '1px' }} />
+                          </button>
+                        )}
+                        <button onClick={() => onCancel(d.id)} style={{
+                          width: '34px', height: '34px', borderRadius: '50%',
+                          background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          color: 'var(--accent-rose)', cursor: 'pointer',
+                        }}>
+                          <X size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="progress-track">
+                      <div className="progress-fill" style={{ width: `${d.progress}%`, background: statusColor(d.status) }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

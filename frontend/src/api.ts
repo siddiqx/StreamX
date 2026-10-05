@@ -1,12 +1,29 @@
 import type { CategorySummary, MediaItem, TelegramTransfer } from './types';
 
 export const getApiBase = (): string => {
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('streamx_api_url');
+    if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
+  }
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL.replace(/\/+$/, '');
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+    if (window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.168.')) {
+      return import.meta.env.VITE_API_URL || '';
+    }
     return `http://${window.location.hostname}:8000`;
   }
   return 'http://localhost:8000';
 };
+
+export function setCustomApiBase(url: string): void {
+  if (typeof window !== 'undefined') {
+    if (url.trim()) {
+      localStorage.setItem('streamx_api_url', url.trim());
+    } else {
+      localStorage.removeItem('streamx_api_url');
+    }
+  }
+}
 
 export const API_BASE = getApiBase();
 
@@ -54,12 +71,86 @@ export async function fetchTransfers(): Promise<TelegramTransfer[]> {
   }
 }
 
+export interface SystemStatus {
+  status: string;
+  drive: {
+    configured: boolean;
+    connected: boolean;
+    user_name?: string;
+    email?: string;
+    limit_bytes?: number;
+    usage_bytes?: number;
+    drive_usage_bytes?: number;
+  };
+  bot: {
+    configured: boolean;
+    username: string;
+  };
+  mtproto: {
+    configured: boolean;
+  };
+  vlc: {
+    installed: boolean;
+    path?: string;
+  };
+  host_storage: {
+    total_bytes: number;
+    used_bytes: number;
+    free_bytes: number;
+  };
+  library: {
+    total_items: number;
+    total_size_bytes: number;
+  };
+}
+
+export async function fetchSystemStatus(): Promise<SystemStatus | null> {
+  try {
+    const res = await fetch(`${API_BASE}/system/status`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('Failed to fetch system status:', err);
+    return null;
+  }
+}
+
 export function getStreamUrl(mediaId: number): string {
   return `${API_BASE}/media/${mediaId}/stream`;
 }
 
+export function getCompatibleStreamUrl(mediaId: number, start?: number): string {
+  return `${API_BASE}/media/${mediaId}/stream/compatible${start ? `?start=${start}` : ''}`;
+}
+
 export function getDownloadUrl(mediaId: number): string {
   return `${API_BASE}/media/${mediaId}/download`;
+}
+
+export function getPlaylistUrl(mediaId: number): string {
+  return `${API_BASE}/media/${mediaId}/playlist.m3u`;
+}
+
+export function getVlcProtocolUrl(mediaId: number): string {
+  return `vlc://${getStreamUrl(mediaId)}`;
+}
+
+export function getVlcIntentUrl(mediaId: number, title?: string): string {
+  const streamUrl = getStreamUrl(mediaId);
+  const rawUrl = streamUrl.replace(/^https?:\/\//, '');
+  const scheme = streamUrl.startsWith('https') ? 'https' : 'http';
+  return `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};${title ? `S.title=${encodeURIComponent(title)};` : ''}end`;
+}
+
+export async function openVlcOnHost(mediaId: number): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}/open-vlc`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Failed to open VLC');
+    return { success: true, message: data.message || 'VLC launched on device' };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Could not launch VLC' };
+  }
 }
 
 export function formatBytes(bytes: number): string {

@@ -6,6 +6,7 @@ export interface MediaItem {
   mime_type: string;
   category: string;
   poster_url?: string;
+  metadata_json?: string;
   created_at: string;
   updated_at: string;
 }
