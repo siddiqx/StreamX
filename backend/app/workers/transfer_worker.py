@@ -53,10 +53,32 @@ class TransferWorker:
         self.running = False
         self.task: Optional[asyncio.Task] = None
 
+    async def reconcile_incomplete_transfers(self) -> None:
+        """Section 37: Reconcile transfers left incomplete by dead or restarted processes."""
+        async with AsyncSessionLocal() as session:
+            stmt = select(TelegramTransfer).where(
+                TelegramTransfer.status.in_(
+                    [TransferStatus.FETCHING_TELEGRAM, TransferStatus.UPLOADING_DRIVE]
+                )
+            )
+            result = await session.execute(stmt)
+            incomplete = result.scalars().all()
+            for t in incomplete:
+                log_event(
+                    "RECONCILING_INCOMPLETE_TRANSFER",
+                    transfer_id=t.id,
+                    filename=t.filename,
+                    previous_status=t.status.value,
+                )
+                t.status = TransferStatus.QUEUED
+            if incomplete:
+                await session.commit()
+
     async def start(self) -> None:
-        """Start worker loop."""
+        """Start worker loop with crash/restart state reconciliation."""
         self.running = True
         log_event("TRANSFER_WORKER_STARTED")
+        await self.reconcile_incomplete_transfers()
         while self.running:
             try:
                 processed = await self.process_next_transfer()
@@ -260,33 +282,55 @@ class TransferWorker:
         start_time = time.time()
         current_offset = start_offset
         drive_file_id = None
+        buffer = bytearray()
+        target_chunk_size = settings.CHUNK_BUFFER_SIZE_BYTES  # 8MB chunk buffer
 
-        async for chunk in client.iter_download(
+        async for raw_slice in client.iter_download(
             target_message.media,
             offset=start_offset,
-            chunk_size=chunk_size,
-            request_size=chunk_size,
+            chunk_size=target_chunk_size,
+            request_size=target_chunk_size,
         ):
-            # Upload chunk to Google Drive
+            buffer.extend(raw_slice)
+
+            # When buffer reaches target chunk size or file end, upload chunk to Google Drive
+            if len(buffer) >= target_chunk_size or (current_offset + len(buffer)) >= actual_size:
+                chunk_bytes = bytes(buffer)
+                buffer.clear()
+
+                completed, file_id = await drive_service.upload_chunk(
+                    upload_url=upload_url,
+                    chunk=chunk_bytes,
+                    start_byte=current_offset,
+                    total_size=actual_size,
+                )
+                current_offset += len(chunk_bytes)
+
+                # Update transfer progress in SQLite
+                async with AsyncSessionLocal() as session:
+                    stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                    t = (await session.execute(stmt)).scalar_one_or_none()
+                    if t:
+                        t.bytes_transferred = current_offset
+                        await session.commit()
+
+                if completed:
+                    drive_file_id = file_id
+                    break
+
+        # Flush any remaining buffer if file not yet completed
+        if not drive_file_id and len(buffer) > 0:
+            chunk_bytes = bytes(buffer)
+            buffer.clear()
             completed, file_id = await drive_service.upload_chunk(
                 upload_url=upload_url,
-                chunk=chunk,
+                chunk=chunk_bytes,
                 start_byte=current_offset,
                 total_size=actual_size,
             )
-            current_offset += len(chunk)
-
-            # Update transfer progress in SQLite
-            async with AsyncSessionLocal() as session:
-                stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
-                t = (await session.execute(stmt)).scalar_one_or_none()
-                if t:
-                    t.bytes_transferred = current_offset
-                    await session.commit()
-
+            current_offset += len(chunk_bytes)
             if completed:
                 drive_file_id = file_id
-                break
 
         if not drive_file_id:
             raise RuntimeError("Streaming ended without Google Drive confirming file completion.")

@@ -165,7 +165,7 @@ class GoogleDriveService:
     async def upload_chunk(
         self,
         upload_url: str,
-        chunk: bytes,
+        chunk: Any,
         start_byte: int,
         total_size: int,
     ) -> Tuple[bool, Optional[str]]:
@@ -173,14 +173,17 @@ class GoogleDriveService:
 
         Returns (is_completed, drive_file_id).
         """
-        end_byte = start_byte + len(chunk) - 1
+        # Ensure chunk is strict bytes (Telethon yields memoryview)
+        chunk_bytes = bytes(chunk) if not isinstance(chunk, bytes) else chunk
+        chunk_len = len(chunk_bytes)
+        end_byte = start_byte + chunk_len - 1
         headers = {
             "Content-Range": f"bytes {start_byte}-{end_byte}/{total_size}",
-            "Content-Length": str(len(chunk)),
+            "Content-Length": str(chunk_len),
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            res = await client.put(upload_url, headers=headers, content=chunk)
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
+            res = await client.put(upload_url, headers=headers, content=chunk_bytes)
 
             # HTTP 308 Resume Incomplete -> chunk received, upload still in progress
             if res.status_code == 308:
