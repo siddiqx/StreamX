@@ -213,6 +213,80 @@ class GoogleDriveService:
                     return last_byte + 1
             return 0
 
+    async def list_library_files(self) -> List[Dict[str, Any]]:
+        """List all media files inside Google Drive."""
+        if not self.is_configured():
+            return []
+
+        creds = await self.get_credentials()
+        loop = asyncio.get_running_loop()
+
+        def _fetch():
+            service = self._get_drive_client(creds)
+            query = "trashed = false and (mimeType contains 'video/' or name contains '.mkv' or name contains '.mp4' or name contains '.avi')"
+            results = service.files().list(
+                q=query,
+                fields="files(id, name, mimeType, size, parents, createdTime)",
+                pageSize=100,
+            ).execute()
+            return results.get("files", [])
+
+        return await loop.run_in_executor(None, _fetch)
+
+    async def sync_library_to_db(self) -> int:
+        """Scan Google Drive StreamX media and ensure cataloged in SQLite Media table."""
+        from app.db.database import AsyncSessionLocal
+        from app.db.models import Media, TelegramTransfer, TransferStatus
+        from app.workers.transfer_worker import detect_category
+        from sqlalchemy import select
+
+        files = await self.list_library_files()
+        synced_count = 0
+
+        async with AsyncSessionLocal() as session:
+            for f in files:
+                drive_id = f.get("id")
+                name = f.get("name") or ""
+                size = int(f.get("size") or 0)
+                mime = f.get("mimeType") or "video/mp4"
+
+                # Strictly skip folders and non-video files
+                if mime == "application/vnd.google-apps.folder":
+                    continue
+                is_video = mime.startswith("video/") or any(
+                    name.lower().endswith(ext) for ext in [".mkv", ".mp4", ".avi", ".mov", ".webm", ".ts", ".m4v"]
+                )
+                if not is_video:
+                    continue
+
+                # Check if already cataloged
+                stmt = select(Media).where(Media.drive_file_id == drive_id)
+                existing = (await session.execute(stmt)).scalar_one_or_none()
+                if not existing:
+                    category = detect_category(name)
+                    item = Media(
+                        drive_file_id=drive_id,
+                        filename=name,
+                        size=size,
+                        mime_type=mime,
+                        category=category,
+                    )
+                    session.add(item)
+                    synced_count += 1
+
+                # Reconcile transfer if exists
+                stmt_t = select(TelegramTransfer).where(TelegramTransfer.filename == name)
+                t = (await session.execute(stmt_t)).scalar_one_or_none()
+                if t and t.status != TransferStatus.COMPLETED:
+                    t.status = TransferStatus.COMPLETED
+                    t.bytes_transferred = size
+
+            await session.commit()
+
+        if synced_count > 0:
+            log_event("DRIVE_LIBRARY_SYNCED", synced_count=synced_count)
+        return synced_count
+
     async def get_download_stream(self, drive_file_id: str, range_header: Optional[str] = None):
         """Yield chunks directly from Google Drive alt=media endpoint for streaming or ranged downloads."""
         creds = await self.get_credentials()
@@ -228,4 +302,5 @@ class GoogleDriveService:
 
 
 drive_service = GoogleDriveService()
+
 

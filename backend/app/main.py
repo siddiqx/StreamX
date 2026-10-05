@@ -11,6 +11,7 @@ from app.api.media import router as media_router
 from app.api.transfers import router as transfers_router
 from app.config.settings import settings
 from app.db.database import init_db
+from app.services.drive_service import drive_service
 from app.services.telegram_bot_service import bot_service
 from app.services.telegram_mtproto_service import mtproto_service
 from app.utils.logging import log_event, logger
@@ -23,6 +24,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     log_event("STARTUP", environment=settings.STREAMX_ENV)
     await init_db()
     log_event("DATABASE_INITIALIZED")
+
+    # Sync any existing master media files from Google Drive
+    if drive_service.is_configured():
+        try:
+            await drive_service.sync_library_to_db()
+        except Exception as e:
+            logger.warning(f"Initial Google Drive sync error: {e}")
 
     # Start Telegram bot polling
     bot_task = None
@@ -70,11 +78,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration
+# CORS configuration - allow all origins without credential conflict
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

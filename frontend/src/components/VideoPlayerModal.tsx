@@ -1,7 +1,7 @@
 import React from 'react';
-import { X, Film } from 'lucide-react';
+import { X, Sparkles, Tv, Film } from 'lucide-react';
 import type { MediaItem } from '../types';
-import { getStreamUrl } from '../api';
+import { getStreamUrl, parseMediaMetadata } from '../api';
 
 interface VideoPlayerModalProps {
   item: MediaItem | null;
@@ -16,27 +16,40 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 }) => {
   if (!item) return null;
 
-  const cleanTitle = item.filename.replace(/\.[^/.]+$/, '').replace(/[_.]/g, ' ');
+  const meta = parseMediaMetadata(item.filename);
+
+  const getCategoryIcon = (cat: string) => {
+    switch (cat.toLowerCase()) {
+      case 'anime':
+        return Sparkles;
+      case 'tv shows':
+        return Tv;
+      default:
+        return Film;
+    }
+  };
+
+  const Icon = getCategoryIcon(item.category);
 
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: '#000',
+        backgroundColor: '#04060a',
         zIndex: 60,
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      {/* Player Header */}
+      {/* Player Header Overlay */}
       <div
         style={{
-          padding: '16px 20px',
+          padding: '18px 24px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          background: 'linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, transparent 100%)',
+          background: 'linear-gradient(to bottom, rgba(4, 6, 10, 0.95) 0%, rgba(4, 6, 10, 0.6) 70%, transparent 100%)',
           position: 'absolute',
           top: 0,
           left: 0,
@@ -44,31 +57,56 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           zIndex: 10,
         }}
       >
-        <div>
-          <h2 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>{cleanTitle}</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
-            <span style={{
-              background: isOffline ? 'var(--accent-emerald)' : '#6366f1',
-              color: '#fff',
-              fontSize: '0.62rem',
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '10px',
+            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            <Icon size={18} color="#fff" />
+          </div>
+
+          <div>
+            <h2 style={{
+              fontSize: '1.05rem',
               fontWeight: 800,
-              padding: '1px 6px',
-              borderRadius: 'var(--radius-full)',
+              color: '#fff',
+              fontFamily: 'var(--font-display)',
+              letterSpacing: '-0.01em',
             }}>
-              {isOffline ? 'LOCAL OFFLINE CACHE' : 'GOOGLE DRIVE STREAM'}
-            </span>
-            <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{item.category}</span>
+              {meta.cleanTitle}
+            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+              <span style={{
+                background: isOffline ? 'rgba(16, 185, 129, 0.2)' : 'rgba(99, 102, 241, 0.25)',
+                border: isOffline ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(99, 102, 241, 0.5)',
+                color: isOffline ? '#6ee7b7' : '#c7d2fe',
+                fontSize: '0.64rem',
+                fontWeight: 800,
+                padding: '2px 7px',
+                borderRadius: 'var(--radius-full)',
+                letterSpacing: '0.04em',
+              }}>
+                {isOffline ? 'LOCAL OFFLINE CACHE' : 'GOOGLE DRIVE DIRECT MASTER'}
+              </span>
+              <span className="badge-spec accent-cyan" style={{ fontSize: '0.64rem' }}>{meta.quality}</span>
+              {meta.seasonEpisode && (
+                <span className="badge-spec accent-purple" style={{ fontSize: '0.64rem' }}>{meta.seasonEpisode}</span>
+              )}
+            </div>
           </div>
         </div>
 
         <button
           onClick={onClose}
+          className="glass-pill"
           style={{
-            background: 'rgba(255, 255, 255, 0.1)',
-            border: 'none',
-            borderRadius: '50%',
-            width: '36px',
-            height: '36px',
+            width: '40px',
+            height: '40px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -80,45 +118,32 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         </button>
       </div>
 
-      {/* Embedded Video Area */}
+      {/* Embedded Cinema Video Area */}
       <div
         style={{
           flex: 1,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: '#05070a',
+          backgroundColor: '#000000',
           position: 'relative',
         }}
       >
         <video
           controls
           autoPlay
+          playsInline
           style={{
             width: '100%',
             height: '100%',
             maxHeight: '100vh',
             objectFit: 'contain',
+            outline: 'none',
           }}
           src={getStreamUrl(item.id)}
         >
-          Your browser does not support video streaming playback.
+          Your browser does not support HTML5 video streaming.
         </video>
-
-        {/* Cinematic Backdrop Placeholder when no video stream URL is active */}
-        <div style={{
-          position: 'absolute',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '12px',
-          color: '#94a3b8',
-          pointerEvents: 'none',
-        }}>
-          <Film size={64} style={{ opacity: 0.2 }} />
-          <p style={{ fontSize: '0.9rem', fontWeight: 600 }}>StreamX Offline Playback Engine</p>
-          <p style={{ fontSize: '0.75rem', color: '#64748b' }}>Ready for Android Scoped Storage Local Playback</p>
-        </div>
       </div>
     </div>
   );

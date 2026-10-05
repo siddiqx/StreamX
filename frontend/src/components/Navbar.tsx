@@ -13,76 +13,109 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTransfers, onOpenTransfers
   ).length;
 
   return (
-    <header className="glass-panel" style={{
+    <header className="glass-nav" style={{
       position: 'sticky',
       top: 0,
       zIndex: 40,
-      padding: '14px 20px',
+      padding: '12px 24px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderBottom: '1px solid var(--border-subtle)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      {/* Brand Identity */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
         <div style={{
-          width: '36px',
-          height: '36px',
-          borderRadius: '10px',
-          background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+          width: '38px',
+          height: '38px',
+          borderRadius: '11px',
+          background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: '0 0 16px -2px rgba(99, 102, 241, 0.5)',
+          boxShadow: '0 4px 20px rgba(99, 102, 241, 0.45)',
         }}>
           <Film size={20} color="#fff" />
         </div>
         <div>
-          <h1 style={{
-            fontSize: '1.25rem',
-            fontWeight: 800,
-            letterSpacing: '-0.03em',
-            fontFamily: 'var(--font-display)',
-            background: 'linear-gradient(to right, #ffffff, #cbd5e1)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            lineHeight: 1,
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <h1 style={{
+              fontSize: '1.35rem',
+              fontWeight: 900,
+              letterSpacing: '-0.03em',
+              fontFamily: 'var(--font-display)',
+              background: 'linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              lineHeight: 1,
+            }}>
+              STREAM<span style={{ color: '#818cf8', WebkitTextFillColor: '#818cf8' }}>X</span>
+            </h1>
+            <span style={{
+              fontSize: '0.6rem',
+              fontWeight: 800,
+              background: 'rgba(99, 102, 241, 0.15)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              color: '#a5b4fc',
+              padding: '1px 5px',
+              borderRadius: '4px',
+              letterSpacing: '0.04em',
+            }}>PRO</span>
+          </div>
+          <p style={{
+            fontSize: '0.68rem',
+            color: 'var(--text-faint)',
+            letterSpacing: '0.04em',
+            fontWeight: 500,
+            marginTop: '2px',
           }}>
-            STREAM<span style={{ color: '#818cf8', WebkitTextFillColor: '#818cf8' }}>X</span>
-          </h1>
-          <span style={{ fontSize: '0.65rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
-            Personal Media Hub
-          </span>
+            Personal Cloud Cinema
+          </p>
         </div>
       </div>
 
+      {/* Cloud & Transfer Status Actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Master Cloud Status Pill */}
+        <div className="glass-pill" style={{
+          padding: '6px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '0.75rem',
+          color: 'var(--text-muted)',
+        }}>
+          <div className="beacon-dot" style={{ background: '#10b981', boxShadow: '0 0 10px #10b981' }} />
+          <span style={{ fontWeight: 600, color: '#e2e8f0' }}>Drive Master</span>
+          <span style={{ color: '#10b981', fontWeight: 700, fontSize: '0.65rem' }}>CONNECTED</span>
+        </div>
+
+        {/* Transfers Pill */}
         <button
           onClick={onOpenTransfers}
+          className="glass-pill"
           style={{
-            background: activeCount > 0 ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-            border: activeCount > 0 ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-full)',
-            padding: '6px 14px',
-            color: activeCount > 0 ? '#a5b4fc' : 'var(--text-muted)',
+            padding: '7px 14px',
+            color: activeCount > 0 ? '#c7d2fe' : 'var(--text-muted)',
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
             cursor: 'pointer',
-            fontSize: '0.8rem',
+            fontSize: '0.78rem',
             fontWeight: 600,
-            transition: 'all 0.2s',
+            background: activeCount > 0 ? 'rgba(99, 102, 241, 0.18)' : undefined,
+            borderColor: activeCount > 0 ? 'rgba(99, 102, 241, 0.45)' : undefined,
           }}
         >
-          <Radio size={14} className={activeCount > 0 ? 'animate-pulse' : ''} color={activeCount > 0 ? '#818cf8' : 'currentColor'} />
-          <span>Cloud Transfers</span>
+          <Radio size={14} color={activeCount > 0 ? '#818cf8' : 'var(--text-faint)'} />
+          <span>Ingestion Queue</span>
           {activeCount > 0 && (
             <span style={{
               background: '#6366f1',
               color: '#fff',
               borderRadius: 'var(--radius-full)',
-              padding: '1px 6px',
-              fontSize: '0.7rem',
-              fontWeight: 700,
+              padding: '1px 7px',
+              fontSize: '0.68rem',
+              fontWeight: 800,
             }}>
               {activeCount}
             </span>

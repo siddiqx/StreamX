@@ -63,6 +63,8 @@ export const TransferModal: React.FC<TransferModalProps> = ({
           flexDirection: 'column',
           overflow: 'hidden',
           boxShadow: 'var(--shadow-card)',
+          border: '1px solid rgba(255, 255, 255, 0.12)',
+          background: 'linear-gradient(180deg, #111726 0%, #090c14 100%)',
         }}
         onClick={(e) => e.stopPropagation()}
       >

@@ -1,7 +1,7 @@
 import React from 'react';
-import { X, Play, Download, Trash2, Cloud, HardDrive, Film, ShieldAlert } from 'lucide-react';
+import { X, Play, Download, Trash2, Film, ShieldAlert, Sparkles, Tv, ShieldCheck } from 'lucide-react';
 import type { MediaItem } from '../types';
-import { formatBytes } from '../api';
+import { formatBytes, parseMediaMetadata } from '../api';
 
 interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -24,20 +24,34 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 }) => {
   if (!item) return null;
 
-  const cleanTitle = item.filename.replace(/\.[^/.]+$/, '').replace(/[_.]/g, ' ');
+  const meta = parseMediaMetadata(item.filename);
   const extension = item.filename.split('.').pop()?.toUpperCase() || 'VIDEO';
 
-  // Section 22: Storage Protection check
+  // Section 22: Storage Protection check (file size + 5% safety margin)
   const requiredWithSafetyMargin = Math.round(item.size * 1.05);
   const hasEnoughStorage = deviceFreeBytes >= requiredWithSafetyMargin;
+
+  const getCategoryIcon = (cat: string) => {
+    switch (cat.toLowerCase()) {
+      case 'anime':
+        return Sparkles;
+      case 'tv shows':
+        return Tv;
+      default:
+        return Film;
+    }
+  };
+
+  const Icon = getCategoryIcon(item.category);
 
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        backdropFilter: 'blur(10px)',
+        backgroundColor: 'rgba(3, 5, 8, 0.85)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
         zIndex: 50,
         display: 'flex',
         alignItems: 'center',
@@ -50,198 +64,219 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         className="glass-panel animate-fade-in"
         style={{
           width: '100%',
-          maxWidth: '520px',
+          maxWidth: '540px',
           borderRadius: 'var(--radius-lg)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           boxShadow: 'var(--shadow-card)',
+          border: '1px solid rgba(255, 255, 255, 0.12)',
+          background: 'linear-gradient(180deg, #111726 0%, #090c14 100%)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header Backdrop */}
+        {/* Cinematic Backdrop Header */}
         <div
           style={{
-            height: '180px',
-            background: 'linear-gradient(180deg, rgba(99, 102, 241, 0.25) 0%, rgba(12, 18, 28, 0.95) 100%)',
+            height: '190px',
+            background: 'linear-gradient(180deg, rgba(99, 102, 241, 0.3) 0%, rgba(9, 12, 20, 0.95) 100%)',
             position: 'relative',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '20px',
+            overflow: 'hidden',
           }}
         >
+          {/* Radial Ambient Mesh */}
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundImage: 'radial-gradient(circle at 50% 30%, rgba(99, 102, 241, 0.35) 0%, transparent 70%)',
+            }}
+          />
+
+          <Icon size={72} color="#818cf8" style={{ opacity: 0.35 }} />
+
+          {/* Close Action */}
           <button
             onClick={onClose}
+            className="glass-pill"
             style={{
               position: 'absolute',
               top: '16px',
               right: '16px',
-              background: 'rgba(0, 0, 0, 0.5)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '50%',
-              width: '32px',
-              height: '32px',
+              width: '36px',
+              height: '36px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: '#fff',
               cursor: 'pointer',
+              zIndex: 2,
             }}
           >
-            <X size={16} />
+            <X size={18} />
           </button>
 
-          <Film size={54} color="rgba(255, 255, 255, 0.2)" />
+          {/* Category Pill Tag */}
+          <div
+            style={{
+              position: 'absolute',
+              bottom: '16px',
+              left: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span className="badge-spec accent-purple" style={{ fontSize: '0.72rem', padding: '4px 10px' }}>
+              <Icon size={12} />
+              {item.category.toUpperCase()}
+            </span>
+            <span className="badge-spec accent-cyan" style={{ fontSize: '0.72rem', padding: '4px 10px' }}>
+              {meta.quality}
+            </span>
+            {meta.seasonEpisode && (
+              <span className="badge-spec accent-emerald" style={{ fontSize: '0.72rem', padding: '4px 10px' }}>
+                {meta.seasonEpisode}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Content Body */}
-        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Modal Body */}
+        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <span style={{
-                background: 'rgba(99, 102, 241, 0.15)',
-                color: '#a5b4fc',
-                borderRadius: 'var(--radius-full)',
-                padding: '2px 8px',
-                fontSize: '0.7rem',
-                fontWeight: 700,
-              }}>
-                {item.category}
-              </span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-faint)' }}>•</span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-faint)' }}>{extension}</span>
-            </div>
-
             <h2 style={{
-              fontSize: '1.35rem',
+              fontSize: '1.4rem',
               fontWeight: 800,
-              color: 'var(--text-main)',
               fontFamily: 'var(--font-display)',
+              letterSpacing: '-0.02em',
+              color: '#fff',
               lineHeight: 1.25,
             }}>
-              {cleanTitle}
+              {meta.cleanTitle}
             </h2>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-faint)', marginTop: '4px', wordBreak: 'break-all' }}>
+            <p style={{
+              fontSize: '0.76rem',
+              color: 'var(--text-faint)',
+              marginTop: '6px',
+              wordBreak: 'break-all',
+              fontFamily: 'monospace',
+            }}>
               {item.filename}
             </p>
           </div>
 
-          {/* Cloud vs Offline Status Box */}
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            padding: '12px 16px',
-            display: 'flex',
-            justifyContent: 'space-around',
-            alignItems: 'center',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Cloud size={18} color="#818cf8" />
-              <div>
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-faint)' }}>Google Drive</p>
-                <p style={{ fontSize: '0.8rem', fontWeight: 700, color: '#818cf8' }}>Cloud ✓</p>
-              </div>
+          {/* Technical Specs Strip */}
+          <div
+            className="glass-card"
+            style={{
+              padding: '14px 18px',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '12px',
+              textAlign: 'center',
+              background: 'rgba(255, 255, 255, 0.03)',
+            }}
+          >
+            <div>
+              <p style={{ fontSize: '0.68rem', color: 'var(--text-faint)', textTransform: 'uppercase', fontWeight: 600 }}>Master File Size</p>
+              <p style={{ fontSize: '0.9rem', fontWeight: 800, color: '#f8fafc', marginTop: '2px' }}>
+                {formatBytes(item.size)}
+              </p>
             </div>
-
-            <div style={{ width: '1px', height: '24px', background: 'var(--border-subtle)' }} />
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <HardDrive size={18} color={isOffline ? 'var(--accent-emerald)' : 'var(--text-faint)'} />
-              <div>
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-faint)' }}>Device Storage</p>
-                <p style={{ fontSize: '0.8rem', fontWeight: 700, color: isOffline ? 'var(--accent-emerald)' : 'var(--text-faint)' }}>
-                  {isOffline ? 'Offline ✓' : 'Offline —'}
-                </p>
-              </div>
-            </div>
-
-            <div style={{ width: '1px', height: '24px', background: 'var(--border-subtle)' }} />
 
             <div>
-              <p style={{ fontSize: '0.7rem', color: 'var(--text-faint)' }}>File Size</p>
-              <p style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                {formatBytes(item.size)}
+              <p style={{ fontSize: '0.68rem', color: 'var(--text-faint)', textTransform: 'uppercase', fontWeight: 600 }}>Container / Codec</p>
+              <p style={{ fontSize: '0.9rem', fontWeight: 800, color: '#a5b4fc', marginTop: '2px' }}>
+                {extension} • {meta.tags[0] || '1080p'}
+              </p>
+            </div>
+
+            <div>
+              <p style={{ fontSize: '0.68rem', color: 'var(--text-faint)', textTransform: 'uppercase', fontWeight: 600 }}>Local Device</p>
+              <p style={{
+                fontSize: '0.9rem',
+                fontWeight: 800,
+                color: isOffline ? 'var(--accent-emerald)' : 'var(--text-muted)',
+                marginTop: '2px',
+              }}>
+                {isOffline ? 'Downloaded ✓' : 'Cloud Only'}
               </p>
             </div>
           </div>
 
+          {/* Cloud Master Security Notice */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '10px 14px',
+            background: 'rgba(99, 102, 241, 0.08)',
+            border: '1px solid rgba(99, 102, 241, 0.2)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.75rem',
+            color: '#c7d2fe',
+          }}>
+            <ShieldCheck size={18} color="#818cf8" style={{ flexShrink: 0 }} />
+            <span>Master library copy is permanently hosted in your private Google Drive (ID: <code>{item.drive_file_id.slice(0, 12)}...</code>)</span>
+          </div>
+
           {/* Action Buttons */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '4px' }}>
             {isOffline ? (
               <>
                 <button
+                  className="btn-cinema-primary"
                   onClick={() => onWatch(item)}
                   style={{
                     background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                    border: 'none',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '12px 20px',
-                    color: '#fff',
-                    fontWeight: 700,
-                    fontSize: '0.9rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 16px rgba(16, 185, 129, 0.3)',
+                    boxShadow: '0 4px 20px rgba(16, 185, 129, 0.4)',
                   }}
                 >
                   <Play size={18} fill="#fff" />
-                  <span>WATCH OFFLINE</span>
+                  <span>PLAY OFFLINE DOWNLOAD</span>
                 </button>
 
                 <button
                   onClick={() => onDeleteDownload(item)}
                   style={{
-                    background: 'rgba(244, 63, 94, 0.1)',
+                    background: 'rgba(244, 63, 94, 0.08)',
                     border: '1px solid rgba(244, 63, 94, 0.3)',
                     borderRadius: 'var(--radius-md)',
-                    padding: '10px 16px',
+                    padding: '11px 18px',
                     color: 'var(--accent-rose)',
-                    fontWeight: 600,
-                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '8px',
                     cursor: 'pointer',
+                    transition: 'all 0.2s',
                   }}
                 >
                   <Trash2 size={16} />
                   <span>DELETE LOCAL DOWNLOAD</span>
                 </button>
                 <p style={{ fontSize: '0.68rem', color: 'var(--text-faint)', textAlign: 'center' }}>
-                  Deleting local copy will NEVER delete the master copy in your Google Drive.
+                  Safety Guarantee: Deleting local storage will NEVER touch or modify your Google Drive master copy.
                 </p>
               </>
             ) : (
               <>
                 <button
+                  className="btn-cinema-primary"
                   onClick={() => onWatch(item)}
-                  style={{
-                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                    border: 'none',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '12px 20px',
-                    color: '#fff',
-                    fontWeight: 700,
-                    fontSize: '0.9rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 16px rgba(99, 102, 241, 0.3)',
-                  }}
                 >
                   <Play size={18} fill="#fff" />
-                  <span>STREAM NOW (CLOUD)</span>
+                  <span>STREAM CLOUD MASTER</span>
                 </button>
 
                 <button
+                  className="btn-cinema-secondary"
                   onClick={() => {
                     if (hasEnoughStorage) {
                       onStartDownload(item);
@@ -249,24 +284,12 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   }}
                   disabled={!hasEnoughStorage}
                   style={{
-                    background: hasEnoughStorage
-                      ? 'rgba(255, 255, 255, 0.08)'
-                      : 'rgba(255, 255, 255, 0.03)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '12px 20px',
-                    color: hasEnoughStorage ? '#fff' : 'var(--text-faint)',
-                    fontWeight: 700,
-                    fontSize: '0.9rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
+                    opacity: hasEnoughStorage ? 1 : 0.45,
                     cursor: hasEnoughStorage ? 'pointer' : 'not-allowed',
                   }}
                 >
                   <Download size={18} />
-                  <span>DOWNLOAD ({formatBytes(item.size)})</span>
+                  <span>DOWNLOAD FOR OFFLINE ({formatBytes(item.size)})</span>
                 </button>
 
                 {!hasEnoughStorage && (
@@ -275,14 +298,14 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     border: '1px solid rgba(244, 63, 94, 0.3)',
                     borderRadius: 'var(--radius-sm)',
                     padding: '8px 12px',
-                    fontSize: '0.72rem',
+                    fontSize: '0.74rem',
                     color: 'var(--accent-rose)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
+                    gap: '8px',
                   }}>
-                    <ShieldAlert size={14} />
-                    <span>Not enough storage. Required: {formatBytes(requiredWithSafetyMargin)}, Available: {formatBytes(deviceFreeBytes)}</span>
+                    <ShieldAlert size={16} />
+                    <span>Insufficient storage on device. Required: {formatBytes(requiredWithSafetyMargin)}, Available: {formatBytes(deviceFreeBytes)}</span>
                   </div>
                 )}
               </>

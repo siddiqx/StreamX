@@ -27,7 +27,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
   return (
     <nav
-      className="glass-panel"
+      className="glass-nav"
       style={{
         position: 'fixed',
         bottom: 0,
@@ -36,8 +36,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         zIndex: 40,
         display: 'flex',
         justifyContent: 'space-around',
-        padding: '8px 10px calc(8px + env(safe-area-inset-bottom, 8px))',
-        borderTop: '1px solid var(--border-subtle)',
+        padding: '8px 12px calc(8px + env(safe-area-inset-bottom, 8px))',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        background: 'rgba(7, 9, 14, 0.88)',
+        backdropFilter: 'blur(20px)',
       }}
     >
       {tabs.map((tab) => {
@@ -48,20 +50,20 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             key={tab.id}
             onClick={() => onSelectTab(tab.id)}
             style={{
-              background: 'none',
+              background: isActive ? 'rgba(99, 102, 241, 0.12)' : 'none',
               border: 'none',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '4px',
-              color: isActive ? '#818cf8' : 'var(--text-faint)',
+              color: isActive ? '#a5b4fc' : 'var(--text-faint)',
               cursor: 'pointer',
-              padding: '6px 8px',
+              padding: '6px 12px',
               borderRadius: 'var(--radius-md)',
               position: 'relative',
-              transition: 'all 0.2s',
-              minWidth: '52px',
+              transition: 'all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)',
+              minWidth: '54px',
             }}
           >
             <div style={{ position: 'relative' }}>
@@ -72,11 +74,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                     position: 'absolute',
                     top: '-4px',
                     right: '-8px',
-                    background: tab.id === 'offline' ? 'var(--accent-emerald)' : 'var(--accent-primary)',
+                    background: tab.id === 'offline' ? '#10b981' : '#6366f1',
                     color: '#fff',
                     borderRadius: 'var(--radius-full)',
                     padding: '1px 5px',
-                    fontSize: '0.65rem',
+                    fontSize: '0.62rem',
                     fontWeight: 800,
                   }}
                 >
@@ -86,7 +88,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             </div>
             <span
               style={{
-                fontSize: '0.7rem',
+                fontSize: '0.72rem',
                 fontWeight: isActive ? 700 : 500,
                 letterSpacing: '-0.01em',
               }}
