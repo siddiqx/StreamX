@@ -9,11 +9,11 @@
 [![React](https://img.shields.io/badge/React-19_TypeScript-61DAFB.svg?style=flat&logo=react&logoColor=black)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-8.x-646CFF.svg?style=flat&logo=vite&logoColor=white)](https://vitejs.dev)
 [![Python](https://img.shields.io/badge/Python-3.12_AsyncIO-3776AB.svg?style=flat&logo=python&logoColor=white)](https://python.org)
-[![Vercel](https://img.shields.io/badge/Vercel-Production_Live-black.svg?style=flat&logo=vercel&logoColor=white)](https://frontend-ebon-psi-82.vercel.app)
+[![Vercel](https://img.shields.io/badge/Vercel-Production_Live-black.svg?style=flat&logo=vercel&logoColor=white)](https://streamx7.vercel.app)
 [![Render](https://img.shields.io/badge/Render-Backend_Live-46E3B7.svg?style=flat&logo=render&logoColor=black)](https://streamx-backend-cqm0.onrender.com)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat)](LICENSE)
 
-[Live Web Application](https://frontend-ebon-psi-82.vercel.app) • [Backend API Documentation](https://streamx-backend-cqm0.onrender.com/docs) • [Telegram Bot](https://t.me/Stream1_X_bot)
+[Live Web Application](https://streamx7.vercel.app) • [Backend API Documentation](https://streamx-backend-cqm0.onrender.com/docs) • [Telegram Bot](https://t.me/Stream1_X_bot)
 
 </div>
 
