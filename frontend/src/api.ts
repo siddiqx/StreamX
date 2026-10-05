@@ -8,11 +8,11 @@ export const getApiBase = (): string => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL.replace(/\/+$/, '');
   if (typeof window !== 'undefined' && window.location && window.location.hostname) {
     if (window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.168.')) {
-      return import.meta.env.VITE_API_URL || '';
+      return 'https://streamx-backend-cqm0.onrender.com';
     }
     return `http://${window.location.hostname}:8000`;
   }
-  return 'http://localhost:8000';
+  return 'https://streamx-backend-cqm0.onrender.com';
 };
 
 export function setCustomApiBase(url: string): void {
