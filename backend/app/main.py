@@ -11,7 +11,9 @@ from app.api.transfers import router as transfers_router
 from app.config.settings import settings
 from app.db.database import init_db
 from app.services.telegram_bot_service import bot_service
+from app.services.telegram_mtproto_service import mtproto_service
 from app.utils.logging import log_event, logger
+from app.workers.transfer_worker import transfer_worker
 
 
 @asynccontextmanager
@@ -21,24 +23,42 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     log_event("DATABASE_INITIALIZED")
 
-    # Start Telegram bot polling if configured
-    polling_task = None
+    # Start Telegram bot polling
+    bot_task = None
     if bot_service.is_configured():
         log_event("TELEGRAM_BOT_CONFIGURED", allowed_users=len(settings.allowed_telegram_users))
-        polling_task = asyncio.create_task(bot_service.start_polling())
+        bot_task = asyncio.create_task(bot_service.start_polling())
     else:
         logger.warning("TELEGRAM_BOT_TOKEN not provided. Bot polling skipped.")
+
+    # Start MTProto transfer worker
+    worker_task = None
+    if mtproto_service.is_configured():
+        log_event("MTPROTO_WORKER_CONFIGURED")
+        worker_task = asyncio.create_task(transfer_worker.start())
+    else:
+        logger.warning("MTProto credentials incomplete. Transfer worker skipped.")
 
     yield
 
     # Graceful shutdown
-    if polling_task:
+    if bot_task:
         bot_service.stop()
-        polling_task.cancel()
+        bot_task.cancel()
         try:
-            await polling_task
+            await bot_task
         except asyncio.CancelledError:
             pass
+
+    if worker_task:
+        transfer_worker.stop()
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+
+    await mtproto_service.disconnect()
     log_event("SHUTDOWN")
 
 

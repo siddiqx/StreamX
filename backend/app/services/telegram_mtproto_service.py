@@ -18,13 +18,15 @@ from app.utils.logging import log_event, logger
 class TelegramMTProtoService:
     def __init__(
         self,
-        api_id: Optional[int] = None,
-        api_hash: Optional[str] = None,
-        session_string: Optional[str] = None,
+        api_id: Any = "DEFAULT",
+        api_hash: Any = "DEFAULT",
+        session_string: Any = "DEFAULT",
     ):
-        self.api_id = api_id or settings.TELEGRAM_API_ID
-        self.api_hash = api_hash or settings.TELEGRAM_API_HASH
-        self.session_string = session_string or settings.TELEGRAM_SESSION_STRING
+        self.api_id = settings.TELEGRAM_API_ID if api_id == "DEFAULT" else api_id
+        self.api_hash = settings.TELEGRAM_API_HASH if api_hash == "DEFAULT" else api_hash
+        self.session_string = (
+            settings.TELEGRAM_SESSION_STRING if session_string == "DEFAULT" else session_string
+        )
         self.client: Optional[TelegramClient] = None
         self._lock = asyncio.Lock()
 
