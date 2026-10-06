@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import {
   ArrowDownCircle, Pause, Play, X, Wifi,
-  WifiOff, Trash2, ExternalLink, HardDrive
+  WifiOff, Trash2, HardDrive
 } from 'lucide-react';
 import type { DeviceDownload, MediaItem } from '../types';
-import {
-  formatBytes, parseMediaMetadata,
-  getVlcIntentUrl, getVlcProtocolUrl, openVlcOnHost
-} from '../api';
+import { formatBytes, parseMediaMetadata } from '../api';
+import { launchVlcWithTracking } from '../utils/playerSettings';
 
 interface DownloadsViewProps {
   downloads: DeviceDownload[];
@@ -15,13 +13,13 @@ interface DownloadsViewProps {
   onResume: (id: string) => void;
   onCancel: (id: string) => void;
   onDeleteDownload: (item: MediaItem) => void;
-  onPlay: (item: MediaItem) => void;
+  onPlay?: (item: MediaItem) => void;
   mediaMap: Map<number, MediaItem>;
   isWifiOnly: boolean;
 }
 
 export const DownloadsView: React.FC<DownloadsViewProps> = ({
-  downloads, onPause, onResume, onCancel, onDeleteDownload, onPlay, mediaMap, isWifiOnly
+  downloads, onPause, onResume, onCancel, onDeleteDownload, mediaMap, isWifiOnly
 }) => {
   const active = downloads.filter(d => d.status !== 'COMPLETED');
   const completed = downloads.filter(d => d.status === 'COMPLETED');
@@ -34,19 +32,6 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
     if (s === 'PAUSED') return '#f59e0b';
     if (s === 'COMPLETED') return '#10b981';
     return '#64748b';
-  };
-
-  const handleLaunchVlc = async (item: MediaItem) => {
-    const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-    if (isMobile) {
-      const intentUrl = getVlcIntentUrl(item.id, item.filename);
-      const vlcProto = getVlcProtocolUrl(item.id);
-      const a = document.createElement('a');
-      a.href = /android/i.test(navigator.userAgent) ? intentUrl : vlcProto;
-      a.click();
-      return;
-    }
-    await openVlcOnHost(item.id);
   };
 
   return (
@@ -173,13 +158,16 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                     </div>
 
                     {/* Actions */}
-                    <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                    <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                       {mediaItem && (
                         <button
-                          onClick={() => onPlay(mediaItem)}
+                          onClick={() => launchVlcWithTracking(mediaItem)}
+                          aria-label="Play in VLC"
+                          title="Play in VLC"
                           style={{
                             width: '36px', height: '36px', borderRadius: '50%', border: 'none',
-                            background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                            background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                            boxShadow: '0 2px 10px rgba(249,115,22,0.4)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             cursor: 'pointer', color: '#fff',
                           }}
@@ -190,21 +178,9 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
 
                       {mediaItem && (
                         <button
-                          onClick={() => handleLaunchVlc(mediaItem)}
-                          style={{
-                            width: '36px', height: '36px', borderRadius: '50%',
-                            background: 'rgba(249,115,22,0.18)', border: '1px solid rgba(249,115,22,0.4)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: 'pointer', color: '#fdba74',
-                          }}
-                        >
-                          <ExternalLink size={14} />
-                        </button>
-                      )}
-
-                      {mediaItem && (
-                        <button
                           onClick={() => onDeleteDownload(mediaItem)}
+                          aria-label="Remove Download"
+                          title="Remove Download"
                           style={{
                             width: '36px', height: '36px', borderRadius: '50%',
                             background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)',

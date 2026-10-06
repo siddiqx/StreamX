@@ -4,7 +4,7 @@ import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
 import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl } from '../api';
 import { getWatchProgress } from '../utils/watchHistory';
-import { getPlayerSettings, launchVlcWithTracking } from '../utils/playerSettings';
+import { launchVlcWithTracking } from '../utils/playerSettings';
 
 export interface MediaCardProps {
   item?: MediaItem;
@@ -12,7 +12,7 @@ export interface MediaCardProps {
   isOffline?: boolean;
   onSelect: (item: MediaItem) => void;
   onSelectGroup?: (group: MediaGroup) => void;
-  onPlay: (item: MediaItem) => void;
+  onPlay?: (item: MediaItem) => void;
   width?: string | number;
 }
 
@@ -30,7 +30,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   isOffline: isOfflineProp,
   onSelect,
   onSelectGroup,
-  onPlay,
   width,
 }) => {
   const [imageError, setImageError] = useState(false);
@@ -68,13 +67,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   const handlePlayClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const settings = getPlayerSettings();
-    const isMkv = resolvedItem.filename?.toLowerCase().endsWith('.mkv') || resolvedItem.mime_type?.includes('matroska');
-    if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
-      launchVlcWithTracking(resolvedItem);
-      return;
-    }
-    onPlay(resolvedItem);
+    launchVlcWithTracking(resolvedItem);
   };
 
   return (

@@ -14,35 +14,27 @@ import {
 import { recordWatchStart } from './watchHistory';
 
 export interface PlayerSettings {
-  defaultPlayer: 'vlc' | 'in_app';
+  defaultPlayer: 'vlc';
   autoOpenVlcForMkv: boolean;
-  streamingQuality: 'original' | 'compatible';
+  streamingQuality: 'original';
   autoplayNext: boolean;
 }
 
 const SETTINGS_KEY = 'streamx_player_settings';
 
 export const DEFAULT_PLAYER_SETTINGS: PlayerSettings = {
-  defaultPlayer: 'vlc', // VLC is recommended by default for 4K / MKV / HEVC compatibility
+  defaultPlayer: 'vlc', // VLC is the default media player
   autoOpenVlcForMkv: true,
   streamingQuality: 'original',
   autoplayNext: true,
 };
 
 export function getPlayerSettings(): PlayerSettings {
-  if (typeof window === 'undefined') return DEFAULT_PLAYER_SETTINGS;
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) {
-      return { ...DEFAULT_PLAYER_SETTINGS, ...JSON.parse(raw) };
-    }
-  } catch {}
   return DEFAULT_PLAYER_SETTINGS;
 }
 
 export function savePlayerSettings(settings: Partial<PlayerSettings>): PlayerSettings {
-  const current = getPlayerSettings();
-  const updated = { ...current, ...settings };
+  const updated = { ...DEFAULT_PLAYER_SETTINGS, ...settings };
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
   } catch {}
@@ -53,8 +45,8 @@ export function savePlayerSettings(settings: Partial<PlayerSettings>): PlayerSet
 }
 
 /**
- * Launches VLC Media Player and records watch progress.
- * Supports Android Intent, VLC protocol handler, and M3U playlist fallback.
+ * Launches VLC Media Player directly and records watch progress.
+ * Supports Android Intent, VLC protocol handler, and M3U stream fallback.
  */
 export async function launchVlcWithTracking(
   item: MediaItem,
@@ -67,9 +59,19 @@ export async function launchVlcWithTracking(
   const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent);
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 
-  if (onStatusUpdate) onStatusUpdate('Launching VLC Player...');
+  const toastMessage = `Opening "${title}" in VLC...`;
+  if (onStatusUpdate) onStatusUpdate(toastMessage);
 
-  // 2. Mobile launch
+  // Notify UI toast
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('streamx_toast', {
+        detail: { message: `Opening in VLC Media Player · Progress tracked`, type: 'vlc' },
+      })
+    );
+  }
+
+  // 2. Mobile launch (Android Intent / iOS Protocol)
   if (isMobile) {
     if (isAndroid) {
       const intentUrl = getVlcIntentUrl(item.id, title);
@@ -77,36 +79,51 @@ export async function launchVlcWithTracking(
       a.href = intentUrl;
       a.click();
     } else {
-      // iOS / other mobile
       const vlcProto = getVlcProtocolUrl(item.id);
       window.location.href = vlcProto;
     }
     if (onStatusUpdate) onStatusUpdate('✓ Opened in VLC App');
-    return { success: true, message: 'Opening VLC app on your device...' };
+    return { success: true, message: 'Opening VLC app...' };
   }
 
-  // 3. Desktop: If local backend is active, try host launcher
+  // 3. Desktop: Try local backend host launcher if localhost:8000 is running
+  try {
+    const localRes = await fetch(`http://localhost:8000/media/${item.id}/open-vlc`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(600),
+    });
+    if (localRes.ok) {
+      if (onStatusUpdate) onStatusUpdate('✓ VLC Player opened on PC');
+      return { success: true, message: 'VLC Player launched on PC' };
+    }
+  } catch {}
+
   if (API_BASE.includes('localhost') || API_BASE.includes('127.0.0.1')) {
     const hostRes = await openVlcOnHost(item.id);
     if (hostRes.success) {
-      if (onStatusUpdate) onStatusUpdate('✓ VLC Player launched on PC');
+      if (onStatusUpdate) onStatusUpdate('✓ VLC Player opened on PC');
       return hostRes;
     }
   }
 
-  // 4. Desktop protocol handler & playlist download
+  // 4. Desktop: Launch via vlc:// protocol handler with automatic M3U playlist stream
   try {
     const vlcProto = getVlcProtocolUrl(item.id);
-    window.location.href = vlcProto;
-    if (onStatusUpdate) onStatusUpdate('✓ Launching VLC...');
-    return { success: true, message: 'Launching VLC Media Player...' };
-  } catch {
-    // Fallback: download M3U playlist
-    const a = document.createElement('a');
-    a.href = getPlaylistUrl(item.id);
-    a.download = `${title}.m3u`;
-    a.click();
-    if (onStatusUpdate) onStatusUpdate('✓ Playlist downloaded for VLC');
-    return { success: true, message: 'Downloaded stream playlist for VLC' };
-  }
+    const link = document.createElement('a');
+    link.href = vlcProto;
+    link.click();
+  } catch {}
+
+  // Fallback trigger for browsers without registered protocol handlers
+  setTimeout(() => {
+    try {
+      const m3uLink = document.createElement('a');
+      m3uLink.href = getPlaylistUrl(item.id);
+      m3uLink.download = `${title}.m3u`;
+      m3uLink.click();
+    } catch {}
+  }, 500);
+
+  if (onStatusUpdate) onStatusUpdate('✓ Launched VLC Stream');
+  return { success: true, message: 'Launching VLC Media Player...' };
 }

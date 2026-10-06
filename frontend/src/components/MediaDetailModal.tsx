@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  X, Play, Download, Trash2, Film, ShieldAlert, ExternalLink,
+  X, Play, Download, Film, ShieldAlert,
   Star, Search, Loader2, Check
 } from 'lucide-react';
 import type { MediaItem, MetadataCandidate } from '../types';
@@ -16,7 +16,7 @@ import {
   searchMetadataCandidates,
   selectMetadata,
 } from '../api';
-import { getPlayerSettings, launchVlcWithTracking } from '../utils/playerSettings';
+import { launchVlcWithTracking } from '../utils/playerSettings';
 
 export interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -26,7 +26,7 @@ export interface MediaDetailModalProps {
   isOffline: boolean;
   onStartDownload: (item: MediaItem) => void;
   onDeleteDownload: (item: MediaItem) => void;
-  onWatch: (item: MediaItem) => void;
+  onWatch?: (item: MediaItem) => void;
   deviceFreeBytes: number;
   onItemUpdated?: (updatedItem: MediaItem) => void;
 }
@@ -39,7 +39,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   isOffline: isOfflineProp,
   onStartDownload,
   onDeleteDownload,
-  onWatch,
   deviceFreeBytes,
   onItemUpdated,
 }) => {
@@ -273,104 +272,81 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </div>
             )}
 
-            {/* Primary Action Buttons */}
+            {/* Primary Actions: Direct Play in VLC & Modern Download Bar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {isOffline ? (
-                <>
-                  <button
-                    className="btn-primary"
-                    style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', boxShadow: '0 4px 20px rgba(16,185,129,0.35)' }}
-                    onClick={() => { onClose(); onWatch(item); }}
-                  >
-                    <Play size={17} fill="#fff" />
-                    Play Offline
-                  </button>
+              {/* Single Direct Play CTA (0 options menu, 100% VLC) */}
+              <button
+                className="btn-primary"
+                onClick={handleOpenVlc}
+                disabled={isLaunchingVlc}
+                style={{
+                  height: '50px',
+                  borderRadius: '14px',
+                  background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                  boxShadow: '0 6px 24px rgba(249,115,22,0.45)',
+                  fontSize: '0.96rem',
+                  fontWeight: 800,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  cursor: isLaunchingVlc ? 'wait' : 'pointer',
+                  border: 'none',
+                  color: '#fff',
+                  opacity: isLaunchingVlc ? 0.75 : 1,
+                }}
+              >
+                <Play size={20} fill="#fff" />
+                {isLaunchingVlc ? 'Opening VLC...' : 'Play in VLC'}
+              </button>
 
-                  <button
-                    className="btn-secondary"
-                    onClick={handleOpenVlc}
-                    disabled={isLaunchingVlc}
-                    style={{
-                      background: 'rgba(249,115,22,0.12)', border: '1px solid rgba(249,115,22,0.35)',
-                      color: '#fdba74', fontWeight: 700,
-                    }}
-                  >
-                    <ExternalLink size={16} />
-                    {isLaunchingVlc ? 'Launching...' : 'Open in VLC Media Player'}
-                  </button>
+              {/* Modern Professional Download Bar */}
+              <button
+                onClick={() => {
+                  if (isOffline) {
+                    onDeleteDownload(item);
+                  } else if (hasEnoughStorage) {
+                    onStartDownload(item);
+                  }
+                }}
+                disabled={!isOffline && !hasEnoughStorage}
+                style={{
+                  height: '42px',
+                  borderRadius: '12px',
+                  background: isOffline ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.06)',
+                  border: isOffline ? '1px solid rgba(16,185,129,0.35)' : '1px solid rgba(255,255,255,0.12)',
+                  color: isOffline ? '#6ee7b7' : '#e2e8f0',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  cursor: !isOffline && !hasEnoughStorage ? 'not-allowed' : 'pointer',
+                  opacity: !isOffline && !hasEnoughStorage ? 0.4 : 1,
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {isOffline ? <Check size={16} strokeWidth={2.5} /> : <Download size={16} />}
+                <span>
+                  {isOffline ? 'Downloaded to Device (Tap to Remove)' : `Download · ${formatBytes(item.size)}`}
+                </span>
+              </button>
 
-                  <button
-                    onClick={() => onDeleteDownload(item)}
-                    style={{
-                      background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)',
-                      borderRadius: '14px', height: '44px', display: 'flex', alignItems: 'center',
-                      justifyContent: 'center', gap: '8px', color: 'var(--accent-rose)',
-                      fontWeight: 700, fontSize: '0.84rem', cursor: 'pointer',
-                    }}
-                  >
-                    <Trash2 size={16} />
-                    Remove Download
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    className="btn-primary"
-                    onClick={() => {
-                      const settings = getPlayerSettings();
-                      const isMkv = item.filename?.toLowerCase().endsWith('.mkv') || item.mime_type?.includes('matroska');
-                      if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
-                        launchVlcWithTracking(item, (msg) => setVlcStatus(msg));
-                        setTimeout(onClose, 800);
-                        return;
-                      }
-                      onClose();
-                      onWatch(item);
-                    }}
-                  >
-                    <Play size={17} fill="#fff" />
-                    Play Stream
-                  </button>
-
-                  <button
-                    className="btn-secondary"
-                    onClick={handleOpenVlc}
-                    disabled={isLaunchingVlc}
-                    style={{
-                      background: 'rgba(249,115,22,0.12)', border: '1px solid rgba(249,115,22,0.35)',
-                      color: '#fdba74', fontWeight: 700,
-                    }}
-                  >
-                    <ExternalLink size={16} />
-                    {isLaunchingVlc ? 'Launching...' : 'Open in VLC Player'}
-                  </button>
-
-                  <button
-                    className="btn-secondary"
-                    onClick={() => { if (hasEnoughStorage) { onStartDownload(item); onClose(); } }}
-                    disabled={!hasEnoughStorage}
-                    style={{ opacity: hasEnoughStorage ? 1 : 0.4, cursor: hasEnoughStorage ? 'pointer' : 'not-allowed' }}
-                  >
-                    <Download size={17} />
-                    Download · {formatBytes(item.size)}
-                  </button>
-
-                  {!hasEnoughStorage && (
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: '8px',
-                      padding: '10px 14px', borderRadius: '10px',
-                      background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)',
-                      fontSize: '0.75rem', color: 'var(--accent-rose)',
-                    }}>
-                      <ShieldAlert size={15} />
-                      <span>Need {formatBytes(requiredWithSafetyMargin)}, only {formatBytes(deviceFreeBytes)} free</span>
-                    </div>
-                  )}
-                </>
+              {!hasEnoughStorage && !isOffline && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  padding: '10px 14px', borderRadius: '10px',
+                  background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)',
+                  fontSize: '0.75rem', color: 'var(--accent-rose)',
+                }}>
+                  <ShieldAlert size={15} />
+                  <span>Need {formatBytes(requiredWithSafetyMargin)}, only {formatBytes(deviceFreeBytes)} free</span>
+                </div>
               )}
             </div>
 
-            {/* Series Episode Hub */}
+            {/* Series Episode Hub (Single tap Play in VLC + Download) */}
             {isSeriesGroup && episodes.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -392,6 +368,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     return (
                       <div
                         key={ep.item.id}
+                        onClick={() => handleOpenVlcForEpisode(ep.item)}
                         style={{
                           background: 'rgba(255,255,255,0.04)',
                           border: '1px solid rgba(255,255,255,0.08)',
@@ -401,13 +378,14 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           gap: '10px',
+                          cursor: 'pointer',
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
                           <span style={{
-                            background: 'rgba(99,102,241,0.2)',
-                            color: '#a5b4fc',
-                            border: '1px solid rgba(99,102,241,0.35)',
+                            background: 'linear-gradient(135deg, rgba(249,115,22,0.25), rgba(234,88,12,0.35))',
+                            color: '#fdba74',
+                            border: '1px solid rgba(249,115,22,0.4)',
                             padding: '4px 8px',
                             borderRadius: '6px',
                             fontSize: '0.72rem',
@@ -434,42 +412,23 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Direct action buttons for this episode */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                          <button
-                            onClick={() => {
-                              const settings = getPlayerSettings();
-                              const isMkv = ep.item.filename?.toLowerCase().endsWith('.mkv') || ep.item.mime_type?.includes('matroska');
-                              if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
-                                launchVlcWithTracking(ep.item, (msg) => setVlcStatus(msg));
-                                setTimeout(onClose, 800);
-                                return;
-                              }
-                              onClose();
-                              onWatch(ep.item);
-                            }}
-                            aria-label={`Stream ${ep.episodeLabel}`}
-                            style={{
-                              width: '32px', height: '32px', borderRadius: '8px',
-                              background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-                              border: 'none', color: '#fff', display: 'flex',
-                              alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                            }}
-                          >
-                            <Play size={13} fill="#fff" />
-                          </button>
-
+                        {/* Episode Action Buttons */}
+                        <div
+                          style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <button
                             onClick={() => handleOpenVlcForEpisode(ep.item)}
-                            aria-label={`VLC ${ep.episodeLabel}`}
+                            aria-label={`Play ${ep.episodeLabel} in VLC`}
                             style={{
-                              width: '32px', height: '32px', borderRadius: '8px',
-                              background: 'rgba(249,115,22,0.18)', border: '1px solid rgba(249,115,22,0.35)',
-                              color: '#fdba74', display: 'flex', alignItems: 'center',
-                              justifyContent: 'center', cursor: 'pointer',
+                              width: '34px', height: '34px', borderRadius: '9px',
+                              background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                              border: 'none', color: '#fff', display: 'flex',
+                              alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                              boxShadow: '0 2px 10px rgba(249,115,22,0.4)',
                             }}
                           >
-                            <ExternalLink size={13} />
+                            <Play size={14} fill="#fff" style={{ marginLeft: '1px' }} />
                           </button>
 
                           <button
@@ -480,16 +439,16 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                                 onStartDownload(ep.item);
                               }
                             }}
-                            aria-label="Download"
+                            aria-label="Download Episode"
                             style={{
-                              width: '32px', height: '32px', borderRadius: '8px',
+                              width: '34px', height: '34px', borderRadius: '9px',
                               background: epOffline ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.06)',
                               border: epOffline ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.12)',
                               color: epOffline ? '#10b981' : '#cbd5e1',
                               display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
                             }}
                           >
-                            {epOffline ? <Check size={14} strokeWidth={2.5} /> : <Download size={13} />}
+                            {epOffline ? <Check size={15} strokeWidth={2.5} /> : <Download size={14} />}
                           </button>
                         </div>
                       </div>

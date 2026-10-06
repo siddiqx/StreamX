@@ -157,58 +157,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <button
-              onClick={() => updateSetting('defaultPlayer', 'vlc')}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-                padding: '12px 14px',
-                borderRadius: '12px',
-                background: playerSettings.defaultPlayer === 'vlc' ? 'rgba(249,115,22,0.15)' : 'rgba(255,255,255,0.03)',
-                border: playerSettings.defaultPlayer === 'vlc' ? '1.5px solid #f97316' : '1px solid var(--border-subtle)',
-                color: playerSettings.defaultPlayer === 'vlc' ? '#fff' : 'var(--text-muted)',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '0.84rem', fontWeight: 800, color: playerSettings.defaultPlayer === 'vlc' ? '#fdba74' : '#fff' }}>
-                  VLC Player
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            padding: '14px 16px',
+            borderRadius: '14px',
+            background: 'linear-gradient(135deg, rgba(249,115,22,0.15) 0%, rgba(234,88,12,0.08) 100%)',
+            border: '1.5px solid rgba(249,115,22,0.4)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#fdba74' }}>
+                  VLC Media Player
                 </span>
-                {playerSettings.defaultPlayer === 'vlc' && <CheckCircle2 size={16} color="#f97316" />}
-              </div>
-              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', lineHeight: 1.3 }}>
-                Hardware accelerated (4K, MKV, Dual Audio)
-              </span>
-            </button>
-
-            <button
-              onClick={() => updateSetting('defaultPlayer', 'in_app')}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-                padding: '12px 14px',
-                borderRadius: '12px',
-                background: playerSettings.defaultPlayer === 'in_app' ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.03)',
-                border: playerSettings.defaultPlayer === 'in_app' ? '1.5px solid #6366f1' : '1px solid var(--border-subtle)',
-                color: playerSettings.defaultPlayer === 'in_app' ? '#fff' : 'var(--text-muted)',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '0.84rem', fontWeight: 800, color: playerSettings.defaultPlayer === 'in_app' ? '#a5b4fc' : '#fff' }}>
-                  In-App Player
+                <span style={{
+                  fontSize: '0.66rem',
+                  fontWeight: 800,
+                  background: '#f97316',
+                  color: '#fff',
+                  padding: '2px 7px',
+                  borderRadius: '6px',
+                  letterSpacing: '0.04em',
+                }}>
+                  DEFAULT
                 </span>
-                {playerSettings.defaultPlayer === 'in_app' && <CheckCircle2 size={16} color="#6366f1" />}
               </div>
-              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', lineHeight: 1.3 }}>
-                Integrated browser playback
-              </span>
-            </button>
+              <CheckCircle2 size={18} color="#f97316" />
+            </div>
+            <p style={{ fontSize: '0.74rem', color: '#cbd5e1', margin: 0, lineHeight: 1.45 }}>
+              Active default player for all media. 100% format compatibility (MKV, HEVC/H.265, Dual Audio, Subtitles, 4K HDR) with zero decode lag and automatic watch progress synchronization.
+            </p>
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Play, Info, Radio, ArrowRight, Sparkles, Tv, Film, ExternalLink,
+  Play, Info, Radio, ArrowRight, Sparkles, Tv, Film,
   Star, Clock, Flame, Heart, Compass, Laugh
 } from 'lucide-react';
 import type { MediaItem, TelegramTransfer } from '../types';
@@ -16,7 +16,7 @@ import {
 
 import { getWatchHistory } from '../utils/watchHistory';
 import type { WatchHistoryItem } from '../utils/watchHistory';
-import { getPlayerSettings, launchVlcWithTracking } from '../utils/playerSettings';
+import { launchVlcWithTracking } from '../utils/playerSettings';
 
 interface HomeViewProps {
   media: MediaItem[];
@@ -87,18 +87,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
   );
 
   const handleHeroStream = () => {
-    if (!featured) return;
-    const settings = getPlayerSettings();
-    const isMkv = featured.filename?.toLowerCase().endsWith('.mkv') || featured.mime_type?.includes('matroska');
-    if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
-      launchVlcWithTracking(featured);
-      return;
-    }
-    onPlayMedia(featured);
-  };
-
-  const handleHeroVlc = (e: React.MouseEvent) => {
-    e.stopPropagation();
     if (!featured) return;
     launchVlcWithTracking(featured);
   };
@@ -302,41 +290,53 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </p>
             )}
 
-            {/* Action Buttons */}
-            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+            {/* Action Buttons: Direct Play in VLC & Details */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
               <button
                 className="btn-primary"
-                style={{ flex: 1.3, height: '48px', minHeight: '48px', fontSize: '0.9rem' }}
+                style={{
+                  flex: 1.5,
+                  height: '48px',
+                  minHeight: '48px',
+                  fontSize: '0.94rem',
+                  fontWeight: 800,
+                  background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                  boxShadow: '0 4px 20px rgba(249,115,22,0.45)',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  cursor: 'pointer',
+                  borderRadius: '14px',
+                }}
                 onClick={handleHeroStream}
               >
-                <Play size={17} fill="#fff" />
-                Stream
-              </button>
-
-              <button
-                className="btn-secondary"
-                style={{
-                  flex: 1, height: '48px', minHeight: '48px', fontSize: '0.84rem',
-                  background: 'rgba(249,115,22,0.18)', border: '1px solid rgba(249,115,22,0.4)',
-                  color: '#fdba74', fontWeight: 800,
-                }}
-                onClick={handleHeroVlc}
-              >
-                <ExternalLink size={16} />
-                VLC
+                <Play size={18} fill="#fff" />
+                Play in VLC
               </button>
 
               <button
                 onClick={handleHeroClick}
                 aria-label="Details"
                 style={{
-                  width: '48px', height: '48px', flexShrink: 0, borderRadius: '12px',
-                  background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', color: '#fff',
+                  flex: 1,
+                  height: '48px',
+                  borderRadius: '14px',
+                  background: 'rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  color: '#fff',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
                 }}
               >
-                <Info size={19} />
+                <Info size={17} />
+                Details
               </button>
             </div>
           </div>

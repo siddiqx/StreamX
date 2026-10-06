@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { MediaItem, TelegramTransfer, DeviceDownload } from './types';
 import type { MediaGroup } from './utils/mediaOrganizer';
 import { fetchMedia, fetchTransfers, getCachedMedia, getCachedTransfers, getDownloadUrl } from './api';
-import { getPlayerSettings, launchVlcWithTracking } from './utils/playerSettings';
+import { launchVlcWithTracking } from './utils/playerSettings';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
@@ -33,7 +33,23 @@ export const App: React.FC = () => {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [playingMedia, setPlayingMedia] = useState<MediaItem | null>(null);
+  const [toast, setToast] = useState<{ message: string; type?: string } | null>(null);
   const [isTransfersOpen, setIsTransfersOpen] = useState(false);
+
+  // Global toast listener for VLC launch notifications
+  useEffect(() => {
+    const handleToast = (e: Event) => {
+      const customEvent = e as CustomEvent<{ message: string; type?: string }>;
+      if (customEvent.detail?.message) {
+        setToast(customEvent.detail);
+        setTimeout(() => {
+          setToast((curr) => (curr?.message === customEvent.detail.message ? null : curr));
+        }, 3600);
+      }
+    };
+    window.addEventListener('streamx_toast', handleToast);
+    return () => window.removeEventListener('streamx_toast', handleToast);
+  }, []);
   const [isWifiOnly, setIsWifiOnly] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('streamx_wifi_only');
@@ -171,15 +187,9 @@ export const App: React.FC = () => {
     }
   };
 
-  // Smart Playback Router (Automatically routes to VLC if default or if MKV)
+  // Direct Playback Router (VLC is the exclusive default player: 0 friction, immediate launch)
   const handlePlayMedia = (item: MediaItem) => {
-    const settings = getPlayerSettings();
-    const isMkv = item.filename?.toLowerCase().endsWith('.mkv') || item.mime_type?.includes('matroska');
-    if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
-      launchVlcWithTracking(item);
-      return;
-    }
-    setPlayingMedia(item);
+    launchVlcWithTracking(item);
   };
 
   return (
@@ -320,6 +330,44 @@ export const App: React.FC = () => {
         onClose={() => setPlayingMedia(null)}
         isOffline={playingMedia ? offlineIds.has(playingMedia.id) : false}
       />
+
+      {/* Floating Status Notification Toast */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          bottom: 'calc(var(--bottomnav-h) + 20px)',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 99999,
+          background: 'rgba(15, 23, 42, 0.94)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          border: '1px solid rgba(249, 115, 22, 0.45)',
+          boxShadow: '0 12px 36px rgba(0,0,0,0.7), 0 0 20px rgba(249,115,22,0.25)',
+          borderRadius: '9999px',
+          padding: '10px 22px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          color: '#fff',
+          fontSize: '0.84rem',
+          fontWeight: 700,
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          maxWidth: '92vw',
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          <div style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: '#f97316',
+            boxShadow: '0 0 8px #f97316',
+            flexShrink: 0,
+          }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 };
