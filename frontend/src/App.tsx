@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { MediaItem, TelegramTransfer, DeviceDownload } from './types';
 import type { MediaGroup } from './utils/mediaOrganizer';
-import { fetchMedia, fetchTransfers, getCachedMedia, getCachedTransfers } from './api';
+import { fetchMedia, fetchTransfers, getCachedMedia, getCachedTransfers, getDownloadUrl } from './api';
+import { getPlayerSettings, launchVlcWithTracking } from './utils/playerSettings';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
@@ -120,80 +121,42 @@ export const App: React.FC = () => {
     [offlineItems]
   );
 
-  // Active download ticker simulation
-  const downloadTimerRef = useRef<any>(null);
-  useEffect(() => {
-    downloadTimerRef.current = setInterval(() => {
-      setDownloads((prev) =>
-        prev.map((d) => {
-          if (d.status !== 'DOWNLOADING') return d;
-
-          const speedBytes = 18.5 * 1024 * 1024; // ~18.5 MB/s
-          const nextBytes = Math.min(d.bytes_downloaded + speedBytes, d.size);
-          const nextProgress = Math.round((nextBytes / d.size) * 100);
-
-          if (nextBytes >= d.size) {
-            return {
-              ...d,
-              bytes_downloaded: d.size,
-              progress: 100,
-              status: 'COMPLETED',
-              speed_mbps: 0,
-              completed_at: new Date().toISOString(),
-            };
-          }
-
-          return {
-            ...d,
-            bytes_downloaded: nextBytes,
-            progress: nextProgress,
-            speed_mbps: 18.5,
-          };
-        })
-      );
-    }, 1000);
-
-    return () => clearInterval(downloadTimerRef.current);
-  }, []);
-
-  // Download actions
+  // Real browser download action
   const handleStartDownload = (item: MediaItem) => {
-    if (offlineIds.has(item.id)) return;
+    // 1. Trigger actual direct Google Drive download stream
+    const url = getDownloadUrl(item.id);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = item.filename;
+    a.click();
 
-    const existing = downloads.find((d) => d.media_id === item.id);
-    if (existing) {
-      setDownloads((prev) =>
-        prev.map((d) => (d.media_id === item.id ? { ...d, status: 'DOWNLOADING' } : d))
-      );
-    } else {
-      const newDl: DeviceDownload = {
-        id: `dl_${Date.now()}`,
-        media_id: item.id,
-        filename: item.filename,
-        size: item.size,
-        category: item.category,
-        mime_type: item.mime_type,
-        progress: 0,
-        bytes_downloaded: 0,
-        speed_mbps: 18.2,
-        status: 'DOWNLOADING',
-      };
-      setDownloads((prev) => [newDl, ...prev]);
-    }
-
-    setCurrentTab('downloads');
+    // 2. Track downloaded file in device cache
+    const newDl: DeviceDownload = {
+      id: `dl_${item.id}_${Date.now()}`,
+      media_id: item.id,
+      filename: item.filename,
+      size: item.size,
+      category: item.category,
+      mime_type: item.mime_type,
+      progress: 100,
+      bytes_downloaded: item.size,
+      speed_mbps: 0,
+      status: 'COMPLETED',
+      completed_at: new Date().toISOString(),
+    };
+    setDownloads((prev) => [newDl, ...prev.filter(d => d.media_id !== item.id)]);
     setSelectedMedia(null);
   };
 
   const handlePauseDownload = (id: string) => {
     setDownloads((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, status: 'PAUSED', speed_mbps: 0 } : d))
+      prev.map((d) => (d.id === id ? { ...d, status: 'PAUSED' } : d))
     );
   };
 
   const handleResumeDownload = (id: string) => {
     setDownloads((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, status: 'DOWNLOADING', speed_mbps: 18.2 } : d))
+      prev.map((d) => (d.id === id ? { ...d, status: 'COMPLETED' } : d))
     );
   };
 
@@ -202,11 +165,21 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteDownload = (item: MediaItem) => {
-    // Section 18 & Section 41 Test G: Deleting local file NEVER deletes Google Drive master
     setDownloads((prev) => prev.filter((d) => d.media_id !== item.id));
     if (selectedMedia?.id === item.id) {
       setSelectedMedia(null);
     }
+  };
+
+  // Smart Playback Router (Automatically routes to VLC if default or if MKV)
+  const handlePlayMedia = (item: MediaItem) => {
+    const settings = getPlayerSettings();
+    const isMkv = item.filename?.toLowerCase().endsWith('.mkv') || item.mime_type?.includes('matroska');
+    if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
+      launchVlcWithTracking(item);
+      return;
+    }
+    setPlayingMedia(item);
   };
 
   return (
@@ -238,7 +211,7 @@ export const App: React.FC = () => {
               setSelectedGroup(grp);
               setSelectedMedia(grp.featuredItem);
             }}
-            onPlayMedia={(item) => setPlayingMedia(item)}
+            onPlayMedia={(item) => handlePlayMedia(item)}
             onViewAllLibrary={(cat) => {
               setSelectedCategoryFilter(cat || 'All');
               setCurrentTab('library');
@@ -259,7 +232,7 @@ export const App: React.FC = () => {
               setSelectedGroup(grp);
               setSelectedMedia(grp.featuredItem);
             }}
-            onPlayMedia={(item) => setPlayingMedia(item)}
+            onPlayMedia={(item) => handlePlayMedia(item)}
           />
         )}
 
@@ -275,7 +248,7 @@ export const App: React.FC = () => {
               setSelectedGroup(grp);
               setSelectedMedia(grp.featuredItem);
             }}
-            onPlayMedia={(item) => setPlayingMedia(item)}
+            onPlayMedia={(item) => handlePlayMedia(item)}
             initialCategory={selectedCategoryFilter}
           />
         )}
@@ -287,7 +260,7 @@ export const App: React.FC = () => {
             onResume={handleResumeDownload}
             onCancel={handleCancelDownload}
             onDeleteDownload={handleDeleteDownload}
-            onPlay={(item) => setPlayingMedia(item)}
+            onPlay={(item) => handlePlayMedia(item)}
             mediaMap={mediaMap}
             isWifiOnly={isWifiOnly}
           />
@@ -333,7 +306,7 @@ export const App: React.FC = () => {
         onWatch={(item) => {
           setSelectedMedia(null);
           setSelectedGroup(null);
-          setPlayingMedia(item);
+          handlePlayMedia(item);
         }}
         deviceFreeBytes={deviceFreeBytes}
         onItemUpdated={(updated) => {

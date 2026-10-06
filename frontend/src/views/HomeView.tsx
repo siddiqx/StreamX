@@ -12,10 +12,11 @@ import {
   getMediaBackdropUrl,
   getMediaDisplayName,
   getMediaDisplayYear,
-  getVlcIntentUrl,
-  getVlcProtocolUrl,
-  openVlcOnHost,
 } from '../api';
+
+import { getWatchHistory } from '../utils/watchHistory';
+import type { WatchHistoryItem } from '../utils/watchHistory';
+import { getPlayerSettings, launchVlcWithTracking } from '../utils/playerSettings';
 
 interface HomeViewProps {
   media: MediaItem[];
@@ -41,6 +42,24 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenTransfers,
 }) => {
   const [heroError, setHeroError] = useState(false);
+  const [historyItems, setHistoryItems] = useState<WatchHistoryItem[]>(getWatchHistory);
+
+  React.useEffect(() => {
+    const handleUpdate = () => setHistoryItems(getWatchHistory());
+    window.addEventListener('streamx_watch_history_updated', handleUpdate);
+    return () => window.removeEventListener('streamx_watch_history_updated', handleUpdate);
+  }, []);
+
+  // Continue Watching items currently in progress
+  const continueWatchingItems = useMemo(() => {
+    return historyItems
+      .filter(h => !h.completed && h.progressPercentage > 0)
+      .map(h => {
+        const item = media.find(m => m.id === h.mediaId);
+        return item ? { history: h, item } : null;
+      })
+      .filter(Boolean) as { history: WatchHistoryItem; item: MediaItem }[];
+  }, [historyItems, media]);
 
   // Automatically organize media into series groups, anime, and genre shelves
   const library = useMemo(() => organizeMediaLibrary(media, offlineIds), [media, offlineIds]);
@@ -67,19 +86,21 @@ export const HomeView: React.FC<HomeViewProps> = ({
     t => t.status === 'FETCHING_TELEGRAM' || t.status === 'UPLOADING_DRIVE' || t.status === 'QUEUED'
   );
 
-  const handleHeroVlc = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleHeroStream = () => {
     if (!featured) return;
-    const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-    if (isMobile) {
-      const intentUrl = getVlcIntentUrl(featured.id, featuredTitle);
-      const vlcProto = getVlcProtocolUrl(featured.id);
-      const a = document.createElement('a');
-      a.href = /android/i.test(navigator.userAgent) ? intentUrl : vlcProto;
-      a.click();
+    const settings = getPlayerSettings();
+    const isMkv = featured.filename?.toLowerCase().endsWith('.mkv') || featured.mime_type?.includes('matroska');
+    if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
+      launchVlcWithTracking(featured);
       return;
     }
-    await openVlcOnHost(featured.id);
+    onPlayMedia(featured);
+  };
+
+  const handleHeroVlc = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!featured) return;
+    launchVlcWithTracking(featured);
   };
 
   const handleHeroClick = () => {
@@ -286,7 +307,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 className="btn-primary"
                 style={{ flex: 1.3, height: '48px', minHeight: '48px', fontSize: '0.9rem' }}
-                onClick={() => onPlayMedia(featured)}
+                onClick={handleHeroStream}
               >
                 <Play size={17} fill="#fff" />
                 Stream
@@ -337,6 +358,35 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '280px', lineHeight: 1.5 }}>
             Forward any movie, series, or anime to your bot to stream here.
           </p>
+        </section>
+      )}
+
+      {/* Continue Watching Row (Active Watch Progress) */}
+      {continueWatchingItems.length > 0 && (
+        <section style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div className="section-header" style={{ padding: '0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Flame size={16} color="#ef4444" />
+              <span className="section-title" style={{ fontSize: '0.98rem', fontWeight: 800, color: '#f8fafc' }}>
+                Continue Watching
+              </span>
+            </div>
+            <span style={{ fontSize: '0.74rem', color: 'var(--text-faint)', fontWeight: 600 }}>
+              {continueWatchingItems.length} in progress
+            </span>
+          </div>
+          <div className="scroll-row" style={{ display: 'flex', gap: '12px', overflowX: 'auto', padding: '4px 16px 12px' }}>
+            {continueWatchingItems.map(({ item }) => (
+              <MediaCard
+                key={`cw_${item.id}`}
+                item={item}
+                isOffline={offlineIds.has(item.id)}
+                onSelect={onSelectMedia}
+                onPlay={onPlayMedia}
+                width={CARD_W}
+              />
+            ))}
+          </div>
         </section>
       )}
 

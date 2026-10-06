@@ -1,14 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   X, Play, Pause, RotateCcw, RotateCw, Maximize2, Minimize2,
-  Tv, Monitor, ExternalLink, Download, AlertTriangle, Loader2
+  Tv, ExternalLink, Download, CheckCircle2,
+  Volume2, VolumeX
 } from 'lucide-react';
 import type { MediaItem } from '../types';
 import {
-  getStreamUrl, getCompatibleStreamUrl, getPlaylistUrl,
-  getVlcProtocolUrl, getVlcIntentUrl, openVlcOnHost,
-  parseMediaMetadata
+  getStreamUrl,
+  getPlaylistUrl,
+  getMediaDisplayName,
+  getMediaBackdropUrl,
+  getMediaPosterUrl,
+  formatRuntime
 } from '../api';
+import { updateWatchProgress, recordWatchStart, getWatchProgress } from '../utils/watchHistory';
+import { launchVlcWithTracking, savePlayerSettings } from '../utils/playerSettings';
 
 interface VideoPlayerModalProps {
   item: MediaItem | null;
@@ -20,22 +26,48 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<any>(null);
+  const progressSaveIntervalRef = useRef<any>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showVlcModal, setShowVlcModal] = useState(false);
-  const [vlcHostStatus, setVlcHostStatus] = useState<string | null>(null);
-  const [isVlcHostLaunching, setIsVlcHostLaunching] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [vlcLaunchMessage, setVlcLaunchMessage] = useState<string | null>(null);
 
-  const isMkv = item?.filename?.toLowerCase().endsWith('.mkv') || item?.mime_type?.includes('matroska');
-  const [streamMode, setStreamMode] = useState<'compatible' | 'direct'>(isMkv ? 'compatible' : 'direct');
+  const displayName = item ? getMediaDisplayName(item) : '';
+  const backdrop = item ? getMediaBackdropUrl(item) : undefined;
+  const poster = item ? getMediaPosterUrl(item) : undefined;
 
-  // Auto-hide controls timer
+  // Resume position from watch history if available
+  useEffect(() => {
+    if (!item) return;
+    const existing = getWatchProgress(item.id);
+    if (existing && existing.progressSeconds > 0 && !existing.completed) {
+      setCurrentTime(existing.progressSeconds);
+    }
+    recordWatchStart(item);
+  }, [item?.id]);
+
+  // Periodic progress tracking (every 2.5 seconds while playing)
+  useEffect(() => {
+    if (!item) return;
+    progressSaveIntervalRef.current = setInterval(() => {
+      const v = videoRef.current;
+      if (v && !v.paused && v.duration > 0) {
+        updateWatchProgress(item.id, v.currentTime, v.duration, item);
+      }
+    }, 2500);
+
+    return () => {
+      if (progressSaveIntervalRef.current) clearInterval(progressSaveIntervalRef.current);
+    };
+  }, [item?.id]);
+
+  // Controls auto-hide
   const resetControlsTimer = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
@@ -43,7 +75,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       if (isPlaying) {
         setShowControls(false);
       }
-    }, 3500);
+    }, 3800);
   };
 
   useEffect(() => {
@@ -55,10 +87,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
 
   if (!item) return null;
 
-  const meta = parseMediaMetadata(item.filename);
-  const currentStreamUrl = streamMode === 'compatible'
-    ? getCompatibleStreamUrl(item.id)
-    : getStreamUrl(item.id);
+  const streamUrl = getStreamUrl(item.id);
 
   const togglePlay = () => {
     const v = videoRef.current;
@@ -87,6 +116,13 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
     resetControlsTimer();
   };
 
+  const toggleMute = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setIsMuted(v.muted);
+  };
+
   const toggleFullscreen = async () => {
     const c = containerRef.current;
     if (!c) return;
@@ -99,42 +135,30 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         setIsFullscreen(false);
       }
     } catch {
-      // Fallback for iOS webkit
       const v = videoRef.current as any;
-      if (v?.webkitEnterFullscreen) {
-        v.webkitEnterFullscreen();
-      }
+      if (v?.webkitEnterFullscreen) v.webkitEnterFullscreen();
     }
   };
 
   const handleVideoError = () => {
     setIsLoading(false);
-    if (streamMode === 'direct') {
-      // Try switching to compatible mode
-      setStreamMode('compatible');
-    } else {
-      setPlaybackError('In-browser transcode unavailable for this video format.');
-    }
+    setPlaybackError(
+      'This stream uses advanced video/audio encoding designed for native playback.'
+    );
   };
 
-  const handleLaunchVlcHost = async () => {
-    setIsVlcHostLaunching(true);
-    setVlcHostStatus(null);
-    const res = await openVlcOnHost(item.id);
-    setIsVlcHostLaunching(false);
-    setVlcHostStatus(res.success ? '✓ VLC Player opened on host PC' : `Failed: ${res.message}`);
-    setTimeout(() => setVlcHostStatus(null), 4000);
+  const handleLaunchVlc = async () => {
+    if (!item) return;
+    setVlcLaunchMessage('Opening VLC Media Player...');
+    await launchVlcWithTracking(item, (msg) => setVlcLaunchMessage(msg));
+    setTimeout(() => {
+      setVlcLaunchMessage(null);
+    }, 4000);
   };
 
-  const handleLaunchMobileVlc = () => {
-    // Attempt intent first on Android, fallback to vlc:// protocol
-    const intentUrl = getVlcIntentUrl(item.id, meta.cleanTitle);
-    const vlcProto = getVlcProtocolUrl(item.id);
-    
-    // Create hidden anchor and click
-    const a = document.createElement('a');
-    a.href = /android/i.test(navigator.userAgent) ? intentUrl : vlcProto;
-    a.click();
+  const handleSetDefaultVlcAndLaunch = async () => {
+    savePlayerSettings({ defaultPlayer: 'vlc', autoOpenVlcForMkv: true });
+    await handleLaunchVlc();
   };
 
   const formatTime = (secs: number) => {
@@ -154,32 +178,66 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: '#000',
-        zIndex: 60,
+        backgroundColor: '#05070a',
+        zIndex: 9999,
         display: 'flex',
         flexDirection: 'column',
         userSelect: 'none',
+        fontFamily: 'var(--font-sans, system-ui, sans-serif)',
       }}
       onClick={resetControlsTimer}
     >
-      {/* Video Element */}
+      {/* Background artwork blur for cinema ambiance */}
+      {(backdrop || poster) && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundImage: `url(${backdrop || poster})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            opacity: isPlaying && !playbackError ? 0.08 : 0.25,
+            filter: 'blur(35px)',
+            transition: 'opacity 0.6s ease',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+
+      {/* Native Video Element */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        src={currentStreamUrl}
+        src={streamUrl}
         style={{
           width: '100%',
           height: '100%',
           objectFit: 'contain',
           outline: 'none',
           backgroundColor: '#000',
+          position: 'relative',
+          zIndex: 10,
         }}
         onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
+        onPause={() => {
+          setIsPlaying(false);
+          if (videoRef.current && item) {
+            updateWatchProgress(item.id, videoRef.current.currentTime, videoRef.current.duration, item);
+          }
+        }}
         onWaiting={() => setIsLoading(true)}
-        onPlaying={() => { setIsLoading(false); setPlaybackError(null); }}
-        onCanPlay={() => setIsLoading(false)}
+        onPlaying={() => {
+          setIsLoading(false);
+          setPlaybackError(null);
+        }}
+        onCanPlay={() => {
+          setIsLoading(false);
+          // Restore position if resuming
+          if (currentTime > 5 && videoRef.current && videoRef.current.currentTime < 1) {
+            videoRef.current.currentTime = currentTime;
+          }
+        }}
         onTimeUpdate={() => {
           if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
         }}
@@ -190,341 +248,484 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         onError={handleVideoError}
       />
 
-      {/* Loading Spinner */}
+      {/* Loading Cinematic Spinner */}
       {isLoading && !playbackError && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
-          gap: '12px', pointerEvents: 'none', zIndex: 15,
-        }}>
-          <div style={{
-            width: '52px', height: '52px', borderRadius: '50%',
-            background: 'rgba(15,21,32,0.85)', backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.12)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Loader2 size={26} color="#818cf8" style={{ animation: 'spin 1s linear infinite' }} />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '16px',
+            pointerEvents: 'none',
+            zIndex: 25,
+          }}
+        >
+          <div
+            style={{
+              width: '58px',
+              height: '58px',
+              borderRadius: '20px',
+              background: 'rgba(15,21,32,0.85)',
+              backdropFilter: 'blur(16px)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div
+              style={{
+                width: '28px',
+                height: '28px',
+                border: '3px solid rgba(99,102,241,0.25)',
+                borderTopColor: '#818cf8',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite',
+              }}
+            />
           </div>
-          <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>
-            {streamMode === 'compatible' ? 'Preparing smooth playback...' : 'Buffering...'}
+          <span style={{ fontSize: '0.84rem', color: '#cbd5e1', fontWeight: 600 }}>
+            Buffering cinema stream...
           </span>
         </div>
       )}
 
-      {/* Error Fallback Banner */}
+      {/* Hyper-Professional Hardware-Accelerated Stream Card (Error or Format Fallback) */}
       {playbackError && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'rgba(7,9,14,0.94)', backdropFilter: 'blur(16px)',
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
-          padding: '24px', zIndex: 20, textAlign: 'center',
-        }}>
-          <div style={{
-            width: '60px', height: '60px', borderRadius: '20px',
-            background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.35)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px',
-          }}>
-            <AlertTriangle size={30} color="#f59e0b" />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(circle at center, rgba(15,23,42,0.94) 0%, rgba(3,7,18,0.98) 100%)',
+            backdropFilter: 'blur(20px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px 20px',
+            zIndex: 40,
+            textAlign: 'center',
+          }}
+        >
+          <div
+            style={{
+              width: '68px',
+              height: '68px',
+              borderRadius: '24px',
+              background: 'linear-gradient(135deg, rgba(249,115,22,0.2), rgba(234,88,12,0.35))',
+              border: '1px solid rgba(249,115,22,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '16px',
+              boxShadow: '0 8px 30px rgba(249,115,22,0.3)',
+            }}
+          >
+            <Tv size={34} color="#fb923c" />
           </div>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff', marginBottom: '6px' }}>
-            Open in VLC Media Player
+
+          <h3
+            style={{
+              fontSize: '1.25rem',
+              fontWeight: 900,
+              color: '#fff',
+              margin: '0 0 8px',
+              fontFamily: 'var(--font-display, inherit)',
+            }}
+          >
+            Hardware-Accelerated Stream
           </h3>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', maxWidth: '340px', lineHeight: 1.4, marginBottom: '20px' }}>
-            This MKV video contains high-definition audio/video streams designed for external media players.
+
+          <p
+            style={{
+              fontSize: '0.84rem',
+              color: '#94a3b8',
+              maxWidth: '380px',
+              lineHeight: 1.5,
+              margin: '0 0 24px',
+            }}
+          >
+            This media uses high-definition audio and video streams (MKV / HEVC) designed for direct hardware playback in VLC Media Player.
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '320px' }}>
-            <button
-              className="btn-primary"
-              onClick={handleLaunchMobileVlc}
-              style={{ background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)', boxShadow: '0 4px 20px rgba(249,115,22,0.4)' }}
+
+          {vlcLaunchMessage && (
+            <div
+              style={{
+                padding: '10px 18px',
+                borderRadius: '12px',
+                background: 'rgba(16,185,129,0.18)',
+                border: '1px solid rgba(16,185,129,0.4)',
+                color: '#6ee7b7',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                marginBottom: '16px',
+              }}
             >
-              <ExternalLink size={18} />
-              Open in VLC App
-            </button>
+              {vlcLaunchMessage}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '340px' }}>
             <button
-              className="btn-secondary"
-              onClick={handleLaunchVlcHost}
-              disabled={isVlcHostLaunching}
+              onClick={handleLaunchVlc}
+              style={{
+                height: '48px',
+                borderRadius: '14px',
+                background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                boxShadow: '0 6px 24px rgba(249,115,22,0.45)',
+                border: 'none',
+                color: '#fff',
+                fontSize: '0.92rem',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+              }}
             >
-              <Monitor size={17} />
-              {isVlcHostLaunching ? 'Launching...' : 'Play on Host PC (VLC)'}
+              <ExternalLink size={19} />
+              Open in VLC Media Player
             </button>
+
+            <button
+              onClick={handleSetDefaultVlcAndLaunch}
+              style={{
+                height: '42px',
+                borderRadius: '12px',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.14)',
+                color: '#e2e8f0',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+              }}
+            >
+              <CheckCircle2 size={16} color="#818cf8" />
+              Always Open in VLC & Remember
+            </button>
+
             <a
               href={getPlaylistUrl(item.id)}
-              download={`${meta.cleanTitle}.m3u`}
-              className="btn-secondary"
-              style={{ textDecoration: 'none' }}
+              download={`${displayName}.m3u`}
+              style={{
+                height: '40px',
+                borderRadius: '12px',
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.08)',
+                color: 'var(--text-muted)',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                textDecoration: 'none',
+              }}
             >
-              <Download size={17} />
-              Download Playlist (.m3u)
+              <Download size={15} />
+              Download Stream Playlist (.m3u)
             </a>
           </div>
         </div>
       )}
 
-      {/* Floating Header */}
+      {/* Top Bar Overlay */}
       <div
         style={{
-          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30,
-          padding: 'max(env(safe-area-inset-top, 0px), 14px) 16px 20px',
-          background: 'linear-gradient(to bottom, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 60%, transparent 100%)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 35,
+          padding: 'max(env(safe-area-inset-top, 0px), 14px) 18px 24px',
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
           opacity: showControls ? 1 : 0,
           pointerEvents: showControls ? 'all' : 'none',
-          transition: 'opacity 0.25s cubic-bezier(0.2,0.8,0.2,1)',
+          transition: 'opacity 0.25s ease',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
           <button
-            onClick={onClose}
+            onClick={() => {
+              if (videoRef.current && item) {
+                updateWatchProgress(item.id, videoRef.current.currentTime, videoRef.current.duration, item);
+              }
+              onClose();
+            }}
+            aria-label="Close Player"
             style={{
-              width: '38px', height: '38px', borderRadius: '50%',
-              background: 'rgba(255,255,255,0.12)', backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255,255,255,0.18)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#fff', cursor: 'pointer', flexShrink: 0,
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.12)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              cursor: 'pointer',
+              flexShrink: 0,
             }}
           >
-            <X size={18} />
+            <X size={20} />
           </button>
+
           <div style={{ minWidth: 0 }}>
-            <h2 style={{
-              fontSize: '0.92rem', fontWeight: 800, color: '#fff',
-              fontFamily: 'var(--font-display)', whiteSpace: 'nowrap',
-              overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {meta.cleanTitle}
+            <h2
+              style={{
+                fontSize: '0.98rem',
+                fontWeight: 800,
+                color: '#fff',
+                fontFamily: 'var(--font-display, inherit)',
+                margin: 0,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {displayName}
             </h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-              <span className="badge-spec accent-cyan" style={{ fontSize: '0.55rem', padding: '1px 5px' }}>
-                {meta.quality}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+              <span
+                style={{
+                  fontSize: '0.66rem',
+                  fontWeight: 800,
+                  color: '#818cf8',
+                  background: 'rgba(99,102,241,0.16)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99,102,241,0.3)',
+                }}
+              >
+                {item.category}
               </span>
-              {meta.seasonEpisode && (
-                <span className="badge-spec accent-emerald" style={{ fontSize: '0.55rem', padding: '1px 5px' }}>
-                  {meta.seasonEpisode}
+              {item.canonical_metadata?.runtime && (
+                <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
+                  {formatRuntime(item.canonical_metadata.runtime)}
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* Quick VLC Action Button */}
+        {/* Quick Launch in VLC Player Button */}
         <button
-          onClick={() => setShowVlcModal(true)}
+          onClick={handleLaunchVlc}
           style={{
-            display: 'flex', alignItems: 'center', gap: '6px',
-            background: 'linear-gradient(135deg, rgba(249,115,22,0.25) 0%, rgba(234,88,12,0.35) 100%)',
-            border: '1px solid rgba(249,115,22,0.5)',
-            borderRadius: 'var(--radius-full)', padding: '6px 12px',
-            color: '#fdba74', fontSize: '0.72rem', fontWeight: 800,
-            cursor: 'pointer', backdropFilter: 'blur(8px)', flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'linear-gradient(135deg, rgba(249,115,22,0.25) 0%, rgba(234,88,12,0.4) 100%)',
+            border: '1px solid rgba(249,115,22,0.6)',
+            borderRadius: '999px',
+            padding: '7px 14px',
+            color: '#fdba74',
+            fontSize: '0.76rem',
+            fontWeight: 800,
+            cursor: 'pointer',
+            backdropFilter: 'blur(10px)',
+            flexShrink: 0,
+            boxShadow: '0 4px 14px rgba(249,115,22,0.25)',
           }}
         >
-          <div style={{
-            width: '8px', height: '8px', borderRadius: '50%',
-            background: '#f97316', boxShadow: '0 0 8px #f97316',
-          }} />
-          VLC Player
+          <div
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#f97316',
+              boxShadow: '0 0 10px #f97316',
+            }}
+          />
+          Launch VLC
         </button>
       </div>
 
-      {/* Center Tap & Controls Area */}
+      {/* Center Controls (Play/Pause, Skip 10s) */}
       <div
         style={{
-          position: 'absolute', inset: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: '28px', zIndex: 25,
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '32px',
+          zIndex: 30,
           opacity: showControls && !playbackError ? 1 : 0,
           pointerEvents: showControls && !playbackError ? 'all' : 'none',
-          transition: 'opacity 0.25s cubic-bezier(0.2,0.8,0.2,1)',
+          transition: 'opacity 0.25s ease',
         }}
         onClick={(e) => {
           if (e.target === e.currentTarget) togglePlay();
         }}
       >
         <button
-          onClick={(e) => { e.stopPropagation(); seekRelative(-10); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            seekRelative(-10);
+          }}
+          aria-label="Skip backward 10s"
           style={{
-            width: '46px', height: '46px', borderRadius: '50%',
-            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)',
+            width: '50px',
+            height: '50px',
+            borderRadius: '50%',
+            background: 'rgba(15,21,32,0.65)',
+            backdropFilter: 'blur(12px)',
             border: '1px solid rgba(255,255,255,0.18)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            cursor: 'pointer',
           }}
         >
-          <RotateCcw size={20} />
+          <RotateCcw size={22} />
         </button>
 
         <button
-          onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePlay();
+          }}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
           style={{
-            width: '64px', height: '64px', borderRadius: '50%',
-            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-            boxShadow: '0 6px 24px rgba(99,102,241,0.5)',
-            border: 'none', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', color: '#fff', cursor: 'pointer',
+            width: '72px',
+            height: '72px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+            boxShadow: '0 8px 32px rgba(99,102,241,0.55)',
+            border: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            cursor: 'pointer',
           }}
         >
-          {isPlaying ? <Pause size={28} fill="#fff" /> : <Play size={28} fill="#fff" style={{ marginLeft: '3px' }} />}
+          {isPlaying ? <Pause size={32} fill="#fff" /> : <Play size={32} fill="#fff" style={{ marginLeft: '4px' }} />}
         </button>
 
         <button
-          onClick={(e) => { e.stopPropagation(); seekRelative(10); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            seekRelative(10);
+          }}
+          aria-label="Skip forward 10s"
           style={{
-            width: '46px', height: '46px', borderRadius: '50%',
-            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)',
+            width: '50px',
+            height: '50px',
+            borderRadius: '50%',
+            background: 'rgba(15,21,32,0.65)',
+            backdropFilter: 'blur(12px)',
             border: '1px solid rgba(255,255,255,0.18)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            cursor: 'pointer',
           }}
         >
-          <RotateCw size={20} />
+          <RotateCw size={22} />
         </button>
       </div>
 
-      {/* Floating Bottom Controls */}
+      {/* Floating Bottom Scrub Bar & Controls */}
       <div
         style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 30,
-          padding: '24px 16px max(env(safe-area-inset-bottom, 0px), 16px)',
-          background: 'linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.4) 60%, transparent 100%)',
-          display: 'flex', flexDirection: 'column', gap: '8px',
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 35,
+          padding: '24px 20px max(env(safe-area-inset-bottom, 0px), 16px)',
+          background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
           opacity: showControls && !playbackError ? 1 : 0,
           pointerEvents: showControls && !playbackError ? 'all' : 'none',
-          transition: 'opacity 0.25s cubic-bezier(0.2,0.8,0.2,1)',
+          transition: 'opacity 0.25s ease',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Progress scrub bar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '0.72rem', color: '#cbd5e1', fontWeight: 600, minWidth: '38px' }}>
+        {/* Scrub Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '0.76rem', color: '#cbd5e1', fontWeight: 700, minWidth: '42px' }}>
             {formatTime(currentTime)}
           </span>
-          <input
-            type="range"
-            min={0}
-            max={duration || 100}
-            value={currentTime}
-            onChange={handleSeekChange}
-            style={{
-              flex: 1,
-              accentColor: '#6366f1',
-              cursor: 'pointer',
-              height: '4px',
-            }}
-          />
-          <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, minWidth: '38px', textAlign: 'right' }}>
+          <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <input
+              type="range"
+              min={0}
+              max={duration || 100}
+              value={currentTime}
+              onChange={handleSeekChange}
+              style={{
+                width: '100%',
+                accentColor: '#6366f1',
+                cursor: 'pointer',
+                height: '6px',
+                borderRadius: '3px',
+              }}
+            />
+          </div>
+          <span style={{ fontSize: '0.76rem', color: '#94a3b8', fontWeight: 700, minWidth: '42px', textAlign: 'right' }}>
             {duration ? formatTime(duration) : 'LIVE'}
           </span>
-          <button
-            onClick={toggleFullscreen}
-            style={{
-              background: 'none', border: 'none', color: '#fff',
-              cursor: 'pointer', display: 'flex', alignItems: 'center',
-              padding: '4px',
-            }}
-          >
-            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-          </button>
         </div>
-      </div>
 
-      {/* VLC Options Modal Bottom Sheet */}
-      {showVlcModal && (
-        <div
-          className="bottom-sheet-backdrop animate-fade-in"
-          style={{ zIndex: 70 }}
-          onClick={() => setShowVlcModal(false)}
-        >
-          <div
-            className="bottom-sheet"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '440px' }}
-          >
-            <div className="bottom-sheet-handle" />
-            <div style={{ padding: '20px 20px 32px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{
-                    width: '38px', height: '38px', borderRadius: '12px',
-                    background: 'linear-gradient(135deg, #f97316, #ea580c)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 4px 14px rgba(249,115,22,0.4)',
-                  }}>
-                    <Tv size={20} color="#fff" />
-                  </div>
-                  <div>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', fontFamily: 'var(--font-display)' }}>
-                      VLC Media Player
-                    </h3>
-                    <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      Smooth native playback · Dual Audio · Subtitles
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowVlcModal(false)}
-                  style={{
-                    background: 'rgba(255,255,255,0.08)', border: 'none',
-                    borderRadius: '50%', width: '32px', height: '32px',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#fff', cursor: 'pointer',
-                  }}
-                >
-                  <X size={16} />
-                </button>
-              </div>
+        {/* Extra Bottom Actions (Mute, Fullscreen, Open in VLC) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              onClick={toggleMute}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#cbd5e1',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '6px',
+              }}
+            >
+              {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            </button>
+          </div>
 
-              {vlcHostStatus && (
-                <div style={{
-                  padding: '10px 14px', borderRadius: '10px',
-                  background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
-                  color: '#6ee7b7', fontSize: '0.8rem', fontWeight: 700,
-                }}>
-                  {vlcHostStatus}
-                </div>
-              )}
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <button
-                  className="btn-primary"
-                  onClick={() => {
-                    handleLaunchMobileVlc();
-                    setShowVlcModal(false);
-                  }}
-                  style={{ background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)', boxShadow: '0 4px 18px rgba(249,115,22,0.4)' }}
-                >
-                  <ExternalLink size={18} />
-                  Open in VLC App (Device)
-                </button>
-
-                <button
-                  className="btn-secondary"
-                  onClick={handleLaunchVlcHost}
-                  disabled={isVlcHostLaunching}
-                >
-                  <Monitor size={17} />
-                  {isVlcHostLaunching ? 'Launching VLC on PC...' : 'Play on Host PC in VLC'}
-                </button>
-
-                <a
-                  href={getPlaylistUrl(item.id)}
-                  download={`${meta.cleanTitle}.m3u`}
-                  className="btn-secondary"
-                  style={{ textDecoration: 'none' }}
-                  onClick={() => setShowVlcModal(false)}
-                >
-                  <Download size={17} />
-                  Download Playlist File (.m3u)
-                </a>
-              </div>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <button
+              onClick={toggleFullscreen}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#fff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '6px',
+              }}
+            >
+              {isFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+            </button>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };

@@ -3,6 +3,8 @@ import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle, Layers } f
 import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
 import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl } from '../api';
+import { getWatchProgress } from '../utils/watchHistory';
+import { getPlayerSettings, launchVlcWithTracking } from '../utils/playerSettings';
 
 export interface MediaCardProps {
   item?: MediaItem;
@@ -48,6 +50,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const category = group ? group.category : resolvedItem.category;
   const isSeries = group?.type === 'series';
   const episodeCount = group?.episodes.length || 1;
+  const watchProgress = getWatchProgress(resolvedItem.id);
 
   const Icon = getCategoryIcon(category);
 
@@ -65,6 +68,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   const handlePlayClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    const settings = getPlayerSettings();
+    const isMkv = resolvedItem.filename?.toLowerCase().endsWith('.mkv') || resolvedItem.mime_type?.includes('matroska');
+    if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
+      launchVlcWithTracking(resolvedItem);
+      return;
+    }
     onPlay(resolvedItem);
   };
 
@@ -328,6 +337,26 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <Play size={12} fill="#fff" style={{ marginLeft: '1px' }} />
         </button>
       </div>
+
+      {/* Netflix-style Watch Progress Bar */}
+      {watchProgress && watchProgress.progressPercentage > 0 && !watchProgress.completed && (
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: '3.5px',
+          background: 'rgba(255,255,255,0.2)',
+          zIndex: 15,
+        }}>
+          <div style={{
+            width: `${watchProgress.progressPercentage}%`,
+            height: '100%',
+            background: 'linear-gradient(90deg, #ef4444, #f87171)',
+            boxShadow: '0 0 6px rgba(239,68,68,0.8)',
+          }} />
+        </div>
+      )}
     </div>
   );
 };

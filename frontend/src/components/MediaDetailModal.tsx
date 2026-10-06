@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   X, Play, Download, Trash2, Film, ShieldAlert, ExternalLink,
-  Star, Search, RefreshCw, Lock, Unlock, AlertTriangle, CheckCircle2, Loader2, Check
+  Star, Search, Loader2, Check
 } from 'lucide-react';
 import type { MediaItem, MetadataCandidate } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
@@ -12,15 +12,11 @@ import {
   getMediaDisplayName,
   getMediaDisplayYear,
   getMediaPosterUrl,
-  getVlcIntentUrl,
-  getVlcProtocolUrl,
-  openVlcOnHost,
   parseMediaMetadata,
-  reprocessMetadata,
   searchMetadataCandidates,
   selectMetadata,
-  unlockMetadata,
 } from '../api';
+import { getPlayerSettings, launchVlcWithTracking } from '../utils/playerSettings';
 
 export interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -77,8 +73,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const rating = group ? group.rating : item.canonical_metadata?.rating;
   const genres = group ? group.genres : (item.canonical_metadata?.genres || []);
   const overview = group ? group.overview : item.canonical_metadata?.overview;
-  const status = group ? (group.metadataStatus || 'PENDING') : (item.metadata_status || 'PENDING');
-  const isLocked = group ? !!group.metadataLocked : !!item.metadata_locked;
   const isOffline = isOfflineProp !== undefined ? isOfflineProp : !!(group ? group.isOffline : false);
 
   const techMeta = parseMediaMetadata(item.filename);
@@ -87,46 +81,17 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const hasEnoughStorage = deviceFreeBytes >= requiredWithSafetyMargin;
 
   const handleOpenVlcForEpisode = async (epItem: MediaItem) => {
-    const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-    if (isMobile) {
-      const intentUrl = getVlcIntentUrl(epItem.id, epItem.filename);
-      const vlcProto = getVlcProtocolUrl(epItem.id);
-      const a = document.createElement('a');
-      a.href = /android/i.test(navigator.userAgent) ? intentUrl : vlcProto;
-      a.click();
-      return;
-    }
-    await openVlcOnHost(epItem.id);
+    setIsLaunchingVlc(true);
+    await launchVlcWithTracking(epItem, (msg) => setVlcStatus(msg));
+    setIsLaunchingVlc(false);
+    setTimeout(() => setVlcStatus(null), 3500);
   };
 
   const handleOpenVlc = async () => {
     setIsLaunchingVlc(true);
-    setVlcStatus(null);
-
-    const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-    if (isMobile) {
-      const intentUrl = getVlcIntentUrl(item.id, title);
-      const vlcProto = getVlcProtocolUrl(item.id);
-      const a = document.createElement('a');
-      a.href = /android/i.test(navigator.userAgent) ? intentUrl : vlcProto;
-      a.click();
-      setIsLaunchingVlc(false);
-      setVlcStatus('✓ Opening in VLC...');
-      setTimeout(() => setVlcStatus(null), 3000);
-      return;
-    }
-
-    const res = await openVlcOnHost(item.id);
+    await launchVlcWithTracking(item, (msg) => setVlcStatus(msg));
     setIsLaunchingVlc(false);
-    if (res.success) {
-      setVlcStatus('✓ VLC Player opened on PC');
-      setTimeout(() => {
-        setVlcStatus(null);
-        onClose();
-      }, 2000);
-    } else {
-      window.location.href = getVlcProtocolUrl(item.id);
-    }
+    setTimeout(() => setVlcStatus(null), 3500);
   };
 
   const handleOpenSearch = async () => {
@@ -179,22 +144,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
           },
         });
       }
-    }
-  };
-
-  const handleReprocess = async () => {
-    setActionMessage('Reprocessing queued...');
-    await reprocessMetadata(item.id, true);
-    setTimeout(() => setActionMessage('✓ Reprocessing started in background.'), 800);
-    setTimeout(() => setActionMessage(null), 4000);
-  };
-
-  const handleUnlock = async () => {
-    const ok = await unlockMetadata(item.id);
-    if (ok) {
-      setActionMessage('✓ Metadata unlocked for auto-updates.');
-      if (onItemUpdated) onItemUpdated({ ...item, metadata_locked: false });
-      setTimeout(() => setActionMessage(null), 3000);
     }
   };
 
@@ -367,10 +316,20 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 <>
                   <button
                     className="btn-primary"
-                    onClick={() => { onClose(); onWatch(item); }}
+                    onClick={() => {
+                      const settings = getPlayerSettings();
+                      const isMkv = item.filename?.toLowerCase().endsWith('.mkv') || item.mime_type?.includes('matroska');
+                      if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
+                        launchVlcWithTracking(item, (msg) => setVlcStatus(msg));
+                        setTimeout(onClose, 800);
+                        return;
+                      }
+                      onClose();
+                      onWatch(item);
+                    }}
                   >
                     <Play size={17} fill="#fff" />
-                    Stream in App
+                    Play Stream
                   </button>
 
                   <button
@@ -478,7 +437,17 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                         {/* Direct action buttons for this episode */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                           <button
-                            onClick={() => { onClose(); onWatch(ep.item); }}
+                            onClick={() => {
+                              const settings = getPlayerSettings();
+                              const isMkv = ep.item.filename?.toLowerCase().endsWith('.mkv') || ep.item.mime_type?.includes('matroska');
+                              if (settings.defaultPlayer === 'vlc' || (settings.autoOpenVlcForMkv && isMkv)) {
+                                launchVlcWithTracking(ep.item, (msg) => setVlcStatus(msg));
+                                setTimeout(onClose, 800);
+                                return;
+                              }
+                              onClose();
+                              onWatch(ep.item);
+                            }}
                             aria-label={`Stream ${ep.episodeLabel}`}
                             style={{
                               width: '32px', height: '32px', borderRadius: '8px',
@@ -530,139 +499,37 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </div>
             )}
 
-            {/* Technical File Information Section */}
+            {/* Clean Specifications Strip */}
             <div style={{
-              background: 'rgba(15,21,32,0.8)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              borderRadius: '14px',
-              padding: '14px 16px',
               display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-            }}>
-              <span style={{ fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#94a3b8' }}>
-                Technical File Info
-              </span>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.76rem' }}>
-                  <span style={{ color: '#64748b' }}>Original File</span>
-                  <span style={{ color: '#e2e8f0', fontWeight: 600, maxWidth: '220px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {item.filename}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.76rem' }}>
-                  <span style={{ color: '#64748b' }}>Size</span>
-                  <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{formatBytes(item.size)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.76rem' }}>
-                  <span style={{ color: '#64748b' }}>Quality / Format</span>
-                  <span style={{ color: '#a5b4fc', fontWeight: 700 }}>{techMeta.quality} · {extension}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.76rem' }}>
-                  <span style={{ color: '#64748b' }}>Cloud Storage</span>
-                  <span style={{ color: '#10b981', fontWeight: 700 }}>Google Drive Verified</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Metadata Status & Management Controls */}
-            <div style={{
-              background: 'rgba(15,21,32,0.8)',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 14px',
+              borderRadius: '12px',
+              background: 'rgba(255,255,255,0.03)',
               border: '1px solid rgba(255,255,255,0.06)',
-              borderRadius: '14px',
-              padding: '14px 16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
+              marginTop: '4px',
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#94a3b8' }}>
-                  Metadata Quality
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#e2e8f0' }}>
+                  {techMeta.quality} · {extension}
                 </span>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {isLocked ? (
-                    <span style={{
-                      background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.35)',
-                      color: '#a5b4fc', fontSize: '0.66rem', fontWeight: 800, padding: '2px 8px', borderRadius: '6px',
-                      display: 'flex', alignItems: 'center', gap: '3px',
-                    }}>
-                      <Lock size={10} /> Manual (Locked)
-                    </span>
-                  ) : status === 'MATCHED' ? (
-                    <span style={{
-                      background: 'rgba(16,185,129,0.2)', border: '1px solid rgba(16,185,129,0.35)',
-                      color: '#6ee7b7', fontSize: '0.66rem', fontWeight: 800, padding: '2px 8px', borderRadius: '6px',
-                      display: 'flex', alignItems: 'center', gap: '3px',
-                    }}>
-                      <CheckCircle2 size={10} /> Auto Matched ({Math.round((item.metadata_confidence || 0.95) * 100)}%)
-                    </span>
-                  ) : status === 'LOW_CONFIDENCE' ? (
-                    <span style={{
-                      background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.35)',
-                      color: '#fcd34d', fontSize: '0.66rem', fontWeight: 800, padding: '2px 8px', borderRadius: '6px',
-                      display: 'flex', alignItems: 'center', gap: '3px',
-                    }}>
-                      <AlertTriangle size={10} /> Needs Review
-                    </span>
-                  ) : (
-                    <span style={{
-                      background: 'rgba(148,163,184,0.15)', color: '#94a3b8',
-                      fontSize: '0.66rem', fontWeight: 800, padding: '2px 8px', borderRadius: '6px',
-                    }}>
-                      {status}
-                    </span>
-                  )}
-                </div>
+                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                  · {formatBytes(item.size)}
+                </span>
               </div>
 
-              {/* Metadata Control Actions */}
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                  onClick={handleOpenSearch}
-                  style={{
-                    flex: 1, minHeight: '38px', borderRadius: '10px',
-                    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                    color: '#fff', fontSize: '0.78rem', fontWeight: 700,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Search size={14} />
-                  Change Match
-                </button>
-
-                <button
-                  onClick={handleReprocess}
-                  style={{
-                    flex: 1, minHeight: '38px', borderRadius: '10px',
-                    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                    color: '#fff', fontSize: '0.78rem', fontWeight: 700,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <RefreshCw size={14} />
-                  Reprocess
-                </button>
-
-                {isLocked && (
-                  <button
-                    onClick={handleUnlock}
-                    style={{
-                      padding: '0 12px', minHeight: '38px', borderRadius: '10px',
-                      background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.25)',
-                      color: 'var(--accent-rose)', fontSize: '0.78rem', fontWeight: 700,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Unlock size={14} />
-                    Unlock
-                  </button>
-                )}
-              </div>
+              <button
+                onClick={handleOpenSearch}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '5px',
+                  background: 'none', border: 'none',
+                  color: '#818cf8', fontSize: '0.74rem', fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                <Search size={13} />
+                Edit Title or Poster
+              </button>
             </div>
 
           </div>
