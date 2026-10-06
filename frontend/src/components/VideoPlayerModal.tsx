@@ -7,6 +7,7 @@ import {
 import type { MediaItem } from '../types';
 import {
   getStreamUrl,
+  getCompatibleStreamUrl,
   getPlaylistUrl,
   getMediaDisplayName,
   getMediaBackdropUrl,
@@ -38,16 +39,42 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [vlcLaunchMessage, setVlcLaunchMessage] = useState<string | null>(null);
 
+  const isMkv = Boolean(
+    item?.filename?.toLowerCase().endsWith('.mkv') ||
+    item?.mime_type?.toLowerCase().includes('matroska')
+  );
+
+  const [streamMode, setStreamMode] = useState<'universal' | 'direct'>(isMkv ? 'universal' : 'direct');
+  const [seekOffset, setSeekOffset] = useState<number>(0);
+
   const displayName = item ? getMediaDisplayName(item) : '';
   const backdrop = item ? getMediaBackdropUrl(item) : undefined;
   const poster = item ? getMediaPosterUrl(item) : undefined;
+
+  const totalDuration = duration > 0 && !isNaN(duration) && isFinite(duration)
+    ? duration
+    : (item?.canonical_metadata?.runtime ? item.canonical_metadata.runtime * 60 : 0);
+
+  const displayTime = streamMode === 'universal' && seekOffset > 0
+    ? seekOffset + currentTime
+    : currentTime;
+
+  const streamUrl = item
+    ? (streamMode === 'universal'
+        ? getCompatibleStreamUrl(item.id, seekOffset > 0 ? seekOffset : undefined)
+        : getStreamUrl(item.id))
+    : '';
 
   // Resume position from watch history if available
   useEffect(() => {
     if (!item) return;
     const existing = getWatchProgress(item.id);
     if (existing && existing.progressSeconds > 0 && !existing.completed) {
-      setCurrentTime(existing.progressSeconds);
+      if (isMkv) {
+        setSeekOffset(existing.progressSeconds);
+      } else {
+        setCurrentTime(existing.progressSeconds);
+      }
     }
     recordWatchStart(item);
   }, [item?.id]);
@@ -57,15 +84,19 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
     if (!item) return;
     progressSaveIntervalRef.current = setInterval(() => {
       const v = videoRef.current;
-      if (v && !v.paused && v.duration > 0) {
-        updateWatchProgress(item.id, v.currentTime, v.duration, item);
+      if (v && !v.paused) {
+        const currentProgress = streamMode === 'universal' && seekOffset > 0 ? seekOffset + v.currentTime : v.currentTime;
+        const currentDur = totalDuration || v.duration;
+        if (currentProgress > 0 && currentDur > 0) {
+          updateWatchProgress(item.id, currentProgress, currentDur, item);
+        }
       }
     }, 2500);
 
     return () => {
       if (progressSaveIntervalRef.current) clearInterval(progressSaveIntervalRef.current);
     };
-  }, [item?.id]);
+  }, [item?.id, streamMode, seekOffset, totalDuration]);
 
   // Controls auto-hide
   const resetControlsTimer = () => {
@@ -87,8 +118,6 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
 
   if (!item) return null;
 
-  const streamUrl = getStreamUrl(item.id);
-
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
@@ -101,19 +130,53 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   };
 
   const seekRelative = (seconds: number) => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.currentTime = Math.max(0, Math.min(v.duration || Infinity, v.currentTime + seconds));
+    const target = Math.max(0, Math.min(totalDuration || Infinity, displayTime + seconds));
+    if (streamMode === 'universal') {
+      setSeekOffset(target);
+      setCurrentTime(0);
+      setIsLoading(true);
+      if (videoRef.current) {
+        videoRef.current.src = getCompatibleStreamUrl(item.id, target);
+        videoRef.current.play().catch(() => {});
+      }
+    } else {
+      if (videoRef.current) {
+        videoRef.current.currentTime = Math.max(0, Math.min(videoRef.current.duration || Infinity, videoRef.current.currentTime + seconds));
+      }
+    }
     resetControlsTimer();
   };
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = videoRef.current;
-    if (!v) return;
     const target = parseFloat(e.target.value);
-    v.currentTime = target;
-    setCurrentTime(target);
+    if (streamMode === 'universal') {
+      setSeekOffset(target);
+      setCurrentTime(0);
+      setIsLoading(true);
+      if (videoRef.current) {
+        videoRef.current.src = getCompatibleStreamUrl(item.id, target);
+        videoRef.current.play().catch(() => {});
+      }
+    } else {
+      if (videoRef.current) {
+        videoRef.current.currentTime = target;
+      }
+      setCurrentTime(target);
+    }
     resetControlsTimer();
+  };
+
+  const toggleStreamMode = () => {
+    const nextMode = streamMode === 'universal' ? 'direct' : 'universal';
+    setStreamMode(nextMode);
+    setSeekOffset(0);
+    setCurrentTime(0);
+    setIsLoading(true);
+    if (videoRef.current) {
+      const nextUrl = nextMode === 'universal' ? getCompatibleStreamUrl(item.id) : getStreamUrl(item.id);
+      videoRef.current.src = nextUrl;
+      videoRef.current.play().catch(() => {});
+    }
   };
 
   const toggleMute = () => {
@@ -223,7 +286,11 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         onPause={() => {
           setIsPlaying(false);
           if (videoRef.current && item) {
-            updateWatchProgress(item.id, videoRef.current.currentTime, videoRef.current.duration, item);
+            const currentProgress = streamMode === 'universal' && seekOffset > 0 ? seekOffset + videoRef.current.currentTime : videoRef.current.currentTime;
+            const currentDur = totalDuration || videoRef.current.duration;
+            if (currentProgress > 0 && currentDur > 0) {
+              updateWatchProgress(item.id, currentProgress, currentDur, item);
+            }
           }
         }}
         onWaiting={() => setIsLoading(true)}
@@ -233,16 +300,38 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         }}
         onCanPlay={() => {
           setIsLoading(false);
-          // Restore position if resuming
-          if (currentTime > 5 && videoRef.current && videoRef.current.currentTime < 1) {
+          if (streamMode !== 'universal' && currentTime > 5 && videoRef.current && videoRef.current.currentTime < 1) {
             videoRef.current.currentTime = currentTime;
           }
         }}
         onTimeUpdate={() => {
-          if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+          if (videoRef.current) {
+            const v = videoRef.current;
+            setCurrentTime(v.currentTime);
+
+            // AUDIO-ONLY DETECTION WATCHDOG:
+            // If playing in direct stream and the browser demuxes audio but videoWidth remains 0,
+            // immediately switch to Universal MP4 stream so the video appears without interruption.
+            if (
+              streamMode === 'direct' &&
+              !v.paused &&
+              v.currentTime > 1.2 &&
+              v.videoWidth === 0
+            ) {
+              console.warn('Audio-only playback detected (videoWidth=0). Auto-switching to Universal MP4 stream...');
+              setStreamMode('universal');
+              setSeekOffset(0);
+              setCurrentTime(0);
+              setIsLoading(true);
+              v.src = getCompatibleStreamUrl(item.id);
+              v.play().catch(() => {});
+            }
+          }
         }}
         onLoadedMetadata={() => {
-          if (videoRef.current) setDuration(videoRef.current.duration);
+          if (videoRef.current && videoRef.current.duration && !isNaN(videoRef.current.duration) && isFinite(videoRef.current.duration)) {
+            setDuration(videoRef.current.duration);
+          }
           setIsLoading(false);
         }}
         onError={handleVideoError}
@@ -523,37 +612,63 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           </div>
         </div>
 
-        {/* Quick Launch in VLC Player Button */}
-        <button
-          onClick={handleLaunchVlc}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            background: 'linear-gradient(135deg, rgba(249,115,22,0.25) 0%, rgba(234,88,12,0.4) 100%)',
-            border: '1px solid rgba(249,115,22,0.6)',
-            borderRadius: '999px',
-            padding: '7px 14px',
-            color: '#fdba74',
-            fontSize: '0.76rem',
-            fontWeight: 800,
-            cursor: 'pointer',
-            backdropFilter: 'blur(10px)',
-            flexShrink: 0,
-            boxShadow: '0 4px 14px rgba(249,115,22,0.25)',
-          }}
-        >
-          <div
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          {/* Stream Mode Indicator / Selector */}
+          <button
+            onClick={toggleStreamMode}
+            title={streamMode === 'universal' ? 'Universal MP4 Remux (H.264/AAC for 100% browser compatibility)' : 'Direct Google Drive Stream'}
             style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: '#f97316',
-              boxShadow: '0 0 10px #f97316',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: streamMode === 'universal' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.08)',
+              border: streamMode === 'universal' ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.18)',
+              borderRadius: '999px',
+              padding: '6px 12px',
+              color: streamMode === 'universal' ? '#a5b4fc' : '#cbd5e1',
+              fontSize: '0.74rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              backdropFilter: 'blur(10px)',
+              transition: 'all 0.2s ease',
             }}
-          />
-          Launch VLC
-        </button>
+          >
+            <span style={{ fontSize: '0.8rem' }}>{streamMode === 'universal' ? '⚡' : '📁'}</span>
+            <span>{streamMode === 'universal' ? 'Universal MP4' : 'Direct Stream'}</span>
+          </button>
+
+          {/* Quick Launch in VLC Player Button */}
+          <button
+            onClick={handleLaunchVlc}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'linear-gradient(135deg, rgba(249,115,22,0.25) 0%, rgba(234,88,12,0.4) 100%)',
+              border: '1px solid rgba(249,115,22,0.6)',
+              borderRadius: '999px',
+              padding: '7px 14px',
+              color: '#fdba74',
+              fontSize: '0.76rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              backdropFilter: 'blur(10px)',
+              flexShrink: 0,
+              boxShadow: '0 4px 14px rgba(249,115,22,0.25)',
+            }}
+          >
+            <div
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#f97316',
+                boxShadow: '0 0 10px #f97316',
+              }}
+            />
+            Launch VLC
+          </button>
+        </div>
       </div>
 
       {/* Center Controls (Play/Pause, Skip 10s) */}
@@ -666,14 +781,14 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         {/* Scrub Bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span style={{ fontSize: '0.76rem', color: '#cbd5e1', fontWeight: 700, minWidth: '42px' }}>
-            {formatTime(currentTime)}
+            {formatTime(displayTime)}
           </span>
           <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
             <input
               type="range"
               min={0}
-              max={duration || 100}
-              value={currentTime}
+              max={totalDuration || 100}
+              value={displayTime}
               onChange={handleSeekChange}
               style={{
                 width: '100%',
@@ -685,7 +800,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             />
           </div>
           <span style={{ fontSize: '0.76rem', color: '#94a3b8', fontWeight: 700, minWidth: '42px', textAlign: 'right' }}>
-            {duration ? formatTime(duration) : 'LIVE'}
+            {totalDuration ? formatTime(totalDuration) : 'LIVE'}
           </span>
         </div>
 

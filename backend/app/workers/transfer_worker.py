@@ -18,7 +18,7 @@ from app.db.models import Media, TelegramTransfer, TransferStatus
 from app.services.drive_service import drive_service
 from app.services.telegram_bot_service import bot_service
 from app.services.telegram_mtproto_service import mtproto_service
-from app.utils.filenames import format_bytes
+from app.utils.filenames import format_bytes, resolve_mime_type
 from app.utils.logging import log_event, logger
 
 
@@ -245,8 +245,7 @@ class TransferWorker:
             )
 
         actual_size = getattr(target_message.file, "size", expected_size)
-        mime_type, _ = mimetypes.guess_type(filename)
-        mime_type = mime_type or "video/mp4"
+        mime_type = resolve_mime_type(filename)
         category = detect_category(filename)
         chunk_size = settings.CHUNK_BUFFER_SIZE_BYTES  # 8MB chunk buffer
 

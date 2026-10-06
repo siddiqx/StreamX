@@ -1,4 +1,4 @@
-const CACHE_NAME = 'streamx-v6';
+const CACHE_NAME = 'streamx-v7';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

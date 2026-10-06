@@ -2,7 +2,7 @@
 
 import os
 import re
-from typing import Union
+from typing import Optional, Union
 
 ILLEGAL_CHARS = re.compile(r'[\/\\:\*\?"<>\|]')
 MULTIPLE_DOTS = re.compile(r"\.{2,}")
@@ -42,3 +42,22 @@ def format_bytes(bytes_count: Union[int, float]) -> str:
         size /= 1024
         unit_index += 1
     return f"{size:.2f} {units[unit_index]}"
+
+
+def resolve_mime_type(filename: str, fallback_mime: Optional[str] = None) -> str:
+    """Accurately determine media container MIME type from filename extension."""
+    if not filename:
+        return fallback_mime or "video/mp4"
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if ext == "mkv":
+        return "video/x-matroska"
+    elif ext in ("mp4", "m4v"):
+        return "video/mp4"
+    elif ext == "webm":
+        return "video/webm"
+    elif ext == "avi":
+        return "video/x-msvideo"
+    elif ext == "mov":
+        return "video/quicktime"
+    return fallback_mime or "video/mp4"
+
