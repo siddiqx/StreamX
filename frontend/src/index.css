@@ -115,3 +115,73 @@ body {
     transform: translateY(0);
   }
 }
+
+@keyframes subtlePulse {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
+@keyframes modalPopIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Master Detail Modal Shell */
+.detail-modal-shell {
+  width: 100%;
+  max-width: 740px;
+  max-height: 94dvh;
+  background: linear-gradient(180deg, #111726 0%, #090c14 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.9), 0 0 60px rgba(99, 102, 241, 0.14);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+@media (min-width: 641px) {
+  .detail-modal-shell {
+    border-radius: 24px;
+    animation: modalPopIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+    margin: auto;
+  }
+  .bottom-sheet-backdrop {
+    align-items: center !important;
+    padding: 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .detail-modal-shell {
+    border-radius: 24px 24px 0 0;
+    border-bottom: none;
+    animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .bottom-sheet-backdrop {
+    align-items: flex-end !important;
+    padding: 0;
+  }
+}
+
+/* Episode Row Micro-interactions */
+.episode-interactive-card {
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform, background, border-color;
+}
+.episode-interactive-card:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.075) !important;
+  border-color: rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(99, 102, 241, 0.1);
+}
+.episode-interactive-card:active {
+  transform: translateY(0);
+}
+

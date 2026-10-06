@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
   X, Play, Download, Film, ShieldAlert,
   Star, Search, Loader2, Check, CheckCircle2,
-  Tv, Sparkles, MonitorPlay
+  Tv, Sparkles, MonitorPlay, Zap, ChevronDown, ChevronUp
 } from 'lucide-react';
 import type { MediaItem, MetadataCandidate } from '../types';
 import type { MediaGroup, MediaEpisode } from '../utils/mediaOrganizer';
@@ -56,6 +56,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const [posterError, setPosterError] = useState(false);
   const [vlcStatus, setVlcStatus] = useState<string | null>(null);
   const [isLaunchingVlc, setIsLaunchingVlc] = useState(false);
+  const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
 
   // Manual Metadata Correction Modal State
   const [showSearchModal, setShowSearchModal] = useState(false);
@@ -79,8 +80,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     return () => window.removeEventListener('streamx_watch_history_updated', sync);
   }, [item?.id]);
 
-  const handleToggleWatched = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleToggleWatched = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!item) return;
     if (watchProgress?.completed) {
       markWatchUnwatched(item.id);
@@ -139,19 +140,19 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         return {
           ep: epMap.get(h.mediaId)!,
           progress: h,
-          label: `Resume ${epMap.get(h.mediaId)!.episodeLabel || `Ep ${epMap.get(h.mediaId)!.episodeNumber}`}`,
+          label: `Resume Ep ${epMap.get(h.mediaId)!.episodeNumber}`,
         };
       }
     }
 
-    // 2. Otherwise find the first uncompleted episode
+    // 2. Otherwise find first uncompleted episode
     const completedIds = new Set(history.filter(h => h.completed).map(h => h.mediaId));
     for (const ep of episodes) {
       if (!completedIds.has(ep.item.id)) {
         return {
           ep,
           progress: null,
-          label: `Play ${ep.episodeLabel || `Ep ${ep.episodeNumber}`}`,
+          label: `Play Ep ${ep.episodeNumber}`,
         };
       }
     }
@@ -160,7 +161,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     return {
       ep: episodes[0],
       progress: null,
-      label: `Play ${episodes[0].episodeLabel || 'Ep 1'}`,
+      label: `Play Ep ${episodes[0].episodeNumber || 1}`,
     };
   }, [isSeriesGroup, episodes]);
 
@@ -181,32 +182,32 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     switch (cat) {
       case 'Anime':
         return {
-          bg: 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(139,92,246,0.32))',
-          border: '1px solid rgba(168,85,247,0.5)',
+          bg: 'linear-gradient(135deg, rgba(168,85,247,0.25), rgba(139,92,246,0.35))',
+          border: '1px solid rgba(168,85,247,0.55)',
           color: '#d8b4fe',
           icon: <Sparkles size={11} color="#d8b4fe" />,
           label: 'ANIME',
         };
       case 'Anime Movies':
         return {
-          bg: 'linear-gradient(135deg, rgba(236,72,153,0.22), rgba(219,39,119,0.32))',
-          border: '1px solid rgba(236,72,153,0.5)',
+          bg: 'linear-gradient(135deg, rgba(236,72,153,0.25), rgba(219,39,119,0.35))',
+          border: '1px solid rgba(236,72,153,0.55)',
           color: '#f472b6',
           icon: <Sparkles size={11} color="#f472b6" />,
           label: 'ANIME MOVIE',
         };
       case 'TV Shows':
         return {
-          bg: 'linear-gradient(135deg, rgba(6,182,212,0.22), rgba(14,165,233,0.32))',
-          border: '1px solid rgba(6,182,212,0.5)',
+          bg: 'linear-gradient(135deg, rgba(6,182,212,0.25), rgba(14,165,233,0.35))',
+          border: '1px solid rgba(6,182,212,0.55)',
           color: '#67e8f9',
           icon: <Tv size={11} color="#67e8f9" />,
           label: 'TV SHOW',
         };
       default:
         return {
-          bg: 'linear-gradient(135deg, rgba(99,102,241,0.22), rgba(79,70,229,0.32))',
-          border: '1px solid rgba(99,102,241,0.5)',
+          bg: 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(79,70,229,0.35))',
+          border: '1px solid rgba(99,102,241,0.55)',
           color: '#a5b4fc',
           icon: <Film size={11} color="#a5b4fc" />,
           label: 'MOVIE',
@@ -260,7 +261,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     setIsSelecting(false);
     if (ok) {
       setShowSearchModal(false);
-      setActionMessage('✓ Metadata updated and locked to canonical match.');
+      setActionMessage('✓ TMDB match linked & locked successfully.');
       setTimeout(() => setActionMessage(null), 4000);
       if (onItemUpdated) {
         onItemUpdated({
@@ -291,197 +292,517 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   return (
     <div className="bottom-sheet-backdrop animate-fade-in" onClick={onClose}>
       <div
-        className="bottom-sheet"
+        className="detail-modal-shell"
         onClick={e => e.stopPropagation()}
-        style={{
-          maxHeight: '92vh',
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'linear-gradient(180deg, #0d121f 0%, #080b12 100%)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          borderRadius: '24px 24px 0 0',
-          boxShadow: '0 -10px 40px rgba(0, 0, 0, 0.8)',
-          overflow: 'hidden',
-        }}
       >
-        <div className="bottom-sheet-handle" style={{ background: 'rgba(255,255,255,0.25)', width: '42px', height: '4px', margin: '10px auto 4px' }} />
+        {/* Mobile Pull Handle */}
+        <div
+          className="bottom-sheet-handle"
+          style={{
+            background: 'rgba(255,255,255,0.25)',
+            width: '42px',
+            height: '4px',
+            margin: '10px auto 4px',
+          }}
+        />
 
-        {/* Scrollable content container */}
+        {/* Scrollable Container */}
         <div style={{ overflowY: 'auto', flex: 1, WebkitOverflowScrolling: 'touch' }}>
 
-          {/* Hero Backdrop Header with Floating Inset Poster */}
-          <div style={{ position: 'relative', height: 'clamp(210px, 30vh, 270px)', background: '#070a12', flexShrink: 0, overflow: 'hidden' }}>
+          {/* Theatrical Backdrop Header */}
+          <div style={{
+            position: 'relative',
+            height: 'clamp(230px, 32vh, 300px)',
+            background: '#070a12',
+            flexShrink: 0,
+            overflow: 'hidden',
+          }}>
             {currentBackdrop && !backdropError ? (
               <img
                 src={currentBackdrop}
                 alt={title}
                 onError={handleBackdropError}
                 style={{
-                  width: '100%', height: '100%', objectFit: 'cover',
-                  objectPosition: 'center 20%', display: 'block',
-                  filter: 'brightness(0.85)',
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  objectPosition: 'center 22%',
+                  display: 'block',
+                  filter: 'brightness(0.9) contrast(1.05)',
                 }}
               />
             ) : (
               <div style={{
-                width: '100%', height: '100%',
-                background: 'radial-gradient(circle at 50% 30%, rgba(99,102,241,0.25) 0%, rgba(7,10,18,1) 85%)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: '100%',
+                height: '100%',
+                background: 'radial-gradient(circle at 50% 30%, rgba(99,102,241,0.3) 0%, rgba(7,10,18,1) 85%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}>
-                <Film size={60} color="#818cf8" style={{ opacity: 0.25 }} />
+                <Film size={64} color="#818cf8" style={{ opacity: 0.25 }} />
               </div>
             )}
 
-            {/* Seamless multi-layer gradient scrim */}
+            {/* Seamless multi-layer gradient scrims */}
             <div style={{
-              position: 'absolute', inset: 0,
-              background: 'linear-gradient(to top, #0d121f 0%, rgba(13,18,31,0.7) 45%, rgba(13,18,31,0.2) 75%, transparent 100%)'
+              position: 'absolute',
+              inset: 0,
+              background: 'linear-gradient(to bottom, rgba(7,10,18,0.85) 0%, rgba(7,10,18,0.2) 40%, transparent 60%)',
             }} />
             <div style={{
-              position: 'absolute', inset: 0,
-              background: 'linear-gradient(to right, rgba(13,18,31,0.8) 0%, transparent 55%)'
+              position: 'absolute',
+              inset: 0,
+              background: 'linear-gradient(to top, #111726 0%, rgba(17,23,38,0.85) 50%, rgba(17,23,38,0.25) 80%, transparent 100%)',
             }} />
 
-            {/* Close Button */}
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              style={{
-                position: 'absolute', top: '14px', right: '14px',
-                width: '38px', height: '38px', borderRadius: '50%',
-                background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-                border: '1px solid rgba(255,255,255,0.18)', display: 'flex',
-                alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer',
-                touchAction: 'manipulation', zIndex: 10,
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.2)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.6)')}
-            >
-              <X size={18} />
-            </button>
-
-            {/* Overlapping Poster and Header Hero Meta */}
+            {/* Top Navigation & Status Bar inside Header */}
             <div style={{
-              position: 'absolute', bottom: '14px', left: '18px', right: '18px',
-              display: 'flex', alignItems: 'flex-end', gap: '16px', zIndex: 5,
+              position: 'absolute',
+              top: '12px',
+              left: '16px',
+              right: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              zIndex: 20,
             }}>
-              {/* Floating Inset Poster Card */}
+              {/* Direct Stream Ready Pill */}
               <div style={{
-                width: '84px',
-                height: '124px',
-                borderRadius: '12px',
-                overflow: 'hidden',
-                flexShrink: 0,
-                border: '1.5px solid rgba(255,255,255,0.18)',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.75)',
-                background: '#131b2e',
-                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+                background: 'rgba(0,0,0,0.6)',
+                backdropFilter: 'blur(14px)',
+                WebkitBackdropFilter: 'blur(14px)',
+                border: '1px solid rgba(255,255,255,0.14)',
+                padding: '4px 10px',
+                borderRadius: '999px',
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                color: '#e2e8f0',
               }}>
-                {currentPoster && !posterError ? (
-                  <img
-                    src={currentPoster}
-                    alt=""
-                    onError={handlePosterError}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  />
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Film size={26} color="#64748b" />
-                  </div>
-                )}
+                <span style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: '#10b981',
+                  boxShadow: '0 0 8px #10b981',
+                }} />
+                <span>VLC Direct Stream</span>
               </div>
 
-              {/* Header Right Content */}
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                  {/* Taxonomy Badge */}
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', gap: '4px',
-                    background: taxonomyStyle.bg, border: taxonomyStyle.border,
-                    color: taxonomyStyle.color, padding: '2.5px 8px', borderRadius: '6px',
-                    fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.04em',
-                  }}>
-                    {taxonomyStyle.icon}
-                    {taxonomyStyle.label}
-                  </span>
-
-                  {year && (
-                    <span style={{
-                      background: 'rgba(255,255,255,0.08)', color: '#cbd5e1',
-                      padding: '2.5px 7px', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 700,
-                    }}>
-                      {year}
-                    </span>
-                  )}
-
-                  {runtime && (
-                    <span style={{
-                      background: 'rgba(255,255,255,0.08)', color: '#cbd5e1',
-                      padding: '2.5px 7px', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 700,
-                    }}>
-                      {runtime}
-                    </span>
-                  )}
-
-                  {rating && (
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '3px',
-                      background: 'rgba(251,191,36,0.18)', border: '1px solid rgba(251,191,36,0.35)',
-                      color: '#fbbf24', padding: '2.5px 7px', borderRadius: '6px',
-                      fontSize: '0.65rem', fontWeight: 800,
-                    }}>
-                      <Star size={9} fill="#fbbf24" strokeWidth={0} />
-                      {rating.toFixed(1)}
-                    </span>
-                  )}
-
-                  {isSeriesGroup && episodes.length > 0 && (
-                    <span style={{
-                      background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.3)',
-                      color: '#a5b4fc', padding: '2.5px 7px', borderRadius: '6px',
-                      fontSize: '0.65rem', fontWeight: 800,
-                    }}>
-                      {episodes.length} Episodes
-                    </span>
-                  )}
-                </div>
-
-                {/* Primary Title */}
-                <h1 style={{
-                  fontSize: 'clamp(1.15rem, 4.6vw, 1.55rem)',
-                  fontWeight: 900,
-                  fontFamily: 'var(--font-display, inherit)',
-                  letterSpacing: '-0.025em',
+              {/* Frosted Glass Close Button */}
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.65)',
+                  backdropFilter: 'blur(14px)',
+                  WebkitBackdropFilter: 'blur(14px)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   color: '#fff',
-                  lineHeight: 1.18,
-                  margin: 0,
-                  textShadow: '0 2px 10px rgba(0,0,0,0.85)',
-                }}>
-                  {title}
-                </h1>
+                  cursor: 'pointer',
+                  touchAction: 'manipulation',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.25)';
+                  e.currentTarget.style.transform = 'scale(1.08)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'rgba(0,0,0,0.65)';
+                  e.currentTarget.style.transform = 'scale(1.0)';
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
 
-                {/* Original Kanji / Japanese Subtitle if present */}
-                {originalTitle && originalTitle !== title && (
-                  <p style={{
-                    fontSize: '0.74rem',
-                    color: 'rgba(203,213,225,0.7)',
-                    margin: 0,
-                    fontWeight: 600,
-                    letterSpacing: '0.02em',
+          {/* Floating Poster & Theatrical Title Area */}
+          <div style={{
+            position: 'relative',
+            marginTop: '-68px',
+            padding: '0 20px',
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'flex-end',
+            gap: '16px',
+          }}>
+            {/* Ambient Floating Poster */}
+            <div style={{
+              width: '100px',
+              height: '148px',
+              borderRadius: '14px',
+              overflow: 'hidden',
+              flexShrink: 0,
+              border: '1.5px solid rgba(255,255,255,0.22)',
+              boxShadow: '0 12px 34px rgba(0,0,0,0.85), 0 0 24px rgba(99,102,241,0.2)',
+              background: '#131b2e',
+              position: 'relative',
+            }}>
+              {currentPoster && !posterError ? (
+                <img
+                  src={currentPoster}
+                  alt={title}
+                  onError={handlePosterError}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+              ) : (
+                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Film size={30} color="#64748b" />
+                </div>
+              )}
+            </div>
+
+            {/* Title & Metadata Strip Right Column */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {/* Badges strip */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  background: taxonomyStyle.bg,
+                  border: taxonomyStyle.border,
+                  color: taxonomyStyle.color,
+                  padding: '2.5px 8px',
+                  borderRadius: '6px',
+                  fontSize: '0.64rem',
+                  fontWeight: 800,
+                  letterSpacing: '0.04em',
+                }}>
+                  {taxonomyStyle.icon}
+                  {taxonomyStyle.label}
+                </span>
+
+                {year && (
+                  <span style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    color: '#cbd5e1',
+                    padding: '2.5px 7px',
+                    borderRadius: '6px',
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
                   }}>
-                    {originalTitle}
-                  </p>
+                    {year}
+                  </span>
+                )}
+
+                {runtime && (
+                  <span style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    color: '#cbd5e1',
+                    padding: '2.5px 7px',
+                    borderRadius: '6px',
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                  }}>
+                    {runtime}
+                  </span>
+                )}
+
+                {rating && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                    background: 'rgba(251,191,36,0.18)',
+                    border: '1px solid rgba(251,191,36,0.35)',
+                    color: '#fbbf24',
+                    padding: '2.5px 7px',
+                    borderRadius: '6px',
+                    fontSize: '0.65rem',
+                    fontWeight: 800,
+                  }}>
+                    <Star size={9} fill="#fbbf24" strokeWidth={0} />
+                    {rating.toFixed(1)}
+                  </span>
+                )}
+
+                {isSeriesGroup && episodes.length > 0 && (
+                  <span style={{
+                    background: 'rgba(99,102,241,0.18)',
+                    border: '1px solid rgba(99,102,241,0.35)',
+                    color: '#a5b4fc',
+                    padding: '2.5px 7px',
+                    borderRadius: '6px',
+                    fontSize: '0.65rem',
+                    fontWeight: 800,
+                  }}>
+                    {episodes.length} Episodes
+                  </span>
                 )}
               </div>
+
+              {/* Canonical Display Title */}
+              <h1 style={{
+                fontSize: 'clamp(1.15rem, 4.4vw, 1.6rem)',
+                fontWeight: 900,
+                fontFamily: 'var(--font-display, inherit)',
+                letterSpacing: '-0.025em',
+                color: '#fff',
+                lineHeight: 1.2,
+                margin: 0,
+                textShadow: '0 2px 12px rgba(0,0,0,0.9)',
+              }}>
+                {title}
+              </h1>
+
+              {/* Japanese Kanji / Original Title */}
+              {originalTitle && originalTitle !== title && (
+                <p style={{
+                  fontSize: '0.74rem',
+                  color: 'rgba(203,213,225,0.7)',
+                  margin: 0,
+                  fontWeight: 600,
+                  letterSpacing: '0.02em',
+                }}>
+                  {originalTitle}
+                </p>
+              )}
             </div>
           </div>
 
           {/* Modal Main Body */}
-          <div style={{ padding: '18px 20px 42px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <div style={{ padding: '20px 20px 42px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
 
-            {/* Genre Pills */}
+            {/* Notification / Feedback Alerts */}
+            {actionMessage && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '12px',
+                background: 'rgba(99,102,241,0.16)',
+                border: '1px solid rgba(99,102,241,0.35)',
+                color: '#c7d2fe',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                textAlign: 'center',
+              }}>
+                {actionMessage}
+              </div>
+            )}
+
+            {vlcStatus && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '12px',
+                background: 'rgba(16,185,129,0.16)',
+                border: '1px solid rgba(16,185,129,0.35)',
+                color: '#6ee7b7',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                textAlign: 'center',
+              }}>
+                {vlcStatus}
+              </div>
+            )}
+
+            {/* Action Center: Big Streaming CTA + Frosted Toolbar */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {/* Primary Streaming CTA */}
+              <button
+                onClick={handlePrimaryPlayAction}
+                disabled={isLaunchingVlc}
+                style={{
+                  height: '52px',
+                  borderRadius: '14px',
+                  background: 'linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%)',
+                  color: '#090d16',
+                  boxShadow: '0 4px 24px rgba(255,255,255,0.28), 0 2px 10px rgba(0,0,0,0.5)',
+                  fontSize: '0.96rem',
+                  fontWeight: 800,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '9px',
+                  cursor: isLaunchingVlc ? 'wait' : 'pointer',
+                  border: 'none',
+                  opacity: isLaunchingVlc ? 0.75 : 1,
+                  transition: 'all 0.18s ease',
+                  letterSpacing: '0.01em',
+                  width: '100%',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-1px)')}
+                onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
+              >
+                <div style={{
+                  width: '26px',
+                  height: '26px',
+                  borderRadius: '50%',
+                  background: '#090d16',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                  <Play size={14} fill="#ffffff" color="#ffffff" style={{ marginLeft: '1px' }} />
+                </div>
+                <span>
+                  {isLaunchingVlc
+                    ? 'Launching VLC...'
+                    : activeEpisodeTarget
+                    ? `${activeEpisodeTarget.label} in VLC`
+                    : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
+                    ? `Resume in VLC (${watchProgress.progressPercentage}%)`
+                    : 'Play in VLC'}
+                </span>
+              </button>
+
+              {/* Secondary Action Toolbar: Download, Watched, TMDB */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                {/* Download Button */}
+                <button
+                  onClick={() => {
+                    if (isOffline) {
+                      onDeleteDownload(item);
+                    } else if (hasEnoughStorage) {
+                      onStartDownload(item);
+                    }
+                  }}
+                  disabled={!isOffline && !hasEnoughStorage}
+                  title={isOffline ? 'Remove download' : 'Download file'}
+                  style={{
+                    height: '42px',
+                    borderRadius: '12px',
+                    background: isOffline ? 'rgba(16,185,129,0.18)' : 'rgba(255,255,255,0.06)',
+                    border: isOffline ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.12)',
+                    color: isOffline ? '#6ee7b7' : '#e2e8f0',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    cursor: !isOffline && !hasEnoughStorage ? 'not-allowed' : 'pointer',
+                    opacity: !isOffline && !hasEnoughStorage ? 0.4 : 1,
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {isOffline ? <Check size={15} strokeWidth={2.8} /> : <Download size={15} />}
+                  <span>{isOffline ? 'Downloaded' : 'Download'}</span>
+                </button>
+
+                {/* Mark as Watched Toggle */}
+                <button
+                  onClick={handleToggleWatched}
+                  title="Toggle watched status"
+                  style={{
+                    height: '42px',
+                    borderRadius: '12px',
+                    background: watchProgress?.completed ? 'rgba(16,185,129,0.18)' : 'rgba(255,255,255,0.06)',
+                    border: watchProgress?.completed ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.12)',
+                    color: watchProgress?.completed ? '#6ee7b7' : '#e2e8f0',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <CheckCircle2 size={15} color={watchProgress?.completed ? '#10b981' : 'currentColor'} />
+                  <span>{watchProgress?.completed ? 'Watched' : 'Mark Seen'}</span>
+                </button>
+
+                {/* Edit TMDB Match Button */}
+                <button
+                  onClick={handleOpenSearch}
+                  title="Search TMDB to correct match"
+                  style={{
+                    height: '42px',
+                    borderRadius: '12px',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#c7d2fe',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <Search size={14} />
+                  <span>Edit Match</span>
+                </button>
+              </div>
+
+              {!hasEnoughStorage && !isOffline && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  background: 'rgba(244,63,94,0.08)',
+                  border: '1px solid rgba(244,63,94,0.25)',
+                  fontSize: '0.74rem',
+                  color: 'var(--accent-rose)',
+                }}>
+                  <ShieldAlert size={15} />
+                  <span>Requires {formatBytes(requiredWithSafetyMargin)}, device has {formatBytes(deviceFreeBytes)} available</span>
+                </div>
+              )}
+            </div>
+
+            {/* In-Progress Watch Status Banner */}
+            {watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0 && (
+              <div style={{
+                background: 'rgba(255,255,255,0.035)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '14px',
+                padding: '12px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: '#ef4444',
+                      boxShadow: '0 0 8px rgba(239,68,68,0.8)',
+                    }} />
+                    <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#fff' }}>
+                      Currently Watching
+                    </span>
+                    <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
+                      · {formatTimeRemaining(watchProgress.progressSeconds, watchProgress.durationSeconds)} ({watchProgress.progressPercentage}%)
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{
+                  width: '100%',
+                  height: '4px',
+                  borderRadius: '2px',
+                  background: 'rgba(255,255,255,0.1)',
+                  overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: `${watchProgress.progressPercentage}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #ef4444, #f87171)',
+                    boxShadow: '0 0 8px rgba(239,68,68,0.7)',
+                  }} />
+                </div>
+              </div>
+            )}
+
+            {/* Genres Row */}
             {genres.length > 0 && (
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 {genres.map(g => (
@@ -492,8 +813,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                       fontWeight: 700,
                       color: '#cbd5e1',
                       background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      padding: '3px 9px',
+                      border: '1px solid rgba(255,255,255,0.09)',
+                      padding: '3px 10px',
                       borderRadius: '8px',
                     }}
                   >
@@ -503,201 +824,69 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </div>
             )}
 
-            {/* Overview / Synopsis */}
+            {/* Synopsis / Overview */}
             {overview ? (
-              <p style={{
-                fontSize: '0.84rem',
-                color: '#cbd5e1',
-                lineHeight: 1.55,
+              <div style={{
                 background: 'rgba(255,255,255,0.03)',
-                padding: '12px 16px',
+                padding: '14px 16px',
                 borderRadius: '14px',
                 border: '1px solid rgba(255,255,255,0.06)',
-                margin: 0,
-              }}>
-                {overview}
-              </p>
-            ) : (
-              <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: 0 }}>
-                No synopsis available.
-              </p>
-            )}
-
-            {/* Feedback / Notification alerts */}
-            {actionMessage && (
-              <div style={{
-                padding: '10px 14px', borderRadius: '10px',
-                background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
-                color: '#a5b4fc', fontSize: '0.8rem', fontWeight: 700, textAlign: 'center',
-              }}>
-                {actionMessage}
-              </div>
-            )}
-            {vlcStatus && (
-              <div style={{
-                padding: '10px 14px', borderRadius: '10px',
-                background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
-                color: '#6ee7b7', fontSize: '0.8rem', fontWeight: 700, textAlign: 'center',
-              }}>
-                {vlcStatus}
-              </div>
-            )}
-
-            {/* Watch Progress & History Card (for movies or series target) */}
-            {watchProgress && (watchProgress.progressPercentage > 0 || watchProgress.completed) && (
-              <div style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '14px',
-                padding: '12px 16px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '8px',
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {watchProgress.completed ? (
-                      <CheckCircle2 size={16} color="#10b981" />
-                    ) : (
-                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
-                    )}
-                    <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#fff' }}>
-                      {watchProgress.completed ? 'Finished Watching' : 'In Progress'}
-                    </span>
-                    {!watchProgress.completed && (
-                      <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
-                        · {formatTimeRemaining(watchProgress.progressSeconds, watchProgress.durationSeconds)} ({watchProgress.progressPercentage}%)
-                      </span>
-                    )}
-                  </div>
-
+                <p style={{
+                  fontSize: '0.84rem',
+                  color: '#cbd5e1',
+                  lineHeight: 1.55,
+                  margin: 0,
+                  display: isOverviewExpanded ? 'block' : '-webkit-box',
+                  WebkitLineClamp: isOverviewExpanded ? 'none' : 3,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }}>
+                  {overview}
+                </p>
+                {overview.length > 160 && (
                   <button
-                    onClick={handleToggleWatched}
+                    onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
                     style={{
+                      alignSelf: 'flex-start',
                       background: 'none',
                       border: 'none',
-                      color: watchProgress.completed ? '#94a3b8' : '#818cf8',
+                      color: '#818cf8',
                       fontSize: '0.74rem',
                       fontWeight: 700,
                       cursor: 'pointer',
                       padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
                     }}
                   >
-                    {watchProgress.completed ? 'Mark as Unwatched' : 'Mark as Watched'}
+                    {isOverviewExpanded ? <>Show less <ChevronUp size={13} /></> : <>Read more <ChevronDown size={13} /></>}
                   </button>
-                </div>
-
-                {!watchProgress.completed && (
-                  <div style={{
-                    width: '100%',
-                    height: '4px',
-                    borderRadius: '2px',
-                    background: 'rgba(255,255,255,0.1)',
-                    overflow: 'hidden',
-                  }}>
-                    <div style={{
-                      width: `${watchProgress.progressPercentage}%`,
-                      height: '100%',
-                      background: 'linear-gradient(90deg, #ef4444, #f87171)',
-                    }} />
-                  </div>
                 )}
               </div>
+            ) : (
+              <p style={{ fontSize: '0.78rem', color: '#64748b', fontStyle: 'italic', margin: 0 }}>
+                No synopsis available for this title.
+              </p>
             )}
 
-            {/* Primary Action Buttons */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {/* Main Play / Resume Button */}
-              <button
-                className="btn-primary"
-                onClick={handlePrimaryPlayAction}
-                disabled={isLaunchingVlc}
-                style={{
-                  height: '48px',
-                  borderRadius: '14px',
-                  background: '#ffffff',
-                  color: '#090d16',
-                  boxShadow: '0 4px 20px rgba(255,255,255,0.22), 0 2px 8px rgba(0,0,0,0.5)',
-                  fontSize: '0.96rem',
-                  fontWeight: 800,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  cursor: isLaunchingVlc ? 'wait' : 'pointer',
-                  border: 'none',
-                  opacity: isLaunchingVlc ? 0.75 : 1,
-                  transition: 'all 0.15s ease',
-                  letterSpacing: '0.01em',
-                }}
-              >
-                <Play size={18} fill="#090d16" />
-                <span>
-                  {isLaunchingVlc
-                    ? 'Opening in VLC...'
-                    : activeEpisodeTarget
-                    ? `${activeEpisodeTarget.label} in VLC`
-                    : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
-                    ? `Resume (${watchProgress.progressPercentage}%)`
-                    : 'Play in VLC'}
-                </span>
-              </button>
-
-              {/* Single Feature Download (For movies) */}
-              {!isSeriesGroup && (
-                <button
-                  onClick={() => {
-                    if (isOffline) {
-                      onDeleteDownload(item);
-                    } else if (hasEnoughStorage) {
-                      onStartDownload(item);
-                    }
-                  }}
-                  disabled={!isOffline && !hasEnoughStorage}
-                  style={{
-                    height: '42px',
-                    borderRadius: '12px',
-                    background: isOffline ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.06)',
-                    border: isOffline ? '1px solid rgba(16,185,129,0.35)' : '1px solid rgba(255,255,255,0.12)',
-                    color: isOffline ? '#6ee7b7' : '#e2e8f0',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    cursor: !isOffline && !hasEnoughStorage ? 'not-allowed' : 'pointer',
-                    opacity: !isOffline && !hasEnoughStorage ? 0.4 : 1,
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {isOffline ? <Check size={16} strokeWidth={2.5} /> : <Download size={16} />}
-                  <span>
-                    {isOffline ? 'Downloaded to Device (Tap to Remove)' : `Download File · ${formatBytes(item.size)}`}
-                  </span>
-                </button>
-              )}
-
-              {!hasEnoughStorage && !isOffline && !isSeriesGroup && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: '8px',
-                  padding: '10px 14px', borderRadius: '10px',
-                  background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)',
-                  fontSize: '0.75rem', color: 'var(--accent-rose)',
-                }}>
-                  <ShieldAlert size={15} />
-                  <span>Need {formatBytes(requiredWithSafetyMargin)}, only {formatBytes(deviceFreeBytes)} free</span>
-                </div>
-              )}
-            </div>
-
-            {/* Clean Episode Hub (Modern Crunchyroll/Netflix design) */}
+            {/* Master Episodes Hub (Crunchyroll & Netflix Elevated Design) */}
             {isSeriesGroup && episodes.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '4px' }}>
+                {/* Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <MonitorPlay size={17} color="#a5b4fc" />
-                    <span style={{ fontSize: '0.98rem', fontWeight: 800, color: '#fff', fontFamily: 'var(--font-display, inherit)' }}>
+                    <span style={{
+                      fontSize: '0.98rem',
+                      fontWeight: 800,
+                      color: '#fff',
+                      fontFamily: 'var(--font-display, inherit)',
+                    }}>
                       Episodes
                     </span>
                     <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 700 }}>
@@ -705,16 +894,20 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     </span>
                   </div>
                   <span style={{
-                    fontSize: '0.68rem', fontWeight: 800, color: '#818cf8',
-                    background: 'rgba(99,102,241,0.14)', padding: '2px 8px', borderRadius: '6px',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    color: '#818cf8',
+                    background: 'rgba(99,102,241,0.14)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
                     border: '1px solid rgba(99,102,241,0.25)',
                   }}>
                     Season 1
                   </span>
                 </div>
 
-                {/* Episode Cards Grid/Stack */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {/* Episode Cards Stack */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
                   {episodes.map((ep) => {
                     const epOffline = offlineIds?.has(ep.item.id) || false;
                     const epProgress = getWatchProgress(ep.item.id);
@@ -723,9 +916,10 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     return (
                       <div
                         key={ep.item.id}
+                        className="episode-interactive-card"
                         onClick={() => handleOpenVlcForEpisode(ep.item)}
                         style={{
-                          background: 'rgba(255,255,255,0.04)',
+                          background: 'rgba(255,255,255,0.035)',
                           border: '1px solid rgba(255,255,255,0.08)',
                           borderRadius: '14px',
                           padding: '12px 14px',
@@ -736,54 +930,50 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           cursor: 'pointer',
                           position: 'relative',
                           overflow: 'hidden',
-                          transition: 'all 0.15s ease',
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)';
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-                          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
                         }}
                       >
-                        {/* In-progress progress line */}
+                        {/* Progress line under card */}
                         {epProgress && !epProgress.completed && epProgress.progressPercentage > 0 && (
                           <div style={{
-                            position: 'absolute', bottom: 0, left: 0, right: 0, height: '3px',
+                            position: 'absolute',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            height: '3px',
                             background: 'rgba(255,255,255,0.1)',
                           }}>
                             <div style={{
                               width: `${epProgress.progressPercentage}%`,
                               height: '100%',
                               background: 'linear-gradient(90deg, #ef4444, #f87171)',
+                              boxShadow: '0 0 6px rgba(239,68,68,0.7)',
                             }} />
                           </div>
                         )}
 
-                        {/* Left: Episode Badge & Clean Details */}
+                        {/* Left: Number Disc & Clean Title */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-                          {/* Episode Number Square */}
+                          {/* Episode Number Disc */}
                           <div style={{
-                            width: '38px',
-                            height: '38px',
-                            borderRadius: '10px',
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '11px',
                             background: epProgress?.completed
-                              ? 'rgba(16,185,129,0.18)'
+                              ? 'rgba(16,185,129,0.2)'
                               : epProgress && epProgress.progressPercentage > 0
-                              ? 'rgba(239,68,68,0.2)'
+                              ? 'rgba(239,68,68,0.22)'
                               : 'rgba(255,255,255,0.07)',
                             border: `1px solid ${
                               epProgress?.completed
-                                ? 'rgba(16,185,129,0.35)'
+                                ? 'rgba(16,185,129,0.45)'
                                 : epProgress && epProgress.progressPercentage > 0
-                                ? 'rgba(239,68,68,0.4)'
+                                ? 'rgba(239,68,68,0.45)'
                                 : 'rgba(255,255,255,0.12)'
                             }`,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '0.82rem',
+                            fontSize: '0.84rem',
                             fontWeight: 900,
                             color: epProgress?.completed ? '#6ee7b7' : epProgress && epProgress.progressPercentage > 0 ? '#fca5a5' : '#e2e8f0',
                             flexShrink: 0,
@@ -791,21 +981,19 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             {epProgress?.completed ? <Check size={16} strokeWidth={2.8} /> : epNumStr}
                           </div>
 
-                          {/* Episode Title & Metadata Specs */}
+                          {/* Episode Title & Tech specs */}
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <p style={{
-                                fontSize: '0.86rem',
-                                fontWeight: 800,
-                                color: '#fff',
-                                margin: 0,
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                              }}>
-                                {ep.cleanTitle}
-                              </p>
-                            </div>
+                            <p style={{
+                              fontSize: '0.88rem',
+                              fontWeight: 800,
+                              color: '#fff',
+                              margin: 0,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}>
+                              {ep.cleanTitle}
+                            </p>
 
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
                               <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600 }}>
@@ -813,7 +1001,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                               </span>
                               {epProgress?.completed && (
                                 <span style={{ color: '#10b981', fontSize: '0.68rem', fontWeight: 800 }}>
-                                  · Watched
+                                  · Watched ✓
                                 </span>
                               )}
                               {epProgress && !epProgress.completed && epProgress.progressPercentage > 0 && (
@@ -825,7 +1013,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Right: Quick Action Buttons */}
+                        {/* Right: Quick Launch Buttons */}
                         <div
                           style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}
                           onClick={(e) => e.stopPropagation()}
@@ -846,10 +1034,10 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                               alignItems: 'center',
                               justifyContent: 'center',
                               cursor: 'pointer',
-                              boxShadow: '0 2px 10px rgba(255,255,255,0.18)',
+                              boxShadow: '0 2px 10px rgba(255,255,255,0.22)',
                               transition: 'all 0.15s ease',
                             }}
-                            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.06)')}
+                            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.08)')}
                             onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1.0)')}
                           >
                             <Play size={15} fill="#090d16" style={{ marginLeft: '1px' }} />
@@ -890,37 +1078,27 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </div>
             )}
 
-            {/* Technical Specifications Bar & TMDB Correction Link */}
+            {/* Technical Specifications Bar */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '12px 16px',
               borderRadius: '14px',
-              background: 'rgba(255,255,255,0.03)',
+              background: 'rgba(255,255,255,0.025)',
               border: '1px solid rgba(255,255,255,0.06)',
               marginTop: '4px',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Zap size={14} color="#818cf8" />
                 <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#e2e8f0' }}>
-                  {techMeta.quality} · {extension}
-                </span>
-                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                  · {formatBytes(item.size)}
+                  {techMeta.quality} · {extension} · {formatBytes(item.size)}
                 </span>
               </div>
 
-              <button
-                onClick={handleOpenSearch}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '5px',
-                  background: 'none', border: 'none',
-                  color: '#818cf8', fontSize: '0.74rem', fontWeight: 700, cursor: 'pointer',
-                }}
-              >
-                <Search size={13} />
-                Edit TMDB Match
-              </button>
+              <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
+                Direct Stream
+              </span>
             </div>
 
           </div>
@@ -930,25 +1108,39 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         {showSearchModal && (
           <div
             style={{
-              position: 'fixed', inset: 0, zIndex: 100,
-              background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
-              display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+              position: 'fixed',
+              inset: 0,
+              zIndex: 100,
+              background: 'rgba(0,0,0,0.85)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
             }}
             onClick={() => setShowSearchModal(false)}
           >
             <div
               style={{
-                width: '100%', maxWidth: '540px', maxHeight: '80vh',
-                background: '#0d131f', borderRadius: '20px 20px 0 0',
+                width: '100%',
+                maxWidth: '540px',
+                maxHeight: '80vh',
+                background: '#0d131f',
+                borderRadius: '20px 20px 0 0',
                 border: '1px solid rgba(255,255,255,0.12)',
-                display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
               }}
               onClick={e => e.stopPropagation()}
             >
               {/* Header */}
               <div style={{
-                padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.08)',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '16px 20px',
+                borderBottom: '1px solid rgba(255,255,255,0.08)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
               }}>
                 <span style={{ fontSize: '0.94rem', fontWeight: 800, color: '#fff' }}>
                   Search TMDB Match
@@ -969,19 +1161,33 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="Enter canonical movie or show title..."
                   style={{
-                    flex: 1, height: '42px', borderRadius: '10px',
-                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
-                    color: '#fff', padding: '0 12px', fontSize: '0.84rem', outline: 'none',
+                    flex: 1,
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#fff',
+                    padding: '0 12px',
+                    fontSize: '0.84rem',
+                    outline: 'none',
                   }}
                 />
                 <button
                   type="submit"
                   disabled={isSearching}
                   style={{
-                    height: '42px', padding: '0 16px', borderRadius: '10px',
+                    height: '42px',
+                    padding: '0 16px',
+                    borderRadius: '10px',
                     background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-                    border: 'none', color: '#fff', fontWeight: 700, fontSize: '0.82rem',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
                   }}
                 >
                   {isSearching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
@@ -1000,8 +1206,12 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     <div
                       key={cand.provider_id}
                       style={{
-                        display: 'flex', gap: '12px', padding: '10px', borderRadius: '12px',
-                        background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                        display: 'flex',
+                        gap: '12px',
+                        padding: '10px',
+                        borderRadius: '12px',
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(255,255,255,0.08)',
                       }}
                     >
                       {cand.poster_url ? (
@@ -1024,8 +1234,13 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           </span>
                           {cand.overview && (
                             <p style={{
-                              fontSize: '0.72rem', color: '#94a3b8', margin: '4px 0 0',
-                              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                              fontSize: '0.72rem',
+                              color: '#94a3b8',
+                              margin: '4px 0 0',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
                             }}>
                               {cand.overview}
                             </p>
@@ -1036,10 +1251,16 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           onClick={() => handleSelectCandidate(cand)}
                           disabled={isSelecting}
                           style={{
-                            alignSelf: 'flex-start', marginTop: '6px',
-                            padding: '4px 12px', borderRadius: '6px',
-                            background: '#10b981', border: 'none', color: '#fff',
-                            fontSize: '0.72rem', fontWeight: 800, cursor: 'pointer',
+                            alignSelf: 'flex-start',
+                            marginTop: '6px',
+                            padding: '4px 12px',
+                            borderRadius: '6px',
+                            background: '#10b981',
+                            border: 'none',
+                            color: '#fff',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
                           }}
                         >
                           Select This Match
