@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     CHUNK_BUFFER_SIZE_BYTES: int = Field(default=8 * 1024 * 1024, description="In-memory chunk buffer (8MB)")
     MAX_RETRIES: int = Field(default=3, description="Bounded retry attempts")
 
+    # TMDB Metadata Provider
+    TMDB_API_KEY: Optional[str] = Field(default=None, description="The Movie Database (TMDB) API Key")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

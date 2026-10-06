@@ -306,6 +306,10 @@ export const App: React.FC = () => {
           setPlayingMedia(item);
         }}
         deviceFreeBytes={deviceFreeBytes}
+        onItemUpdated={(updated) => {
+          setSelectedMedia(updated);
+          setMedia((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+        }}
       />
 
       <VideoPlayerModal

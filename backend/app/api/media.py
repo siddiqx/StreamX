@@ -1,17 +1,67 @@
 import asyncio
-from typing import List, Optional
+import json
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.database import get_db
-from app.db.models import Media
-from app.schemas.media import MediaResponse
+from app.db.models import Media, MetadataEntity
+from app.schemas.media import MediaResponse, MetadataEntityResponse, MetadataSelectRequest
 from app.services.drive_service import drive_service
+from app.services.metadata_service import metadata_service
 from app.utils.filenames import sanitize_filename
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
+
+
+def format_media_item(item: Media) -> MediaResponse:
+    """Format SQLAlchemy Media entity into MediaResponse schema with canonical metadata."""
+    canonical = None
+    if item.metadata_entity:
+        entity = item.metadata_entity
+        genres = []
+        if entity.genres_json:
+            try:
+                genres = json.loads(entity.genres_json)
+            except Exception:
+                genres = []
+        canonical = MetadataEntityResponse(
+            id=entity.id,
+            provider=entity.provider,
+            provider_id=entity.provider_id,
+            media_type=entity.media_type,
+            title=entity.title,
+            original_title=entity.original_title,
+            release_date=entity.release_date,
+            release_year=entity.release_year,
+            overview=entity.overview,
+            poster_path=entity.poster_path,
+            backdrop_path=entity.backdrop_path,
+            rating=entity.rating,
+            runtime=entity.runtime,
+            genres=genres,
+        )
+
+    return MediaResponse(
+        id=item.id,
+        drive_file_id=item.drive_file_id,
+        filename=item.filename,
+        size=item.size,
+        mime_type=item.mime_type,
+        category=item.category,
+        poster_url=item.poster_url,
+        metadata_json=item.metadata_json,
+        metadata_entity_id=item.metadata_entity_id,
+        metadata_status=item.metadata_status.value if hasattr(item.metadata_status, "value") else str(item.metadata_status),
+        metadata_confidence=item.metadata_confidence,
+        metadata_locked=item.metadata_locked,
+        canonical_metadata=canonical,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
 
 
 @router.get("", response_model=List[MediaResponse])
@@ -21,26 +71,45 @@ async def list_media(
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ) -> List[MediaResponse]:
-    """List library media items ordered by creation date descending."""
-    stmt = select(Media).order_by(Media.id.desc())
+    """List library media items ordered by creation date descending with canonical metadata."""
+    stmt = (
+        select(Media)
+        .options(selectinload(Media.metadata_entity))
+        .order_by(Media.id.desc())
+    )
     if category:
         stmt = stmt.where(Media.category == category)
     stmt = stmt.limit(limit).offset(offset)
     result = await db.execute(stmt)
-    return result.scalars().all()
+    items = result.scalars().all()
+    return [format_media_item(item) for item in items]
 
 
 @router.get("/search", response_model=List[MediaResponse])
 async def search_media(
-    q: str = Query(..., min_length=1, description="Search keyword in filename"),
+    q: str = Query(..., min_length=1, description="Search keyword in filename or canonical title"),
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ) -> List[MediaResponse]:
-    """Search media catalog by filename."""
+    """Search media catalog across canonical titles, original titles, and raw filenames."""
     pattern = f"%{q.strip()}%"
-    stmt = select(Media).where(Media.filename.ilike(pattern)).order_by(Media.id.desc()).limit(limit)
+    stmt = (
+        select(Media)
+        .outerjoin(MetadataEntity, Media.metadata_entity_id == MetadataEntity.id)
+        .options(selectinload(Media.metadata_entity))
+        .where(
+            or_(
+                Media.filename.ilike(pattern),
+                MetadataEntity.title.ilike(pattern),
+                MetadataEntity.original_title.ilike(pattern),
+            )
+        )
+        .order_by(Media.id.desc())
+        .limit(limit)
+    )
     result = await db.execute(stmt)
-    return result.scalars().all()
+    items = result.scalars().all()
+    return [format_media_item(item) for item in items]
 
 
 @router.get("/categories")
@@ -54,18 +123,77 @@ async def list_categories(
     return [{"category": row[0], "count": row[1]} for row in rows]
 
 
+@router.get("/metadata/stats")
+async def get_metadata_stats():
+    """Retrieve metadata catalog health metrics and match percentage."""
+    return await metadata_service.get_metadata_stats()
+
+
+@router.post("/metadata/backfill")
+async def trigger_metadata_backfill(
+    force: bool = Query(False, description="Force reprocess even already matched items"),
+):
+    """Enqueue metadata backfill for library media items."""
+    return await metadata_service.backfill_library(force=force)
+
+
 @router.get("/{media_id}", response_model=MediaResponse)
 async def get_media_item(
     media_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> MediaResponse:
-    """Retrieve details for a single media item by ID."""
-    stmt = select(Media).where(Media.id == media_id)
+    """Retrieve details for a single media item with canonical metadata."""
+    stmt = select(Media).options(selectinload(Media.metadata_entity)).where(Media.id == media_id)
     result = await db.execute(stmt)
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Media item not found")
-    return item
+    return format_media_item(item)
+
+
+@router.post("/{media_id}/metadata/search")
+async def search_candidates_for_media(
+    media_id: int,
+    query: Optional[str] = Query(None, description="Custom title search query"),
+):
+    """Search TMDB candidates for manual correction."""
+    return await metadata_service.search_candidates_for_media(media_id, query)
+
+
+@router.post("/{media_id}/metadata/select")
+async def select_metadata_for_media(
+    media_id: int,
+    req: MetadataSelectRequest,
+):
+    """Manually link media item to a specific TMDB entity and lock it."""
+    success = await metadata_service.manually_select_metadata(media_id, req.provider_id, req.media_type)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to retrieve or assign metadata for selected item.")
+    return {"status": "ok", "message": "Metadata assigned and locked."}
+
+
+@router.post("/{media_id}/metadata/reprocess")
+async def reprocess_media_metadata(
+    media_id: int,
+    force: bool = Query(False, description="Reprocess even if locked"),
+):
+    """Reprocess metadata for a specific media item."""
+    success = await metadata_service.reprocess_media(media_id, force=force)
+    if not success:
+        raise HTTPException(status_code=400, detail="Could not enqueue media for reprocessing (it may be locked).")
+    return {"status": "ok", "message": "Media enqueued for reprocessing."}
+
+
+@router.post("/{media_id}/metadata/unlock")
+async def unlock_media_metadata(
+    media_id: int,
+):
+    """Unlock media metadata so it can be automatically enriched."""
+    success = await metadata_service.unlock_metadata(media_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Media item not found.")
+    return {"status": "ok", "message": "Metadata unlocked."}
+
 
 
 @router.get("/{media_id}/stream")

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.api.media import router as media_router
+from app.api.metadata import router as metadata_router
 from app.api.transfers import router as transfers_router
 from app.config.settings import settings
 from app.db.database import init_db
@@ -48,9 +49,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.warning("MTProto credentials incomplete. Transfer worker skipped.")
 
+    # Start Metadata Background Worker
+    from app.workers.metadata_worker import metadata_worker
+    metadata_task = asyncio.create_task(metadata_worker.start())
+
     yield
 
     # Graceful shutdown
+    if metadata_task:
+        metadata_worker.stop()
+        metadata_task.cancel()
+        try:
+            await metadata_task
+        except asyncio.CancelledError:
+            pass
+
     if bot_task:
         bot_service.stop()
         bot_task.cancel()
@@ -91,3 +104,4 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(transfers_router)
 app.include_router(media_router)
+app.include_router(metadata_router)

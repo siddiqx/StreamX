@@ -1,8 +1,16 @@
 import React, { useState } from 'react';
-import { Play, Info, Radio, ArrowRight, Sparkles, Tv, Film, ExternalLink } from 'lucide-react';
+import { Play, Info, Radio, ArrowRight, Sparkles, Tv, Film, ExternalLink, Star, Clock } from 'lucide-react';
 import type { MediaItem, TelegramTransfer } from '../types';
 import { MediaCard } from '../components/MediaCard';
-import { parseMediaMetadata, getVlcIntentUrl, getVlcProtocolUrl, openVlcOnHost } from '../api';
+import {
+  formatRuntime,
+  getMediaBackdropUrl,
+  getMediaDisplayName,
+  getMediaDisplayYear,
+  getVlcIntentUrl,
+  getVlcProtocolUrl,
+  openVlcOnHost,
+} from '../api';
 
 interface HomeViewProps {
   media: MediaItem[];
@@ -17,16 +25,42 @@ interface HomeViewProps {
 const CARD_W = 140;
 
 export const HomeView: React.FC<HomeViewProps> = ({
-  media, offlineIds, activeTransfers,
-  onSelectMedia, onPlayMedia, onViewAllLibrary, onOpenTransfers,
+  media,
+  offlineIds,
+  activeTransfers,
+  onSelectMedia,
+  onPlayMedia,
+  onViewAllLibrary,
+  onOpenTransfers,
 }) => {
   const [heroError, setHeroError] = useState(false);
-  const featured = media[0] || null;
-  const featuredMeta = featured ? parseMediaMetadata(featured.filename) : null;
 
-  const anime   = media.filter(m => m.category.toLowerCase() === 'anime');
-  const tvShows = media.filter(m => m.category.toLowerCase() === 'tv shows');
-  const movies  = media.filter(m => m.category.toLowerCase() === 'movies');
+  // Pick first item that has a backdrop or canonical metadata, or fallback to first
+  const featured = media.find(m => getMediaBackdropUrl(m) || m.canonical_metadata) || media[0] || null;
+  const featuredTitle = featured ? getMediaDisplayName(featured) : '';
+  const featuredYear = featured ? getMediaDisplayYear(featured) : null;
+  const featuredBackdrop = featured ? getMediaBackdropUrl(featured, 'w1280') : undefined;
+  const featuredRuntime = featured ? formatRuntime(featured.canonical_metadata?.runtime) : undefined;
+  const featuredRating = featured?.canonical_metadata?.rating;
+  const featuredGenres = featured?.canonical_metadata?.genres || [];
+  const featuredOverview = featured?.canonical_metadata?.overview;
+
+  // Filter discovery categories
+  const recentlyAdded = [...media].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  ).slice(0, 15);
+
+  const movies = media.filter(
+    m => m.canonical_metadata?.media_type === 'movie' || m.category.toLowerCase() === 'movies'
+  );
+  const tvShows = media.filter(
+    m => (m.canonical_metadata?.media_type === 'tv' || m.category.toLowerCase() === 'tv shows') &&
+         m.category.toLowerCase() !== 'anime'
+  );
+  const anime = media.filter(
+    m => m.category.toLowerCase() === 'anime' ||
+         m.filename.toLowerCase().includes('anime')
+  );
 
   const activeTransfer = activeTransfers.find(
     t => t.status === 'FETCHING_TELEGRAM' || t.status === 'UPLOADING_DRIVE' || t.status === 'QUEUED'
@@ -37,7 +71,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     if (!featured) return;
     const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
     if (isMobile) {
-      const intentUrl = getVlcIntentUrl(featured.id, featuredMeta?.cleanTitle);
+      const intentUrl = getVlcIntentUrl(featured.id, featuredTitle);
       const vlcProto = getVlcProtocolUrl(featured.id);
       const a = document.createElement('a');
       a.href = /android/i.test(navigator.userAgent) ? intentUrl : vlcProto;
@@ -49,16 +83,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   type Section = { title: string; icon: React.ReactNode; items: MediaItem[]; cat: string };
   const sections: Section[] = [
-    { title: 'All Titles',  icon: <Film size={15} color="#818cf8" />,     items: media,    cat: '' },
-    { title: 'Anime',       icon: <Sparkles size={15} color="#c084fc" />, items: anime,   cat: 'Anime' },
-    { title: 'TV Series',   icon: <Tv size={15} color="#67e8f9" />,       items: tvShows, cat: 'TV Shows' },
-    { title: 'Movies',      icon: <Film size={15} color="#818cf8" />,     items: movies,  cat: 'Movies' },
+    { title: 'Recently Added', icon: <Clock size={15} color="#818cf8" />, items: recentlyAdded, cat: '' },
+    { title: 'Movies', icon: <Film size={15} color="#818cf8" />, items: movies, cat: 'Movies' },
+    { title: 'TV Shows', icon: <Tv size={15} color="#67e8f9" />, items: tvShows, cat: 'TV Shows' },
+    { title: 'Anime', icon: <Sparkles size={15} color="#c084fc" />, items: anime, cat: 'Anime' },
   ].filter(s => s.items.length > 0);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '28px' }}>
 
-      {/* Active Telegram Transfer Banner */}
+      {/* Active Telegram Ingestion Banner */}
       {activeTransfer && (
         <div
           onClick={onOpenTransfers}
@@ -106,76 +140,120 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       )}
 
-      {/* Featured Hero Card */}
-      {featured && featuredMeta ? (
+      {/* Netflix-Style Featured Spotlight Hero */}
+      {featured ? (
         <section
           className="hero-spotlight animate-fade-in"
           style={{
             margin: '0 16px',
-            minHeight: '260px',
+            minHeight: '300px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'flex-end',
             position: 'relative',
             borderRadius: '20px',
             overflow: 'hidden',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.8)',
+            border: '1px solid rgba(255,255,255,0.08)',
           }}
         >
-          {/* Backdrop poster */}
-          {featured.poster_url && !heroError ? (
+          {/* Backdrop artwork */}
+          {featuredBackdrop && !heroError ? (
             <img
-              src={featured.poster_url}
+              src={featuredBackdrop}
               alt=""
               onError={() => setHeroError(true)}
               style={{
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
-                objectFit: 'cover', objectPosition: 'top center', opacity: 0.42,
+                objectFit: 'cover', objectPosition: 'center 20%', opacity: 0.52,
               }}
             />
           ) : (
             <div style={{
               position: 'absolute', inset: 0,
-              background: 'radial-gradient(circle at 60% 30%, rgba(99,102,241,0.25) 0%, rgba(9,12,20,1) 80%)',
+              background: 'radial-gradient(circle at 60% 30%, rgba(99,102,241,0.3) 0%, rgba(7,9,14,1) 85%)',
             }} />
           )}
 
           {/* Vignette Gradients */}
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.65) 55%, transparent 100%)',
+            background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.6) 55%, transparent 100%)',
           }} />
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to right, rgba(7,9,14,0.8) 0%, transparent 60%)',
+            background: 'linear-gradient(to right, rgba(7,9,14,0.85) 0%, transparent 65%)',
           }} />
 
           {/* Hero Content */}
           <div style={{
-            position: 'relative', zIndex: 2, padding: '20px 18px',
+            position: 'relative', zIndex: 2, padding: '22px 18px',
             display: 'flex', flexDirection: 'column', gap: '10px',
           }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {/* Metadata Badges strip */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
               <span className="badge-spec accent-purple">{featured.category}</span>
-              <span className="badge-spec accent-cyan">{featuredMeta.quality}</span>
-              {featuredMeta.seasonEpisode && (
-                <span className="badge-spec accent-emerald">{featuredMeta.seasonEpisode}</span>
+              {featuredYear && (
+                <span className="badge-spec accent-cyan">{featuredYear}</span>
               )}
+              {featuredRuntime && (
+                <span className="badge-spec accent-emerald">{featuredRuntime}</span>
+              )}
+              {featuredRating && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '3px',
+                  background: 'rgba(251,191,36,0.18)', border: '1px solid rgba(251,191,36,0.35)',
+                  color: '#fbbf24', padding: '2px 7px', borderRadius: '5px',
+                  fontSize: '0.66rem', fontWeight: 800,
+                }}>
+                  <Star size={10} fill="#fbbf24" strokeWidth={0} />
+                  {featuredRating.toFixed(1)}
+                </span>
+              )}
+              {featuredGenres.slice(0, 2).map(g => (
+                <span key={g} style={{
+                  background: 'rgba(255,255,255,0.08)', color: '#cbd5e1',
+                  padding: '2px 6px', borderRadius: '5px', fontSize: '0.64rem', fontWeight: 700,
+                }}>
+                  {g}
+                </span>
+              ))}
             </div>
 
-            <h2 style={{
-              fontSize: 'clamp(1.2rem, 5.5vw, 1.65rem)',
+            {/* Canonical Title */}
+            <h1 style={{
+              fontSize: 'clamp(1.3rem, 5.5vw, 1.85rem)',
               fontWeight: 900,
-              fontFamily: 'var(--font-display)',
+              fontFamily: 'var(--font-display, inherit)',
               letterSpacing: '-0.03em',
               lineHeight: 1.15,
               color: '#fff',
+              margin: 0,
               textShadow: '0 2px 14px rgba(0,0,0,0.9)',
             }}>
-              {featuredMeta.cleanTitle}
-            </h2>
+              {featuredTitle}
+            </h1>
 
-            {/* Quick Action Buttons */}
-            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+            {/* Overview excerpt */}
+            {featuredOverview && (
+              <p style={{
+                fontSize: '0.78rem',
+                color: 'rgba(241,245,249,0.8)',
+                lineHeight: 1.45,
+                margin: 0,
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+                textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+                maxWidth: '520px',
+              }}>
+                {featuredOverview}
+              </p>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
               <button
                 className="btn-primary"
                 style={{ flex: 1.3, height: '44px', minHeight: '44px', fontSize: '0.88rem' }}
@@ -200,6 +278,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
               <button
                 onClick={() => onSelectMedia(featured)}
+                aria-label="Details"
                 style={{
                   width: '44px', height: '44px', flexShrink: 0, borderRadius: '12px',
                   background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)',
@@ -225,26 +304,30 @@ export const HomeView: React.FC<HomeViewProps> = ({
           }}>
             <Play size={26} color="#fff" fill="#fff" />
           </div>
-          <p style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'var(--font-display)', color: '#fff' }}>No media found</p>
+          <p style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff' }}>No media found</p>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '280px', lineHeight: 1.5 }}>
-            Send any movie or anime to your bot to stream here.
+            Forward any movie, series, or anime to your bot to stream here.
           </p>
         </section>
       )}
 
-      {/* Horizontal Scroll Rows */}
+      {/* Horizontal Netflix-Style Rows */}
       {sections.map(s => (
-        <section key={s.title} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <div className="section-header">
+        <section key={s.title} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div className="section-header" style={{ padding: '0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               {s.icon}
-              <span className="section-title">{s.title}</span>
+              <span className="section-title" style={{ fontSize: '0.98rem', fontWeight: 800, color: '#f8fafc' }}>{s.title}</span>
             </div>
-            <button className="section-see-all" onClick={() => onViewAllLibrary(s.cat || undefined)}>
+            <button
+              className="section-see-all"
+              onClick={() => onViewAllLibrary(s.cat || undefined)}
+              style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', color: '#818cf8', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+            >
               See all <ArrowRight size={13} />
             </button>
           </div>
-          <div className="scroll-row">
+          <div className="scroll-row" style={{ display: 'flex', gap: '12px', overflowX: 'auto', padding: '4px 16px 12px' }}>
             {s.items.map(item => (
               <MediaCard
                 key={item.id}

@@ -23,7 +23,12 @@ export const SearchView: React.FC<SearchViewProps> = ({ allMedia, offlineIds, on
     if (selectedCat !== 'All') filtered = filtered.filter(m => m.category.toLowerCase() === selectedCat.toLowerCase());
     if (query.trim()) {
       const q = query.toLowerCase();
-      filtered = filtered.filter(m => m.filename.toLowerCase().includes(q));
+      filtered = filtered.filter(m => {
+        const canonical = m.canonical_metadata?.title?.toLowerCase() || '';
+        const orig = m.canonical_metadata?.original_title?.toLowerCase() || '';
+        const file = m.filename.toLowerCase();
+        return canonical.includes(q) || orig.includes(q) || file.includes(q);
+      });
     }
     setResults(filtered);
   }, [query, selectedCat, allMedia]);

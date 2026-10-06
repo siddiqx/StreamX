@@ -32,17 +32,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   const [isVlcHostLaunching, setIsVlcHostLaunching] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
 
-  if (!item) return null;
-
-  const meta = parseMediaMetadata(item.filename);
-  const isMkv = item.filename.toLowerCase().endsWith('.mkv') || item.mime_type?.includes('matroska');
-  
-  // For MKV files, browsers cannot decode native matroska; default to universal compatible stream
+  const isMkv = item?.filename?.toLowerCase().endsWith('.mkv') || item?.mime_type?.includes('matroska');
   const [streamMode, setStreamMode] = useState<'compatible' | 'direct'>(isMkv ? 'compatible' : 'direct');
-
-  const currentStreamUrl = streamMode === 'compatible'
-    ? getCompatibleStreamUrl(item.id)
-    : getStreamUrl(item.id);
 
   // Auto-hide controls timer
   const resetControlsTimer = () => {
@@ -61,6 +52,13 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
   }, [isPlaying]);
+
+  if (!item) return null;
+
+  const meta = parseMediaMetadata(item.filename);
+  const currentStreamUrl = streamMode === 'compatible'
+    ? getCompatibleStreamUrl(item.id)
+    : getStreamUrl(item.id);
 
   const togglePlay = () => {
     const v = videoRef.current;

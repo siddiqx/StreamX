@@ -125,6 +125,15 @@ Every transfer transitions through strict transactional states within SQLite:
 ```
 Transfers interrupted by server hibernation or deployments are reconciled automatically upon startup via `reconcile_incomplete_transfers()`.
 
+### 3.4 Automatic Media Metadata Enrichment & Netflix-Style Catalogue
+Uploaded files undergo automatic asynchronous metadata enrichment:
+1. **Deterministic Parser:** Strips release artifacts (`1080p`, `x264`, `HEVC`, `WEB-DL`, `[Group]`, etc.) and detects canonical title, release year, media type (`movie` vs `tv`), season, and episode.
+2. **TMDB Candidate Search & Deduplication:** Queries TMDB API v3 server-side with candidate ranking and entity caching (multiple resolutions of the same title reference a single canonical metadata entity).
+3. **Multi-Factor Confidence Scoring:** Evaluates title similarity (50%), year matching (25%), media type (10%), and original title (10%) with year mismatch penalties.
+4. **Resilient Decoupling:** Metadata enrichment never blocks Drive uploads or streaming playback. Unidentified files remain 100% playable.
+5. **Manual Override & Lock:** Project owners can correct or search metadata directly in the app. Manual overrides are permanently locked against automatic rewrites.
+6. **Netflix-Style UI:** High-resolution backdrop hero spotlight, categorized carousels (Recently Added, Movies, TV Shows, Anime), canonical typography, ratings, and runtime badges.
+
 ---
 
 ## 4. Production Cloud Deployment Topology

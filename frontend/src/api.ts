@@ -209,4 +209,139 @@ export function parseMediaMetadata(filename: string): ParsedMediaMeta {
   };
 }
 
+// --- Canonical Metadata Resolution & Artwork Helpers ---
+
+export function getMediaDisplayName(item: MediaItem): string {
+  if (item.canonical_metadata?.title) {
+    return item.canonical_metadata.title;
+  }
+  return parseMediaMetadata(item.filename).cleanTitle;
+}
+
+export function getMediaDisplayYear(item: MediaItem): number | undefined {
+  if (item.canonical_metadata?.release_year) {
+    return item.canonical_metadata.release_year;
+  }
+  if (item.canonical_metadata?.release_date) {
+    const y = parseInt(item.canonical_metadata.release_date.slice(0, 4));
+    if (!isNaN(y)) return y;
+  }
+  const match = item.filename.match(/\b(19\d\d|20\d\d)\b/);
+  return match ? parseInt(match[1]) : undefined;
+}
+
+export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'original' = 'w500'): string | undefined {
+  if (item.canonical_metadata?.poster_path) {
+    const path = item.canonical_metadata.poster_path;
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    return `https://image.tmdb.org/t/p/${size}/${path.replace(/^\//, '')}`;
+  }
+  return item.poster_url;
+}
+
+export function getMediaBackdropUrl(item: MediaItem, size: 'w780' | 'w1280' | 'original' = 'w1280'): string | undefined {
+  if (item.canonical_metadata?.backdrop_path) {
+    const path = item.canonical_metadata.backdrop_path;
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    return `https://image.tmdb.org/t/p/${size}/${path.replace(/^\//, '')}`;
+  }
+  if (item.metadata_json) {
+    try {
+      const parsed = JSON.parse(item.metadata_json);
+      if (parsed.backdrop_url) return parsed.backdrop_url;
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+}
+
+export function formatRuntime(minutes?: number): string | undefined {
+  if (!minutes || minutes <= 0) return undefined;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+// --- Metadata API Client Functions ---
+
+export async function searchMetadataCandidates(mediaId: number, query?: string): Promise<any[]> {
+  try {
+    const url = query
+      ? `${API_BASE}/media/${mediaId}/metadata/search?query=${encodeURIComponent(query.trim())}`
+      : `${API_BASE}/media/${mediaId}/metadata/search`;
+    const res = await fetch(url, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('Failed searching metadata candidates:', err);
+    return [];
+  }
+}
+
+export async function selectMetadata(mediaId: number, providerId: string, mediaType = 'movie'): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/select`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider_id: providerId, media_type: mediaType }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed selecting metadata:', err);
+    return false;
+  }
+}
+
+export async function reprocessMetadata(mediaId: number, force = false): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/reprocess?force=${force}`, {
+      method: 'POST',
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed reprocessing metadata:', err);
+    return false;
+  }
+}
+
+export async function unlockMetadata(mediaId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/unlock`, {
+      method: 'POST',
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed unlocking metadata:', err);
+    return false;
+  }
+}
+
+export async function fetchMetadataStats(): Promise<any | null> {
+  try {
+    const res = await fetch(`${API_BASE}/metadata/stats`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('Failed fetching metadata stats:', err);
+    return null;
+  }
+}
+
+export async function triggerMetadataBackfill(force = false): Promise<any | null> {
+  try {
+    const res = await fetch(`${API_BASE}/metadata/backfill?force=${force}`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('Failed triggering metadata backfill:', err);
+    return null;
+  }
+}
+
+
 

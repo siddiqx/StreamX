@@ -1,3 +1,30 @@
+export type MetadataStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'MATCHED'
+  | 'LOW_CONFIDENCE'
+  | 'NOT_FOUND'
+  | 'MANUAL'
+  | 'FAILED'
+  | 'RETRYING';
+
+export interface CanonicalMetadata {
+  id: number;
+  provider: string;
+  provider_id: string;
+  media_type: string;
+  title: string;
+  original_title?: string;
+  release_date?: string;
+  release_year?: number;
+  overview?: string;
+  poster_path?: string;
+  backdrop_path?: string;
+  rating?: number;
+  runtime?: number;
+  genres: string[];
+}
+
 export interface MediaItem {
   id: number;
   drive_file_id: string;
@@ -7,6 +34,11 @@ export interface MediaItem {
   category: string;
   poster_url?: string;
   metadata_json?: string;
+  metadata_entity_id?: number;
+  metadata_status?: MetadataStatus;
+  metadata_confidence?: number;
+  metadata_locked?: boolean;
+  canonical_metadata?: CanonicalMetadata;
   created_at: string;
   updated_at: string;
 }
@@ -54,4 +86,32 @@ export interface DeviceDownload {
 export interface CategorySummary {
   category: string;
   count: number;
+}
+
+export interface MetadataCandidate {
+  provider: string;
+  provider_id: string;
+  title: string;
+  original_title?: string;
+  media_type: string;
+  release_year?: number;
+  release_date?: string;
+  overview?: string;
+  poster_url?: string;
+  backdrop_url?: string;
+  rating?: number;
+  confidence: number;
+}
+
+export interface MetadataStats {
+  total_media: number;
+  matched: number;
+  manual: number;
+  low_confidence: number;
+  not_found: number;
+  failed: number;
+  pending: number;
+  processing: number;
+  retrying: number;
+  match_percentage: number;
 }

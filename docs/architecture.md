@@ -24,15 +24,17 @@ StreamX is an automated media transfer pipeline and offline media player designe
 |   | - Health Check        |             | (8MB - 16MB ring buffer)   |   |
 |   | - Library API         |             +--------------+-------------+   |
 |   | - Transfer State API  |                            |                 |
-|   +-----------+-----------+                            | Chunked stream  |
-|               |                                        v upload          |
+|   | - Metadata API        |                            | Chunked stream  |
+|   +-----------+-----------+                            v upload          |
 |               |                         +----------------------------+   |
 |   +-----------v-----------+             | Google Drive API Service   |   |
 |   | SQLite State DB       |             | (Resumable Upload Session) |   |
 |   | - transfers           |             +--------------+-------------+   |
 |   | - media               |                            |                 |
-|   | - device_downloads    |                            |                 |
-|   +-----------------------+                            |                 |
+|   | - metadata_entities   |             +--------------v-------------+   |
+|   | - metadata_jobs       |             | Metadata Background Worker |   |
+|   | - device_downloads    |             | (TMDB / Confidence Scorer) |   |
+|   +-----------------------+             +----------------------------+   |
 +--------------------------------------------------------|-----------------+
                                                          v
 +--------------------------------------------------------------------------+

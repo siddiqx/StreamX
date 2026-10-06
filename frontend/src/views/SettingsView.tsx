@@ -16,6 +16,47 @@ interface SettingsViewProps {
   offlineCount: number;
 }
 
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <div>
+    <p style={{
+      fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-faint)',
+      textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', paddingLeft: '4px'
+    }}>
+      {title}
+    </p>
+    <div style={{
+      background: 'rgba(15,21,32,0.7)',
+      border: '1px solid var(--border-subtle)',
+      borderRadius: '16px',
+      overflow: 'hidden',
+    }}>
+      {children}
+    </div>
+  </div>
+);
+
+const Row = ({ icon, label, sub, right, last = false }: {
+  icon: React.ReactNode; label: string; sub?: string; right?: React.ReactNode; last?: boolean;
+}) => (
+  <div style={{
+    display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 16px',
+    borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
+  }}>
+    <div style={{
+      width: '36px', height: '36px', borderRadius: '10px',
+      background: 'rgba(99,102,241,0.12)', display: 'flex',
+      alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    }}>
+      {icon}
+    </div>
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <p style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-main)' }}>{label}</p>
+      {sub && <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)', marginTop: '1px' }}>{sub}</p>}
+    </div>
+    {right}
+  </div>
+);
+
 export const SettingsView: React.FC<SettingsViewProps> = ({
   isWifiOnly,
   onToggleWifiOnly,
@@ -47,47 +88,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const browserUsedBytes = Math.max(0, deviceTotalBytes - deviceFreeBytes);
   const browserPct = deviceTotalBytes > 0 ? Math.min(100, Math.round((browserUsedBytes / deviceTotalBytes) * 100)) : 0;
-
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div>
-      <p style={{
-        fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-faint)',
-        textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', paddingLeft: '4px'
-      }}>
-        {title}
-      </p>
-      <div style={{
-        background: 'rgba(15,21,32,0.7)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: '16px',
-        overflow: 'hidden',
-      }}>
-        {children}
-      </div>
-    </div>
-  );
-
-  const Row = ({ icon, label, sub, right, last = false }: {
-    icon: React.ReactNode; label: string; sub?: string; right?: React.ReactNode; last?: boolean;
-  }) => (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 16px',
-      borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
-    }}>
-      <div style={{
-        width: '36px', height: '36px', borderRadius: '10px',
-        background: 'rgba(99,102,241,0.12)', display: 'flex',
-        alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-      }}>
-        {icon}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-main)' }}>{label}</p>
-        {sub && <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)', marginTop: '1px' }}>{sub}</p>}
-      </div>
-      {right}
-    </div>
-  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', padding: '0 16px 40px' }}>
@@ -334,6 +334,155 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </Section>
+
+      {/* Metadata Health & Catalogue Intelligence */}
+      <MetadataHealthSection />
+
+      {/* Official TMDB Attribution */}
+      <Section title="Attribution & Licensing">
+        <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              background: 'linear-gradient(90deg, #01b4e4, #90cea1)',
+              borderRadius: '6px', padding: '3px 8px', fontWeight: 900,
+              fontSize: '0.72rem', color: '#032541', letterSpacing: '0.05em',
+            }}>
+              TMDB
+            </div>
+            <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#f8fafc' }}>
+              The Movie Database
+            </span>
+          </div>
+          <p style={{ fontSize: '0.74rem', color: '#94a3b8', lineHeight: 1.5, margin: 0 }}>
+            This product uses the TMDB API but is not endorsed or certified by TMDB. Movie, TV, and episode artwork, titles, overviews, ratings, and release dates are supplied by The Movie Database.
+          </p>
+          <a
+            href="https://www.themoviedb.org"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              fontSize: '0.74rem', color: '#818cf8', fontWeight: 700,
+              display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none',
+            }}
+          >
+            Visit The Movie Database <ExternalLink size={12} />
+          </a>
+        </div>
+      </Section>
     </div>
   );
 };
+
+const MetadataHealthSection: React.FC = () => {
+  const [stats, setStats] = useState<any | null>(null);
+  const [isBackfilling, setIsBackfilling] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const loadStats = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/metadata/stats`);
+      if (res.ok) setStats(await res.json());
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    loadStats();
+  }, []);
+
+  const handleBackfill = async () => {
+    setIsBackfilling(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${API_BASE}/metadata/backfill?force=false`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setMessage(`✓ Enqueued ${data.enqueued} files for automatic metadata enrichment!`);
+        setTimeout(() => loadStats(), 2000);
+      } else {
+        setMessage('Failed to enqueue backfill.');
+      }
+    } catch {
+      setMessage('Error connecting to backend.');
+    } finally {
+      setIsBackfilling(false);
+      setTimeout(() => setMessage(null), 5000);
+    }
+  };
+
+  return (
+    <div>
+      <p style={{
+        fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-faint)',
+        textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', paddingLeft: '4px'
+      }}>
+        Metadata Health
+      </p>
+      <div style={{
+        background: 'rgba(15,21,32,0.7)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: '16px',
+        padding: '16px',
+        display: 'flex', flexDirection: 'column', gap: '12px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <span style={{ fontSize: '1.25rem', fontWeight: 900, color: '#fff', fontFamily: 'var(--font-display, inherit)' }}>
+              {stats ? `${stats.match_percentage}%` : '---'}
+            </span>
+            <span style={{ fontSize: '0.74rem', color: '#94a3b8', display: 'block' }}>
+              Enrichment Match Rate
+            </span>
+          </div>
+
+          <button
+            onClick={handleBackfill}
+            disabled={isBackfilling}
+            style={{
+              padding: '8px 14px', borderRadius: '10px',
+              background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+              border: 'none', color: '#fff', fontSize: '0.78rem', fontWeight: 700,
+              cursor: isBackfilling ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: '6px',
+            }}
+          >
+            <RefreshCw size={13} className={isBackfilling ? 'animate-spin' : ''} />
+            {isBackfilling ? 'Queuing...' : 'Backfill Library'}
+          </button>
+        </div>
+
+        {message && (
+          <div style={{
+            padding: '8px 12px', borderRadius: '8px',
+            background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
+            color: '#6ee7b7', fontSize: '0.75rem', fontWeight: 700,
+          }}>
+            {message}
+          </div>
+        )}
+
+        {stats && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px',
+            background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '12px',
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: '0.62rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 2px' }}>Total</p>
+              <p style={{ fontSize: '0.86rem', fontWeight: 800, color: '#fff', margin: 0 }}>{stats.total_media}</p>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: '0.62rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 2px' }}>Matched</p>
+              <p style={{ fontSize: '0.86rem', fontWeight: 800, color: '#6ee7b7', margin: 0 }}>{stats.matched + (stats.manual || 0)}</p>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: '0.62rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 2px' }}>Review</p>
+              <p style={{ fontSize: '0.86rem', fontWeight: 800, color: '#fcd34d', margin: 0 }}>{stats.low_confidence + (stats.not_found || 0)}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+

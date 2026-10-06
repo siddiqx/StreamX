@@ -347,6 +347,7 @@ class TransferWorker:
         )
 
         # 5. Catalog in Media Table & Update State to COMPLETED
+        media_id = None
         async with AsyncSessionLocal() as session:
             # Add to permanent Media catalog
             media = Media(
@@ -367,6 +368,17 @@ class TransferWorker:
                 t.error_message = None
 
             await session.commit()
+            await session.refresh(media)
+            media_id = media.id
+
+        # Automatically enqueue metadata enrichment job
+        if media_id:
+            try:
+                from app.services.metadata_service import metadata_service
+                await metadata_service.enqueue_media_for_enrichment(media_id)
+            except Exception as e:
+                logger.warning(f"Failed to enqueue metadata job for media #{media_id}: {e}")
+
 
         # 6. Send Notification Card to Telegram
         await bot_service.send_message(

@@ -33,7 +33,8 @@ def test_sanitize_filename():
 @pytest.mark.asyncio
 async def test_bot_unauthorized_user(clean_db):
     bot = TelegramBotService(bot_token="test_token")
-    with patch.object(bot, "send_message", new_callable=AsyncMock) as mock_send:
+    with patch.object(bot, "send_message", new_callable=AsyncMock) as mock_send, \
+         patch.object(bot, "is_user_allowed", return_value=False):
         update = {
             "update_id": 1,
             "message": {

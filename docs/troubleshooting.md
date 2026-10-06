@@ -21,3 +21,18 @@
 - **Problem**: Free host kills process with OOM (Out Of Memory).
   - Reduce `CHUNK_BUFFER_SIZE_BYTES` in `.env` to `4194304` (4MB).
   - Verify that no temporary files are being accumulated in `/tmp`.
+
+## 4. Metadata Enrichment Troubleshooting
+- **Problem**: Blank poster cards or raw filenames displayed.
+  - Check that `TMDB_API_KEY` is configured in `.env`.
+  - Go to **Settings -> Metadata Health** and click **Backfill Library**.
+  - Check `GET /metadata/stats` to inspect counts of `pending`, `processing`, and `failed` jobs.
+- **Problem**: Incorrect movie or TV show matched automatically.
+  - Click the item in StreamX, click **Change Match**, search with exact title, and select the correct entity.
+  - The item will be locked with `status = MANUAL` so automatic jobs will not overwrite it.
+- **Problem**: TMDB API Rate Limiting (HTTP 429).
+  - StreamX automatically throttles requests and respects `Retry-After` headers.
+  - Jobs are rescheduled with exponential backoff.
+- **Problem**: Playback or Drive uploads failing when TMDB is down.
+  - Metadata is strictly decoupled from streaming and storage. Uploads and playback always succeed even if TMDB is offline.
+

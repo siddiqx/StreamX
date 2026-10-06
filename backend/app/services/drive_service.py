@@ -266,29 +266,22 @@ class GoogleDriveService:
 
                 if not existing:
                     from app.services.metadata_service import metadata_service
-                    import json
-                    poster, backdrop = await metadata_service.fetch_poster_and_backdrop(name, category)
+                    from app.db.models import MetadataStatus
                     item = Media(
                         drive_file_id=drive_id,
                         filename=name,
                         size=size,
                         mime_type=mime,
                         category=category,
-                        poster_url=poster,
-                        metadata_json=json.dumps({"backdrop_url": backdrop}) if backdrop else None,
+                        metadata_status=MetadataStatus.PENDING,
                     )
                     session.add(item)
+                    await session.flush()
+                    await metadata_service.enqueue_media_for_enrichment(item.id, session=session)
                     synced_count += 1
-                elif not existing.poster_url:
+                elif not existing.metadata_entity_id and not existing.metadata_locked:
                     from app.services.metadata_service import metadata_service
-                    import json
-                    poster, backdrop = await metadata_service.fetch_poster_and_backdrop(name, category)
-                    if poster:
-                        existing.poster_url = poster
-                    if backdrop:
-                        meta = json.loads(existing.metadata_json or "{}")
-                        meta["backdrop_url"] = backdrop
-                        existing.metadata_json = json.dumps(meta)
+                    await metadata_service.enqueue_media_for_enrichment(existing.id, session=session)
 
                 # Reconcile transfer if exists
                 stmt_t = select(TelegramTransfer).where(TelegramTransfer.filename == name)
