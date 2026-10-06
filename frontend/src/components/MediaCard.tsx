@@ -3,7 +3,8 @@ import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle, Layers } f
 import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
 import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl } from '../api';
-import { getWatchProgress } from '../utils/watchHistory';
+import { getWatchProgress, getWatchHistory } from '../utils/watchHistory';
+import type { WatchHistoryItem } from '../utils/watchHistory';
 import { launchVlcWithTracking } from '../utils/playerSettings';
 
 export interface MediaCardProps {
@@ -49,7 +50,34 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const category = group ? group.category : resolvedItem.category;
   const isSeries = group?.type === 'series';
   const episodeCount = group?.episodes.length || 1;
-  const watchProgress = getWatchProgress(resolvedItem.id);
+
+  const [watchProgress, setWatchProgress] = useState<WatchHistoryItem | null>(() => {
+    if (group && group.episodes && group.episodes.length > 0) {
+      const history = getWatchHistory();
+      const epIds = new Set(group.episodes.map(e => e.item.id));
+      const matched = history.filter(h => epIds.has(h.mediaId));
+      if (matched.length > 0) return matched[0];
+    }
+    return getWatchProgress(resolvedItem.id);
+  });
+
+  React.useEffect(() => {
+    const handleUpdate = () => {
+      if (group && group.episodes && group.episodes.length > 0) {
+        const history = getWatchHistory();
+        const epIds = new Set(group.episodes.map(e => e.item.id));
+        const matched = history.filter(h => epIds.has(h.mediaId));
+        if (matched.length > 0) {
+          setWatchProgress(matched[0]);
+          return;
+        }
+      }
+      setWatchProgress(getWatchProgress(resolvedItem.id));
+    };
+
+    window.addEventListener('streamx_watch_history_updated', handleUpdate);
+    return () => window.removeEventListener('streamx_watch_history_updated', handleUpdate);
+  }, [resolvedItem.id, group]);
 
   const Icon = getCategoryIcon(category);
 
@@ -262,6 +290,25 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               boxShadow: '0 2px 8px rgba(16,185,129,0.5)',
             }}>
               <Check size={10} color="#fff" strokeWidth={3} />
+            </span>
+          )}
+
+          {/* Watched / Finished badge */}
+          {watchProgress?.completed && (
+            <span style={{
+              background: 'rgba(16,185,129,0.85)',
+              borderRadius: '6px',
+              padding: '2px 5px',
+              fontSize: '0.58rem',
+              fontWeight: 800,
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '2px',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.6)',
+            }}>
+              <Check size={8} color="#fff" strokeWidth={3} />
+              Watched
             </span>
           )}
         </div>

@@ -150,3 +150,88 @@ export function removeWatchHistoryItem(mediaId: number): void {
     window.dispatchEvent(new CustomEvent('streamx_watch_history_updated'));
   }
 }
+
+export function markWatchCompleted(mediaId: number, item?: MediaItem): void {
+  const history = getWatchHistory();
+  const existing = history.find(h => h.mediaId === mediaId);
+  const duration = existing ? existing.durationSeconds : (item?.canonical_metadata?.runtime ? item.canonical_metadata.runtime * 60 : 1800);
+  updateWatchProgress(mediaId, duration, duration, item);
+}
+
+export function markWatchUnwatched(mediaId: number): void {
+  removeWatchHistoryItem(mediaId);
+}
+
+const SESSION_KEY = 'streamx_active_watch_session';
+
+export interface ActiveWatchSession {
+  mediaId: number;
+  startedAt: number; // timestamp in ms
+  initialProgressSeconds: number;
+  durationSeconds: number;
+}
+
+/**
+ * Starts a background watch session when an external player (VLC) is launched.
+ */
+export function startWatchSession(item: MediaItem): void {
+  const history = getWatchHistory();
+  const existing = history.find(h => h.mediaId === item.id);
+  const runtimeSecs = item.canonical_metadata?.runtime ? item.canonical_metadata.runtime * 60 : 1800;
+  const initialSecs = existing ? existing.progressSeconds : 0;
+
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      mediaId: item.id,
+      startedAt: Date.now(),
+      initialProgressSeconds: initialSecs,
+      durationSeconds: existing?.durationSeconds || runtimeSecs,
+    }));
+  } catch {}
+
+  recordWatchStart(item);
+}
+
+/**
+ * Checks if the user was watching media in VLC and returned to the app,
+ * calculating elapsed watch time and updating the progress bar.
+ */
+export function syncActiveWatchSession(mediaList: MediaItem[]): { updated: boolean; title?: string; progressSeconds?: number } {
+  if (typeof window === 'undefined') return { updated: false };
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return { updated: false };
+    const session: ActiveWatchSession = JSON.parse(raw);
+    localStorage.removeItem(SESSION_KEY);
+
+    if (!session || !session.mediaId || !session.startedAt) return { updated: false };
+
+    const elapsedSeconds = Math.round((Date.now() - session.startedAt) / 1000);
+    // Ignore brief switches under 15 seconds
+    if (elapsedSeconds < 15) return { updated: false };
+
+    const targetItem = mediaList.find(m => m.id === session.mediaId);
+    const duration = session.durationSeconds > 0
+      ? session.durationSeconds
+      : (targetItem?.canonical_metadata?.runtime ? targetItem.canonical_metadata.runtime * 60 : 1800);
+
+    const newProgress = Math.min(duration, session.initialProgressSeconds + elapsedSeconds);
+    updateWatchProgress(session.mediaId, newProgress, duration, targetItem);
+
+    return {
+      updated: true,
+      title: targetItem ? getMediaDisplayName(targetItem) : undefined,
+      progressSeconds: newProgress,
+    };
+  } catch {}
+  return { updated: false };
+}
+
+export function formatTimeRemaining(progressSeconds: number, durationSeconds: number): string {
+  const remaining = Math.max(0, durationSeconds - progressSeconds);
+  if (remaining <= 60) return 'Watched';
+  const hours = Math.floor(remaining / 3600);
+  const minutes = Math.floor((remaining % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m left`;
+  return `${minutes}m left`;
+}

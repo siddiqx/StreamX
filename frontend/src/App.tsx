@@ -3,6 +3,7 @@ import type { MediaItem, TelegramTransfer, DeviceDownload } from './types';
 import type { MediaGroup } from './utils/mediaOrganizer';
 import { fetchMedia, fetchTransfers, getCachedMedia, getCachedTransfers, getDownloadUrl } from './api';
 import { launchVlcWithTracking } from './utils/playerSettings';
+import { syncActiveWatchSession } from './utils/watchHistory';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
@@ -50,6 +51,33 @@ export const App: React.FC = () => {
     window.addEventListener('streamx_toast', handleToast);
     return () => window.removeEventListener('streamx_toast', handleToast);
   }, []);
+
+  // Synchronize watch progress whenever user returns from VLC
+  useEffect(() => {
+    const handleSync = () => {
+      const res = syncActiveWatchSession(media);
+      if (res.updated) {
+        setToast({
+          message: res.title ? `Watch progress saved for "${res.title}"` : 'Watch progress updated',
+          type: 'play'
+        });
+        setTimeout(() => setToast(null), 3500);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleSync();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleSync);
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, [media]);
   const [isWifiOnly, setIsWifiOnly] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('streamx_wifi_only');

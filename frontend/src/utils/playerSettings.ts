@@ -11,7 +11,7 @@ import {
   getPlaylistUrl,
   openVlcOnHost
 } from '../api';
-import { recordWatchStart } from './watchHistory';
+import { startWatchSession } from './watchHistory';
 
 export interface PlayerSettings {
   defaultPlayer: 'vlc';
@@ -52,8 +52,8 @@ export async function launchVlcWithTracking(
   item: MediaItem,
   onStatusUpdate?: (status: string) => void
 ): Promise<{ success: boolean; message: string }> {
-  // 1. Record in persistent watch history
-  recordWatchStart(item);
+  // 1. Record in persistent watch history and initiate session
+  startWatchSession(item);
 
   const title = getMediaDisplayName(item);
   const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent);

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   X, Play, Download, Film, ShieldAlert,
-  Star, Search, Loader2, Check
+  Star, Search, Loader2, Check, CheckCircle2
 } from 'lucide-react';
 import type { MediaItem, MetadataCandidate } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
@@ -17,6 +17,13 @@ import {
   selectMetadata,
 } from '../api';
 import { launchVlcWithTracking } from '../utils/playerSettings';
+import {
+  getWatchProgress,
+  markWatchCompleted,
+  markWatchUnwatched,
+  formatTimeRemaining
+} from '../utils/watchHistory';
+import type { WatchHistoryItem } from '../utils/watchHistory';
 
 export interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -57,6 +64,26 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const item = rawItem || group?.featuredItem || null;
   const isSeriesGroup = group?.type === 'series';
   const episodes = group?.episodes || [];
+
+  const [watchProgress, setWatchProgress] = useState<WatchHistoryItem | null>(() => item ? getWatchProgress(item.id) : null);
+
+  React.useEffect(() => {
+    if (!item) return;
+    const sync = () => setWatchProgress(getWatchProgress(item.id));
+    sync();
+    window.addEventListener('streamx_watch_history_updated', sync);
+    return () => window.removeEventListener('streamx_watch_history_updated', sync);
+  }, [item?.id]);
+
+  const handleToggleWatched = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!item) return;
+    if (watchProgress?.completed) {
+      markWatchUnwatched(item.id);
+    } else {
+      markWatchCompleted(item.id, item);
+    }
+  };
 
   const backdropUrl = group?.backdropUrl || (item ? (getMediaBackdropUrl(item, 'w1280') || getMediaPosterUrl(item, 'original')) : undefined);
 
@@ -272,6 +299,68 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </div>
             )}
 
+            {/* Watch Progress & History Card */}
+            {watchProgress && (watchProgress.progressPercentage > 0 || watchProgress.completed) && (
+              <div style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '12px',
+                padding: '10px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {watchProgress.completed ? (
+                      <CheckCircle2 size={16} color="#10b981" />
+                    ) : (
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                    )}
+                    <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#fff' }}>
+                      {watchProgress.completed ? 'Watched' : 'In Progress'}
+                    </span>
+                    {!watchProgress.completed && (
+                      <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
+                        · {formatTimeRemaining(watchProgress.progressSeconds, watchProgress.durationSeconds)} ({watchProgress.progressPercentage}%)
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleToggleWatched}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: watchProgress.completed ? '#94a3b8' : '#818cf8',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    {watchProgress.completed ? 'Mark as Unwatched' : 'Mark as Watched'}
+                  </button>
+                </div>
+
+                {!watchProgress.completed && (
+                  <div style={{
+                    width: '100%',
+                    height: '4px',
+                    borderRadius: '2px',
+                    background: 'rgba(255,255,255,0.1)',
+                    overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      width: `${watchProgress.progressPercentage}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #ef4444, #f87171)',
+                    }} />
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Primary Actions: Direct Play & Modern Download Bar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {/* Single Direct Play CTA (0 options menu, instant launch) */}
@@ -299,7 +388,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 }}
               >
                 <Play size={18} fill="#090d16" />
-                {isLaunchingVlc ? 'Opening...' : 'Play'}
+                {isLaunchingVlc ? 'Opening...' : (watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0 ? 'Resume' : 'Play')}
               </button>
 
               {/* Modern Professional Download Bar */}
@@ -367,6 +456,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {episodes.map((ep) => {
                     const epOffline = offlineIds?.has(ep.item.id) || false;
+                    const epProgress = getWatchProgress(ep.item.id);
                     return (
                       <div
                         key={ep.item.id}
@@ -381,13 +471,31 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           justifyContent: 'space-between',
                           gap: '10px',
                           cursor: 'pointer',
+                          position: 'relative',
+                          overflow: 'hidden',
                         }}
                       >
+                        {/* Episode bottom progress line if in progress */}
+                        {epProgress && !epProgress.completed && epProgress.progressPercentage > 0 && (
+                          <div style={{
+                            position: 'absolute', bottom: 0, left: 0, right: 0, height: '2.5px',
+                            background: 'rgba(255,255,255,0.1)',
+                          }}>
+                            <div style={{
+                              width: `${epProgress.progressPercentage}%`,
+                              height: '100%',
+                              background: '#ef4444',
+                            }} />
+                          </div>
+                        )}
+
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
                           <span style={{
-                            background: 'linear-gradient(135deg, rgba(249,115,22,0.25), rgba(234,88,12,0.35))',
-                            color: '#fdba74',
-                            border: '1px solid rgba(249,115,22,0.4)',
+                            background: epProgress?.completed
+                              ? 'rgba(16,185,129,0.18)'
+                              : 'linear-gradient(135deg, rgba(249,115,22,0.25), rgba(234,88,12,0.35))',
+                            color: epProgress?.completed ? '#6ee7b7' : '#fdba74',
+                            border: `1px solid ${epProgress?.completed ? 'rgba(16,185,129,0.35)' : 'rgba(249,115,22,0.4)'}`,
                             padding: '4px 8px',
                             borderRadius: '6px',
                             fontSize: '0.72rem',
@@ -410,6 +518,16 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             </p>
                             <span style={{ fontSize: '0.66rem', color: '#94a3b8' }}>
                               {ep.quality} · {formatBytes(ep.item.size)}
+                              {epProgress?.completed && (
+                                <span style={{ color: '#10b981', fontWeight: 700, marginLeft: '6px' }}>
+                                  · Watched ✓
+                                </span>
+                              )}
+                              {epProgress && !epProgress.completed && epProgress.progressPercentage > 0 && (
+                                <span style={{ color: '#f87171', fontWeight: 700, marginLeft: '6px' }}>
+                                  · {epProgress.progressPercentage}%
+                                </span>
+                              )}
                             </span>
                           </div>
                         </div>
