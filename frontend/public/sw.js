@@ -1,4 +1,4 @@
-const CACHE_NAME = 'streamx-v1';
+const CACHE_NAME = 'streamx-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -26,6 +26,12 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
@@ -35,6 +41,7 @@ self.addEventListener('fetch', (e) => {
     url.pathname.startsWith('/metadata/') ||
     url.pathname.startsWith('/health') ||
     url.pathname.startsWith('/telegram/') ||
+    url.pathname.startsWith('/auth') ||
     url.port === '8000'
   ) {
     return;
@@ -43,7 +50,15 @@ self.addEventListener('fetch', (e) => {
   // Network first with cache fallback for app navigation
   if (e.request.mode === 'navigate') {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match('/index.html'))
+      fetch(e.request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(e.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match('/index.html'))
     );
     return;
   }
@@ -67,3 +82,4 @@ self.addEventListener('fetch', (e) => {
     })
   );
 });
+

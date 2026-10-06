@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Tv, Play, Wifi, Trash2,
   CheckCircle2, Clock, ShieldCheck,
-  ExternalLink, Smartphone, ChevronDown, ChevronUp
+  ExternalLink, Smartphone, ChevronDown, ChevronUp, RefreshCw
 } from 'lucide-react';
 import { formatBytes, API_BASE, setCustomApiBase } from '../api';
 import { getPlayerSettings, savePlayerSettings } from '../utils/playerSettings';
@@ -168,6 +168,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     clearWatchHistory();
     setConfirmClearHistory(false);
     loadHistory();
+  };
+
+  const [isClearingAppCache, setIsClearingAppCache] = useState(false);
+
+  const handleBustCacheAndReload = async () => {
+    setIsClearingAppCache(true);
+    try {
+      if ('caches' in window) {
+        const keys = await window.caches.keys();
+        await Promise.all(keys.map(k => window.caches.delete(k)));
+      }
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map(r => r.unregister()));
+      }
+    } catch (err) {
+      console.error('Failed to clear caches:', err);
+    } finally {
+      window.location.reload();
+    }
   };
 
   return (
@@ -518,9 +538,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <Row
           icon={<ShieldCheck size={18} color="#a5b4fc" />}
           label="StreamX Cinema Edition"
-          sub="Version 2.4 · Hardware-accelerated personal media catalogue"
-          right={<span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 700 }}>v2.4</span>}
+          sub="Version 2.5 · Hardware-accelerated personal media catalogue"
+          right={<span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 700 }}>v2.5</span>}
         />
+        <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', gap: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1 }}>
+            <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#fff' }}>Force Update App & Reset Cache</span>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Purges offline PWA cache and loads the latest live build from Vercel.</span>
+          </div>
+          <button
+            onClick={handleBustCacheAndReload}
+            disabled={isClearingAppCache}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 14px',
+              borderRadius: '10px',
+              border: '1px solid rgba(99,102,241,0.3)',
+              background: 'rgba(99,102,241,0.15)',
+              color: '#a5b4fc',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              cursor: isClearingAppCache ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <RefreshCw size={13} />
+            {isClearingAppCache ? 'Updating...' : 'Reload & Update'}
+          </button>
+        </div>
         <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)' }}>
           <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
             Catalogue artwork & metadata provided by TMDB.
