@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle } from 'lucide-react';
+import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle, Layers } from 'lucide-react';
 import type { MediaItem } from '../types';
+import type { MediaGroup } from '../utils/mediaOrganizer';
 import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl } from '../api';
 
-interface MediaCardProps {
-  item: MediaItem;
-  isOffline: boolean;
+export interface MediaCardProps {
+  item?: MediaItem;
+  group?: MediaGroup;
+  isOffline?: boolean;
   onSelect: (item: MediaItem) => void;
+  onSelectGroup?: (group: MediaGroup) => void;
   onPlay: (item: MediaItem) => void;
   width?: string | number;
 }
@@ -19,22 +22,51 @@ const getCategoryIcon = (cat: string) => {
   }
 };
 
-export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect, onPlay, width }) => {
+export const MediaCard: React.FC<MediaCardProps> = ({
+  item,
+  group,
+  isOffline: isOfflineProp,
+  onSelect,
+  onSelectGroup,
+  onPlay,
+  width,
+}) => {
   const [imageError, setImageError] = useState(false);
   const [pressed, setPressed] = useState(false);
 
-  const title = getMediaDisplayName(item);
-  const year = getMediaDisplayYear(item);
-  const posterUrl = getMediaPosterUrl(item);
-  const hasPoster = !!posterUrl && !imageError;
-  const rating = item.canonical_metadata?.rating;
-  const status = item.metadata_status;
+  // Resolve target item and metadata
+  const resolvedItem = item || group?.featuredItem;
+  if (!resolvedItem) return null;
 
-  const Icon = getCategoryIcon(item.category);
+  const title = group ? group.title : getMediaDisplayName(resolvedItem);
+  const year = group ? group.year : getMediaDisplayYear(resolvedItem);
+  const posterUrl = group ? group.posterUrl : getMediaPosterUrl(resolvedItem);
+  const hasPoster = !!posterUrl && !imageError;
+  const rating = group ? group.rating : resolvedItem.canonical_metadata?.rating;
+  const status = group ? group.metadataStatus : resolvedItem.metadata_status;
+  const isOffline = isOfflineProp !== undefined ? isOfflineProp : !!(group ? group.isOffline : false);
+  const category = group ? group.category : resolvedItem.category;
+  const isSeries = group?.type === 'series';
+  const episodeCount = group?.episodes.length || 1;
+
+  const Icon = getCategoryIcon(category);
 
   React.useEffect(() => {
     setImageError(false);
   }, [posterUrl]);
+
+  const handleCardClick = () => {
+    if (group && onSelectGroup) {
+      onSelectGroup(group);
+    } else {
+      onSelect(resolvedItem);
+    }
+  };
+
+  const handlePlayClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onPlay(resolvedItem);
+  };
 
   return (
     <div
@@ -54,7 +86,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect,
         userSelect: 'none',
         touchAction: 'manipulation',
       }}
-      onClick={() => onSelect(item)}
+      onClick={handleCardClick}
       onPointerDown={() => setPressed(true)}
       onPointerUp={() => setPressed(false)}
       onPointerLeave={() => setPressed(false)}
@@ -193,21 +225,44 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect,
           <span />
         )}
 
-        {/* Offline downloaded badge */}
-        {isOffline && (
-          <span style={{
-            background: '#10b981',
-            borderRadius: '50%',
-            width: '18px',
-            height: '18px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(16,185,129,0.5)',
-          }}>
-            <Check size={10} color="#fff" strokeWidth={3} />
-          </span>
-        )}
+        {/* Right side: Offline badge or Series Episode Count */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          {isSeries && (
+            <span style={{
+              background: 'rgba(99,102,241,0.88)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              borderRadius: '6px',
+              padding: '2px 6px',
+              fontSize: '0.6rem',
+              fontWeight: 800,
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+              boxShadow: '0 2px 8px rgba(99,102,241,0.4)',
+            }}>
+              <Layers size={9} />
+              {episodeCount} {episodeCount === 1 ? 'Ep' : 'Eps'}
+            </span>
+          )}
+
+          {/* Offline downloaded badge */}
+          {isOffline && (
+            <span style={{
+              background: '#10b981',
+              borderRadius: '50%',
+              width: '18px',
+              height: '18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(16,185,129,0.5)',
+            }}>
+              <Check size={10} color="#fff" strokeWidth={3} />
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Bottom Vignette with Canonical Title & Quick Play */}
@@ -252,10 +307,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect,
 
         {/* Quick Stream Button */}
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onPlay(item);
-          }}
+          onClick={handlePlayClick}
           aria-label="Play"
           style={{
             width: '32px',

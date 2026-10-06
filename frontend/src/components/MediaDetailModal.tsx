@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import {
   X, Play, Download, Trash2, Film, ShieldAlert, ExternalLink,
-  Star, Search, RefreshCw, Lock, Unlock, AlertTriangle, CheckCircle2, Loader2
+  Star, Search, RefreshCw, Lock, Unlock, AlertTriangle, CheckCircle2, Loader2, Check
 } from 'lucide-react';
 import type { MediaItem, MetadataCandidate } from '../types';
+import type { MediaGroup } from '../utils/mediaOrganizer';
 import {
   formatBytes,
   formatRuntime,
@@ -21,8 +22,10 @@ import {
   unlockMetadata,
 } from '../api';
 
-interface MediaDetailModalProps {
+export interface MediaDetailModalProps {
   item: MediaItem | null;
+  group?: MediaGroup | null;
+  offlineIds?: Set<number>;
   onClose: () => void;
   isOffline: boolean;
   onStartDownload: (item: MediaItem) => void;
@@ -33,9 +36,11 @@ interface MediaDetailModalProps {
 }
 
 export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
-  item,
+  item: rawItem,
+  group,
+  offlineIds,
   onClose,
-  isOffline,
+  isOffline: isOfflineProp,
   onStartDownload,
   onDeleteDownload,
   onWatch,
@@ -54,7 +59,11 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const [isSelecting, setIsSelecting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  const backdropUrl = item ? (getMediaBackdropUrl(item, 'w1280') || getMediaPosterUrl(item, 'original')) : undefined;
+  const item = rawItem || group?.featuredItem || null;
+  const isSeriesGroup = group?.type === 'series';
+  const episodes = group?.episodes || [];
+
+  const backdropUrl = group?.backdropUrl || (item ? (getMediaBackdropUrl(item, 'w1280') || getMediaPosterUrl(item, 'original')) : undefined);
 
   React.useEffect(() => {
     setBackdropError(false);
@@ -62,19 +71,33 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   if (!item) return null;
 
-  const title = getMediaDisplayName(item);
-  const year = getMediaDisplayYear(item);
-  const runtime = formatRuntime(item.canonical_metadata?.runtime);
-  const rating = item.canonical_metadata?.rating;
-  const genres = item.canonical_metadata?.genres || [];
-  const overview = item.canonical_metadata?.overview;
-  const status = item.metadata_status || 'PENDING';
-  const isLocked = !!item.metadata_locked;
+  const title = group ? group.title : getMediaDisplayName(item);
+  const year = group ? group.year : getMediaDisplayYear(item);
+  const runtime = group?.runtime ? formatRuntime(group.runtime) : formatRuntime(item.canonical_metadata?.runtime);
+  const rating = group ? group.rating : item.canonical_metadata?.rating;
+  const genres = group ? group.genres : (item.canonical_metadata?.genres || []);
+  const overview = group ? group.overview : item.canonical_metadata?.overview;
+  const status = group ? (group.metadataStatus || 'PENDING') : (item.metadata_status || 'PENDING');
+  const isLocked = group ? !!group.metadataLocked : !!item.metadata_locked;
+  const isOffline = isOfflineProp !== undefined ? isOfflineProp : !!(group ? group.isOffline : false);
 
   const techMeta = parseMediaMetadata(item.filename);
   const extension = item.filename.split('.').pop()?.toUpperCase() || 'MKV';
   const requiredWithSafetyMargin = Math.round(item.size * 1.05);
   const hasEnoughStorage = deviceFreeBytes >= requiredWithSafetyMargin;
+
+  const handleOpenVlcForEpisode = async (epItem: MediaItem) => {
+    const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (isMobile) {
+      const intentUrl = getVlcIntentUrl(epItem.id, epItem.filename);
+      const vlcProto = getVlcProtocolUrl(epItem.id);
+      const a = document.createElement('a');
+      a.href = /android/i.test(navigator.userAgent) ? intentUrl : vlcProto;
+      a.click();
+      return;
+    }
+    await openVlcOnHost(epItem.id);
+  };
 
   const handleOpenVlc = async () => {
     setIsLaunchingVlc(true);
@@ -387,6 +410,125 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 </>
               )}
             </div>
+
+            {/* Series Episode Hub */}
+            {isSeriesGroup && episodes.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.94rem', fontWeight: 800, color: '#fff', fontFamily: 'var(--font-display, inherit)' }}>
+                    Episodes ({episodes.length})
+                  </span>
+                  <span style={{
+                    fontSize: '0.68rem', fontWeight: 800, color: '#818cf8',
+                    background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: '6px',
+                    border: '1px solid rgba(99,102,241,0.25)',
+                  }}>
+                    Season 1
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {episodes.map((ep) => {
+                    const epOffline = offlineIds?.has(ep.item.id) || false;
+                    return (
+                      <div
+                        key={ep.item.id}
+                        style={{
+                          background: 'rgba(255,255,255,0.04)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: '12px',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                          <span style={{
+                            background: 'rgba(99,102,241,0.2)',
+                            color: '#a5b4fc',
+                            border: '1px solid rgba(99,102,241,0.35)',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            flexShrink: 0,
+                          }}>
+                            {ep.episodeLabel}
+                          </span>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <p style={{
+                              fontSize: '0.8rem',
+                              fontWeight: 700,
+                              color: '#fff',
+                              margin: 0,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}>
+                              {ep.cleanTitle}
+                            </p>
+                            <span style={{ fontSize: '0.66rem', color: '#94a3b8' }}>
+                              {ep.quality} · {formatBytes(ep.item.size)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Direct action buttons for this episode */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                          <button
+                            onClick={() => { onClose(); onWatch(ep.item); }}
+                            aria-label={`Stream ${ep.episodeLabel}`}
+                            style={{
+                              width: '32px', height: '32px', borderRadius: '8px',
+                              background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                              border: 'none', color: '#fff', display: 'flex',
+                              alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                            }}
+                          >
+                            <Play size={13} fill="#fff" />
+                          </button>
+
+                          <button
+                            onClick={() => handleOpenVlcForEpisode(ep.item)}
+                            aria-label={`VLC ${ep.episodeLabel}`}
+                            style={{
+                              width: '32px', height: '32px', borderRadius: '8px',
+                              background: 'rgba(249,115,22,0.18)', border: '1px solid rgba(249,115,22,0.35)',
+                              color: '#fdba74', display: 'flex', alignItems: 'center',
+                              justifyContent: 'center', cursor: 'pointer',
+                            }}
+                          >
+                            <ExternalLink size={13} />
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              if (epOffline) {
+                                onDeleteDownload(ep.item);
+                              } else {
+                                onStartDownload(ep.item);
+                              }
+                            }}
+                            aria-label="Download"
+                            style={{
+                              width: '32px', height: '32px', borderRadius: '8px',
+                              background: epOffline ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.06)',
+                              border: epOffline ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.12)',
+                              color: epOffline ? '#10b981' : '#cbd5e1',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                            }}
+                          >
+                            {epOffline ? <Check size={14} strokeWidth={2.5} /> : <Download size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Technical File Information Section */}
             <div style={{

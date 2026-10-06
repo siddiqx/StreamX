@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
-import { Play, Info, Radio, ArrowRight, Sparkles, Tv, Film, ExternalLink, Star, Clock } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import {
+  Play, Info, Radio, ArrowRight, Sparkles, Tv, Film, ExternalLink,
+  Star, Clock, Flame, Heart, Compass, Laugh
+} from 'lucide-react';
 import type { MediaItem, TelegramTransfer } from '../types';
+import type { MediaGroup } from '../utils/mediaOrganizer';
+import { organizeMediaLibrary } from '../utils/mediaOrganizer';
 import { MediaCard } from '../components/MediaCard';
 import {
   formatRuntime,
@@ -17,6 +22,7 @@ interface HomeViewProps {
   offlineIds: Set<number>;
   activeTransfers: TelegramTransfer[];
   onSelectMedia: (item: MediaItem) => void;
+  onSelectGroup?: (group: MediaGroup) => void;
   onPlayMedia: (item: MediaItem) => void;
   onViewAllLibrary: (category?: string) => void;
   onOpenTransfers: () => void;
@@ -29,42 +35,33 @@ export const HomeView: React.FC<HomeViewProps> = ({
   offlineIds,
   activeTransfers,
   onSelectMedia,
+  onSelectGroup,
   onPlayMedia,
   onViewAllLibrary,
   onOpenTransfers,
 }) => {
   const [heroError, setHeroError] = useState(false);
 
+  // Automatically organize media into series groups, anime, and genre shelves
+  const library = useMemo(() => organizeMediaLibrary(media, offlineIds), [media, offlineIds]);
+
   // Pick first item that has a backdrop or canonical metadata, or fallback to first
-  const featured = media.find(m => getMediaBackdropUrl(m) || m.canonical_metadata) || media[0] || null;
-  const featuredTitle = featured ? getMediaDisplayName(featured) : '';
-  const featuredYear = featured ? getMediaDisplayYear(featured) : null;
-  const featuredBackdrop = featured ? getMediaBackdropUrl(featured, 'w1280') : undefined;
+  const featuredGroup = library.allGroups.find(g => g.backdropUrl || g.posterUrl) || library.allGroups[0] || null;
+  const featured = featuredGroup?.featuredItem || media[0] || null;
+  const featuredTitle = featuredGroup ? featuredGroup.title : (featured ? getMediaDisplayName(featured) : '');
+  const featuredYear = featuredGroup ? featuredGroup.year : (featured ? getMediaDisplayYear(featured) : null);
+  const featuredBackdrop = featuredGroup?.backdropUrl || (featured ? getMediaBackdropUrl(featured, 'w1280') : undefined);
 
   React.useEffect(() => {
     setHeroError(false);
   }, [featuredBackdrop]);
-  const featuredRuntime = featured ? formatRuntime(featured.canonical_metadata?.runtime) : undefined;
-  const featuredRating = featured?.canonical_metadata?.rating;
-  const featuredGenres = featured?.canonical_metadata?.genres || [];
-  const featuredOverview = featured?.canonical_metadata?.overview;
 
-  // Filter discovery categories
-  const recentlyAdded = [...media].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  ).slice(0, 15);
-
-  const movies = media.filter(
-    m => m.canonical_metadata?.media_type === 'movie' || m.category.toLowerCase() === 'movies'
-  );
-  const tvShows = media.filter(
-    m => (m.canonical_metadata?.media_type === 'tv' || m.category.toLowerCase() === 'tv shows') &&
-         m.category.toLowerCase() !== 'anime'
-  );
-  const anime = media.filter(
-    m => m.category.toLowerCase() === 'anime' ||
-         m.filename.toLowerCase().includes('anime')
-  );
+  const featuredRuntime = featuredGroup?.runtime
+    ? formatRuntime(featuredGroup.runtime)
+    : (featured ? formatRuntime(featured.canonical_metadata?.runtime) : undefined);
+  const featuredRating = featuredGroup?.rating || featured?.canonical_metadata?.rating;
+  const featuredGenres = featuredGroup?.genres || featured?.canonical_metadata?.genres || [];
+  const featuredOverview = featuredGroup?.overview || featured?.canonical_metadata?.overview;
 
   const activeTransfer = activeTransfers.find(
     t => t.status === 'FETCHING_TELEGRAM' || t.status === 'UPLOADING_DRIVE' || t.status === 'QUEUED'
@@ -85,12 +82,37 @@ export const HomeView: React.FC<HomeViewProps> = ({
     await openVlcOnHost(featured.id);
   };
 
-  type Section = { title: string; icon: React.ReactNode; items: MediaItem[]; cat: string };
+  const handleHeroClick = () => {
+    if (featuredGroup && onSelectGroup) {
+      onSelectGroup(featuredGroup);
+    } else if (featured) {
+      onSelectMedia(featured);
+    }
+  };
+
+  type Section = { title: string; icon: React.ReactNode; items: MediaGroup[]; cat: string };
+
+  // Icon resolver for dynamic genre shelves
+  const getShelfIcon = (iconName: string) => {
+    switch (iconName) {
+      case 'Sparkles': return <Sparkles size={15} color="#c084fc" />;
+      case 'Tv': return <Tv size={15} color="#67e8f9" />;
+      case 'Flame': return <Flame size={15} color="#f97316" />;
+      case 'Compass': return <Compass size={15} color="#38bdf8" />;
+      case 'Heart': return <Heart size={15} color="#ec4899" />;
+      case 'Laugh': return <Laugh size={15} color="#fbbf24" />;
+      default: return <Film size={15} color="#818cf8" />;
+    }
+  };
+
   const sections: Section[] = [
-    { title: 'Recently Added', icon: <Clock size={15} color="#818cf8" />, items: recentlyAdded, cat: '' },
-    { title: 'Movies', icon: <Film size={15} color="#818cf8" />, items: movies, cat: 'Movies' },
-    { title: 'TV Shows', icon: <Tv size={15} color="#67e8f9" />, items: tvShows, cat: 'TV Shows' },
-    { title: 'Anime', icon: <Sparkles size={15} color="#c084fc" />, items: anime, cat: 'Anime' },
+    { title: 'Recently Added', icon: <Clock size={15} color="#818cf8" />, items: library.allGroups.slice(0, 15), cat: '' },
+    ...library.genreShelves.map((shelf) => ({
+      title: shelf.title,
+      icon: getShelfIcon(shelf.iconName),
+      items: shelf.items,
+      cat: shelf.categoryFilter || '',
+    })),
   ].filter(s => s.items.length > 0);
 
   return (
@@ -284,7 +306,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </button>
 
               <button
-                onClick={() => onSelectMedia(featured)}
+                onClick={handleHeroClick}
                 aria-label="Details"
                 style={{
                   width: '48px', height: '48px', flexShrink: 0, borderRadius: '12px',
@@ -335,12 +357,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </button>
           </div>
           <div className="scroll-row" style={{ display: 'flex', gap: '12px', overflowX: 'auto', padding: '4px 16px 12px' }}>
-            {s.items.map(item => (
+            {s.items.map(group => (
               <MediaCard
-                key={item.id}
-                item={item}
-                isOffline={offlineIds.has(item.id)}
+                key={group.id}
+                group={group}
+                isOffline={group.isOffline}
                 onSelect={onSelectMedia}
+                onSelectGroup={onSelectGroup}
                 onPlay={onPlayMedia}
                 width={CARD_W}
               />

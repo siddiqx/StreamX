@@ -311,7 +311,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="text"
               value={apiUrlInput}
               onChange={(e) => setApiUrlInput(e.target.value)}
-              placeholder="e.g. https://streamx-backend.onrender.com"
+              placeholder="e.g. https://streamx-backend-cqm0.onrender.com"
               style={{
                 flex: 1, height: '38px', borderRadius: '8px',
                 background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-subtle)',
@@ -330,6 +330,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               }}
             >
               Save
+            </button>
+            <button
+              onClick={() => {
+                try { localStorage.removeItem('streamx_api_base'); } catch {}
+                window.location.reload();
+              }}
+              title="Reset to default Render cloud backend"
+              style={{
+                height: '38px', padding: '0 10px', borderRadius: '8px',
+                background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-subtle)',
+                color: 'var(--text-muted)', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Reset
             </button>
           </div>
         </div>

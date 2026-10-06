@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { MediaItem, TelegramTransfer, DeviceDownload } from './types';
-import { fetchMedia, fetchTransfers } from './api';
+import type { MediaGroup } from './utils/mediaOrganizer';
+import { fetchMedia, fetchTransfers, getCachedMedia, getCachedTransfers } from './api';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
@@ -15,8 +16,10 @@ import { SettingsView } from './views/SettingsView';
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<NavTab>('home');
-  const [media, setMedia] = useState<MediaItem[]>([]);
-  const [transfers, setTransfers] = useState<TelegramTransfer[]>([]);
+  // Stale-While-Revalidate: Instant 0ms load from localStorage cache
+  const [media, setMedia] = useState<MediaItem[]>(getCachedMedia);
+  const [transfers, setTransfers] = useState<TelegramTransfer[]>(getCachedTransfers);
+  const [selectedGroup, setSelectedGroup] = useState<MediaGroup | null>(null);
   const [downloads, setDownloads] = useState<DeviceDownload[]>(() => {
     try {
       const saved = localStorage.getItem('streamx_downloads');
@@ -227,7 +230,14 @@ export const App: React.FC = () => {
             media={media}
             offlineIds={offlineIds}
             activeTransfers={transfers}
-            onSelectMedia={(item) => setSelectedMedia(item)}
+            onSelectMedia={(item) => {
+              setSelectedMedia(item);
+              setSelectedGroup(null);
+            }}
+            onSelectGroup={(grp) => {
+              setSelectedGroup(grp);
+              setSelectedMedia(grp.featuredItem);
+            }}
             onPlayMedia={(item) => setPlayingMedia(item)}
             onViewAllLibrary={(cat) => {
               setSelectedCategoryFilter(cat || 'All');
@@ -241,7 +251,14 @@ export const App: React.FC = () => {
           <SearchView
             allMedia={media}
             offlineIds={offlineIds}
-            onSelectMedia={(item) => setSelectedMedia(item)}
+            onSelectMedia={(item) => {
+              setSelectedMedia(item);
+              setSelectedGroup(null);
+            }}
+            onSelectGroup={(grp) => {
+              setSelectedGroup(grp);
+              setSelectedMedia(grp.featuredItem);
+            }}
             onPlayMedia={(item) => setPlayingMedia(item)}
           />
         )}
@@ -250,7 +267,14 @@ export const App: React.FC = () => {
           <LibraryView
             media={media}
             offlineIds={offlineIds}
-            onSelectMedia={(item) => setSelectedMedia(item)}
+            onSelectMedia={(item) => {
+              setSelectedMedia(item);
+              setSelectedGroup(null);
+            }}
+            onSelectGroup={(grp) => {
+              setSelectedGroup(grp);
+              setSelectedMedia(grp.featuredItem);
+            }}
             onPlayMedia={(item) => setPlayingMedia(item)}
             initialCategory={selectedCategoryFilter}
           />
@@ -297,12 +321,18 @@ export const App: React.FC = () => {
 
       <MediaDetailModal
         item={selectedMedia}
-        onClose={() => setSelectedMedia(null)}
+        group={selectedGroup}
+        offlineIds={offlineIds}
+        onClose={() => {
+          setSelectedMedia(null);
+          setSelectedGroup(null);
+        }}
         isOffline={selectedMedia ? offlineIds.has(selectedMedia.id) : false}
         onStartDownload={handleStartDownload}
         onDeleteDownload={handleDeleteDownload}
         onWatch={(item) => {
           setSelectedMedia(null);
+          setSelectedGroup(null);
           setPlayingMedia(item);
         }}
         deviceFreeBytes={deviceFreeBytes}

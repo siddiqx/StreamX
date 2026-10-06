@@ -1,41 +1,110 @@
 import type { CategorySummary, MediaItem, TelegramTransfer } from './types';
 
+export const CLOUD_BACKEND_URL = 'https://streamx-backend-cqm0.onrender.com';
+
 export const getApiBase = (): string => {
   if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem('streamx_api_url');
-    if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
-  }
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL.replace(/\/+$/, '');
-  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-    if (window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.168.')) {
-      return 'https://streamx-backend-cqm0.onrender.com';
+    const saved = localStorage.getItem('streamx_api_url') || localStorage.getItem('streamx_api_base');
+    // If user previously had unreachable localhost:8000 saved, clean it up
+    if (saved && (saved.includes('localhost:8000') || saved.includes('127.0.0.1:8000'))) {
+      localStorage.removeItem('streamx_api_url');
+      localStorage.removeItem('streamx_api_base');
+    } else if (saved && saved.trim()) {
+      return saved.trim().replace(/\/+$/, '');
     }
-    return `http://${window.location.hostname}:8000`;
   }
-  return 'https://streamx-backend-cqm0.onrender.com';
+  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.trim()) {
+    return import.meta.env.VITE_API_URL.trim().replace(/\/+$/, '');
+  }
+  return CLOUD_BACKEND_URL;
 };
 
 export function setCustomApiBase(url: string): void {
   if (typeof window !== 'undefined') {
     if (url.trim()) {
       localStorage.setItem('streamx_api_url', url.trim());
+      localStorage.setItem('streamx_api_base', url.trim());
     } else {
       localStorage.removeItem('streamx_api_url');
+      localStorage.removeItem('streamx_api_base');
     }
   }
 }
 
 export const API_BASE = getApiBase();
 
-export async function fetchMedia(category?: string): Promise<MediaItem[]> {
+// --- Instant 0ms Local Storage Cache (Stale-While-Revalidate) ---
+
+export function getCachedMedia(): MediaItem[] {
+  if (typeof window === 'undefined') return [];
   try {
-    const url = category ? `${API_BASE}/media?category=${encodeURIComponent(category)}` : `${API_BASE}/media`;
-    const res = await fetch(url);
+    const raw = localStorage.getItem('streamx_cached_media');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function setCachedMedia(items: MediaItem[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (Array.isArray(items) && items.length > 0) {
+      localStorage.setItem('streamx_cached_media', JSON.stringify(items));
+    }
+  } catch {}
+}
+
+export function getCachedTransfers(): TelegramTransfer[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem('streamx_cached_transfers');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function setCachedTransfers(transfers: TelegramTransfer[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('streamx_cached_transfers', JSON.stringify(transfers));
+  } catch {}
+}
+
+export async function fetchMedia(category?: string): Promise<MediaItem[]> {
+  const url = category ? `${API_BASE}/media?category=${encodeURIComponent(category)}` : `${API_BASE}/media`;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    const data: MediaItem[] = await res.json();
+    if (!category && Array.isArray(data) && data.length > 0) {
+      setCachedMedia(data);
+    }
+    return data;
   } catch (err) {
-    console.warn('API error fetching media, falling back to cache:', err);
-    return [];
+    console.warn('API error fetching media, serving cached library:', err);
+    // If API_BASE failed and wasn't the cloud backend, try fallback to cloud
+    if (API_BASE !== CLOUD_BACKEND_URL) {
+      try {
+        const fallbackRes = await fetch(`${CLOUD_BACKEND_URL}/media`);
+        if (fallbackRes.ok) {
+          const fallbackData = await fallbackRes.json();
+          if (Array.isArray(fallbackData) && fallbackData.length > 0) {
+            setCachedMedia(fallbackData);
+            return fallbackData;
+          }
+        }
+      } catch {}
+    }
+    return getCachedMedia();
   }
 }
 

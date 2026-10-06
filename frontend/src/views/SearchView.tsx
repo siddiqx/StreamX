@@ -1,19 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search as SearchIcon, X, Film } from 'lucide-react';
 import type { MediaItem } from '../types';
+import type { MediaGroup } from '../utils/mediaOrganizer';
+import { organizeMediaLibrary } from '../utils/mediaOrganizer';
 import { MediaCard } from '../components/MediaCard';
-import { useEffect } from 'react';
 
 interface SearchViewProps {
   allMedia: MediaItem[];
   offlineIds: Set<number>;
   onSelectMedia: (item: MediaItem) => void;
+  onSelectGroup?: (group: MediaGroup) => void;
   onPlayMedia: (item: MediaItem) => void;
 }
 
 const CATS = ['All', 'Movies', 'TV Shows', 'Anime', 'Other'];
 
-export const SearchView: React.FC<SearchViewProps> = ({ allMedia, offlineIds, onSelectMedia, onPlayMedia }) => {
+export const SearchView: React.FC<SearchViewProps> = ({
+  allMedia,
+  offlineIds,
+  onSelectMedia,
+  onSelectGroup,
+  onPlayMedia,
+}) => {
   const [query, setQuery] = useState('');
   const [selectedCat, setSelectedCat] = useState('All');
   const [results, setResults] = useState<MediaItem[]>(allMedia);
@@ -32,6 +40,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ allMedia, offlineIds, on
     }
     setResults(filtered);
   }, [query, selectedCat, allMedia]);
+
+  const organized = useMemo(() => organizeMediaLibrary(results, offlineIds), [results, offlineIds]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '0 16px 40px' }}>
@@ -84,16 +94,22 @@ export const SearchView: React.FC<SearchViewProps> = ({ allMedia, offlineIds, on
       ) : (
         <>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-faint)', fontWeight: 500 }}>
-            {results.length} {results.length === 1 ? 'result' : 'results'}
+            {organized.allGroups.length} {organized.allGroups.length === 1 ? 'title' : 'titles'} ({results.length} files)
           </p>
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(clamp(115px, 30vw, 155px), 1fr))',
             gap: '12px',
           }}>
-            {results.map(item => (
-              <MediaCard key={item.id} item={item} isOffline={offlineIds.has(item.id)}
-                onSelect={onSelectMedia} onPlay={onPlayMedia} />
+            {organized.allGroups.map(group => (
+              <MediaCard
+                key={group.id}
+                group={group}
+                isOffline={group.isOffline}
+                onSelect={onSelectMedia}
+                onSelectGroup={onSelectGroup}
+                onPlay={onPlayMedia}
+              />
             ))}
           </div>
         </>
