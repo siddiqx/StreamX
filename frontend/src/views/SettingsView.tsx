@@ -183,6 +183,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         const registrations = await navigator.serviceWorker.getRegistrations();
         await Promise.all(registrations.map(r => r.unregister()));
       }
+      try {
+        localStorage.removeItem('streamx_cached_media');
+        localStorage.removeItem('streamx_cached_transfers');
+      } catch {}
     } catch (err) {
       console.error('Failed to clear caches:', err);
     } finally {

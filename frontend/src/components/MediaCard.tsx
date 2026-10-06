@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle, Layers } from 'lucide-react';
 import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
-import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl } from '../api';
+import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl, API_BASE } from '../api';
 import { getWatchProgress, getWatchHistory } from '../utils/watchHistory';
 import type { WatchHistoryItem } from '../utils/watchHistory';
 import { launchVlcWithTracking } from '../utils/playerSettings';
@@ -43,7 +43,26 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const title = group ? group.title : getMediaDisplayName(resolvedItem);
   const year = group ? group.year : getMediaDisplayYear(resolvedItem);
   const posterUrl = group ? group.posterUrl : getMediaPosterUrl(resolvedItem);
-  const hasPoster = !!posterUrl && !imageError;
+
+  const [currentPoster, setCurrentPoster] = useState<string | undefined>(posterUrl);
+  const [hasTriedProxy, setHasTriedProxy] = useState(false);
+
+  React.useEffect(() => {
+    setCurrentPoster(posterUrl);
+    setImageError(false);
+    setHasTriedProxy(false);
+  }, [posterUrl]);
+
+  const handlePosterError = () => {
+    if (!hasTriedProxy && posterUrl && posterUrl.includes('image.tmdb.org')) {
+      setHasTriedProxy(true);
+      setCurrentPoster(`${API_BASE}/media/image-proxy?url=${encodeURIComponent(posterUrl)}`);
+    } else {
+      setImageError(true);
+    }
+  };
+
+  const hasPoster = !!currentPoster && !imageError;
   const rating = group ? group.rating : resolvedItem.canonical_metadata?.rating;
   const status = group ? group.metadataStatus : resolvedItem.metadata_status;
   const isOffline = isOfflineProp !== undefined ? isOfflineProp : !!(group ? group.isOffline : false);
@@ -80,10 +99,6 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   }, [resolvedItem.id, group]);
 
   const Icon = getCategoryIcon(category);
-
-  React.useEffect(() => {
-    setImageError(false);
-  }, [posterUrl]);
 
   const handleCardClick = () => {
     if (group && onSelectGroup) {
@@ -122,14 +137,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       onPointerLeave={() => setPressed(false)}
     >
       {/* Poster Image */}
-      {hasPoster ? (
+      {hasPoster && currentPoster ? (
         <img
-          src={posterUrl}
+          src={currentPoster}
           alt={title}
           loading="lazy"
-          referrerPolicy="no-referrer"
-          crossOrigin="anonymous"
-          onError={() => setImageError(true)}
+          onError={handlePosterError}
           style={{
             width: '100%',
             height: '100%',

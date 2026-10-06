@@ -12,6 +12,7 @@ import {
   getMediaBackdropUrl,
   getMediaDisplayName,
   getMediaDisplayYear,
+  API_BASE,
 } from '../api';
 
 import { getWatchHistory } from '../utils/watchHistory';
@@ -70,10 +71,23 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const featuredTitle = featuredGroup ? featuredGroup.title : (featured ? getMediaDisplayName(featured) : '');
   const featuredYear = featuredGroup ? featuredGroup.year : (featured ? getMediaDisplayYear(featured) : null);
   const featuredBackdrop = featuredGroup?.backdropUrl || (featured ? getMediaBackdropUrl(featured, 'w1280') : undefined);
+  const [currentBackdrop, setCurrentBackdrop] = useState<string | undefined>(featuredBackdrop);
+  const [hasTriedBackdropProxy, setHasTriedBackdropProxy] = useState(false);
 
   React.useEffect(() => {
+    setCurrentBackdrop(featuredBackdrop);
     setHeroError(false);
+    setHasTriedBackdropProxy(false);
   }, [featuredBackdrop]);
+
+  const handleHeroBackdropError = () => {
+    if (!hasTriedBackdropProxy && featuredBackdrop && featuredBackdrop.includes('image.tmdb.org')) {
+      setHasTriedBackdropProxy(true);
+      setCurrentBackdrop(`${API_BASE}/media/image-proxy?url=${encodeURIComponent(featuredBackdrop)}`);
+    } else {
+      setHeroError(true);
+    }
+  };
 
   const featuredRuntime = featuredGroup?.runtime
     ? formatRuntime(featuredGroup.runtime)
@@ -193,14 +207,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
           }}
         >
           {/* Backdrop artwork */}
-          {featuredBackdrop && !heroError ? (
+          {currentBackdrop && !heroError ? (
             <img
-              src={featuredBackdrop}
+              src={currentBackdrop}
               alt=""
               loading="eager"
-              referrerPolicy="no-referrer"
-              crossOrigin="anonymous"
-              onError={() => setHeroError(true)}
+              onError={handleHeroBackdropError}
               style={{
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
                 objectFit: 'cover', objectPosition: 'center 20%', opacity: 0.55,

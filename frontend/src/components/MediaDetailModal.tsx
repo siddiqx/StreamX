@@ -15,6 +15,7 @@ import {
   parseMediaMetadata,
   searchMetadataCandidates,
   selectMetadata,
+  API_BASE,
 } from '../api';
 import { launchVlcWithTracking } from '../utils/playerSettings';
 import {
@@ -86,10 +87,23 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   };
 
   const backdropUrl = group?.backdropUrl || (item ? (getMediaBackdropUrl(item, 'w1280') || getMediaPosterUrl(item, 'original')) : undefined);
+  const [currentBackdrop, setCurrentBackdrop] = useState<string | undefined>(backdropUrl);
+  const [hasTriedBackdropProxy, setHasTriedBackdropProxy] = useState(false);
 
   React.useEffect(() => {
+    setCurrentBackdrop(backdropUrl);
     setBackdropError(false);
+    setHasTriedBackdropProxy(false);
   }, [backdropUrl]);
+
+  const handleBackdropError = () => {
+    if (!hasTriedBackdropProxy && backdropUrl && backdropUrl.includes('image.tmdb.org')) {
+      setHasTriedBackdropProxy(true);
+      setCurrentBackdrop(`${API_BASE}/media/image-proxy?url=${encodeURIComponent(backdropUrl)}`);
+    } else {
+      setBackdropError(true);
+    }
+  };
 
   if (!item) return null;
 
@@ -183,13 +197,11 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
           {/* Hero Backdrop Header */}
           <div style={{ position: 'relative', height: 'clamp(180px, 26vh, 230px)', background: '#0a0d17', flexShrink: 0 }}>
-            {backdropUrl && !backdropError ? (
+            {currentBackdrop && !backdropError ? (
               <img
-                src={backdropUrl}
+                src={currentBackdrop}
                 alt={title}
-                referrerPolicy="no-referrer"
-                crossOrigin="anonymous"
-                onError={() => setBackdropError(true)}
+                onError={handleBackdropError}
                 style={{
                   width: '100%', height: '100%', objectFit: 'cover',
                   objectPosition: 'center 20%', display: 'block',
@@ -703,8 +715,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                         <img
                           src={cand.poster_url}
                           alt=""
-                          referrerPolicy="no-referrer"
-                          crossOrigin="anonymous"
+                          loading="lazy"
                           style={{ width: '48px', height: '72px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }}
                         />
                       ) : (

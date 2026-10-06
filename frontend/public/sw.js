@@ -1,4 +1,4 @@
-const CACHE_NAME = 'streamx-v4';
+const CACHE_NAME = 'streamx-v5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -34,6 +34,11 @@ self.addEventListener('message', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+
+  // CRITICAL: NEVER intercept cross-origin requests (e.g. image.tmdb.org, cloud backend API, Google Fonts)
+  if (url.origin !== self.location.origin) {
+    return;
+  }
 
   // Do not intercept backend API calls or media streaming requests
   if (

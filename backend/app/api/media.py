@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -121,6 +121,30 @@ async def list_categories(
     result = await db.execute(stmt)
     rows = result.all()
     return [{"category": row[0], "count": row[1]} for row in rows]
+
+
+@router.get("/image-proxy")
+async def proxy_image(url: str = Query(..., description="The TMDB or CDN image URL to proxy")):
+    """Safely proxy metadata/poster images (e.g. from TMDB) to bypass ISP/client CORS or domain blocks."""
+    if not (url.startswith("https://image.tmdb.org/") or url.startswith("http://image.tmdb.org/")):
+        raise HTTPException(status_code=400, detail="Only TMDB images can be proxied")
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch image")
+            return Response(
+                content=resp.content,
+                media_type=resp.headers.get("content-type", "image/jpeg"),
+                headers={
+                    "Cache-Control": "public, max-age=604800, stale-while-revalidate=2592000",
+                    "Access-Control-Allow-Origin": "*",
+                },
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Image proxy error: {str(e)}")
 
 
 @router.get("/metadata/stats")
