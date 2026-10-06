@@ -11,6 +11,8 @@ export interface MediaCardProps {
   item?: MediaItem;
   group?: MediaGroup;
   isOffline?: boolean;
+  episodeLabelBadge?: string;
+  overrideProgress?: WatchHistoryItem | null;
   onSelect: (item: MediaItem) => void;
   onSelectGroup?: (group: MediaGroup) => void;
   onPlay?: (item: MediaItem) => void;
@@ -18,17 +20,19 @@ export interface MediaCardProps {
 }
 
 const getCategoryIcon = (cat: string) => {
-  switch (cat.toLowerCase()) {
-    case 'anime': return Sparkles;
-    case 'tv shows': return Tv;
-    default: return Film;
-  }
+  const c = cat.toLowerCase();
+  if (c === 'anime' || c.includes('anime series')) return Sparkles;
+  if (c === 'anime movies' || c.includes('anime movie')) return Sparkles;
+  if (c === 'tv shows' || c.includes('tv')) return Tv;
+  return Film;
 };
 
 export const MediaCard: React.FC<MediaCardProps> = ({
   item,
   group,
   isOffline: isOfflineProp,
+  episodeLabelBadge,
+  overrideProgress,
   onSelect,
   onSelectGroup,
   width,
@@ -71,6 +75,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const episodeCount = group?.episodes.length || 1;
 
   const [watchProgress, setWatchProgress] = useState<WatchHistoryItem | null>(() => {
+    if (overrideProgress !== undefined) return overrideProgress;
     if (group && group.episodes && group.episodes.length > 0) {
       const history = getWatchHistory();
       const epIds = new Set(group.episodes.map(e => e.item.id));
@@ -81,6 +86,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   });
 
   React.useEffect(() => {
+    if (overrideProgress !== undefined) {
+      setWatchProgress(overrideProgress);
+      return;
+    }
     const handleUpdate = () => {
       if (group && group.episodes && group.episodes.length > 0) {
         const history = getWatchHistory();
@@ -96,7 +105,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
     window.addEventListener('streamx_watch_history_updated', handleUpdate);
     return () => window.removeEventListener('streamx_watch_history_updated', handleUpdate);
-  }, [resolvedItem.id, group]);
+  }, [resolvedItem.id, group, overrideProgress]);
 
   const Icon = getCategoryIcon(category);
 
@@ -268,9 +277,22 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <span />
         )}
 
-        {/* Right side: Offline badge or Series Episode Count */}
+        {/* Right side: Offline badge, Series Episode Count, or Continue Watching Episode */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {isSeries && (
+          {episodeLabelBadge ? (
+            <span style={{
+              background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+              borderRadius: '6px',
+              padding: '2px 6px',
+              fontSize: '0.62rem',
+              fontWeight: 900,
+              color: '#fff',
+              boxShadow: '0 2px 8px rgba(239,68,68,0.5)',
+              letterSpacing: '0.02em',
+            }}>
+              {episodeLabelBadge}
+            </span>
+          ) : isSeries ? (
             <span style={{
               background: 'rgba(99,102,241,0.88)',
               backdropFilter: 'blur(8px)',
@@ -288,7 +310,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               <Layers size={9} />
               {episodeCount} {episodeCount === 1 ? 'Ep' : 'Eps'}
             </span>
-          )}
+          ) : null}
 
           {/* Offline downloaded badge */}
           {isOffline && (

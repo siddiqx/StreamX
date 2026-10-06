@@ -50,19 +50,61 @@ export const HomeView: React.FC<HomeViewProps> = ({
     return () => window.removeEventListener('streamx_watch_history_updated', handleUpdate);
   }, []);
 
-  // Continue Watching items currently in progress
-  const continueWatchingItems = useMemo(() => {
-    return historyItems
-      .filter(h => !h.completed && h.progressPercentage > 0)
-      .map(h => {
-        const item = media.find(m => m.id === h.mediaId);
-        return item ? { history: h, item } : null;
-      })
-      .filter(Boolean) as { history: WatchHistoryItem; item: MediaItem }[];
-  }, [historyItems, media]);
-
   // Automatically organize media into series groups, anime, and genre shelves
   const library = useMemo(() => organizeMediaLibrary(media, offlineIds), [media, offlineIds]);
+
+  // Continue Watching items currently in progress (Collapsed by Series to eliminate duplicate title cards)
+  const continueWatchingList = useMemo(() => {
+    const validHistory = historyItems
+      .filter(h => !h.completed && h.progressPercentage > 0)
+      .sort((a, b) => new Date(b.lastWatchedAt).getTime() - new Date(a.lastWatchedAt).getTime());
+
+    const seenGroupIds = new Set<string>();
+    const seenMediaIds = new Set<number>();
+    const result: {
+      group?: MediaGroup;
+      item: MediaItem;
+      history: WatchHistoryItem;
+      episodeLabel?: string;
+    }[] = [];
+
+    for (const h of validHistory) {
+      const item = media.find(m => m.id === h.mediaId);
+      if (!item) continue;
+
+      // Find if this item belongs to a series group
+      const parentGroup = library.allGroups.find(g =>
+        g.type === 'series' && g.episodes.some(ep => ep.item.id === h.mediaId)
+      );
+
+      if (parentGroup) {
+        if (seenGroupIds.has(parentGroup.id)) {
+          // Already have the latest episode for this series in Continue Watching!
+          continue;
+        }
+        seenGroupIds.add(parentGroup.id);
+        const epObj = parentGroup.episodes.find(ep => ep.item.id === h.mediaId);
+        result.push({
+          group: parentGroup,
+          item: item,
+          history: h,
+          episodeLabel: epObj?.episodeLabel || `Ep ${epObj?.episodeNumber || ''}`,
+        });
+      } else {
+        // Standalone Movie or Single Video
+        if (seenMediaIds.has(item.id)) continue;
+        seenMediaIds.add(item.id);
+        const movieGroup = library.allGroups.find(g => g.featuredItem.id === item.id);
+        result.push({
+          group: movieGroup,
+          item: item,
+          history: h,
+        });
+      }
+    }
+
+    return result;
+  }, [historyItems, media, library.allGroups]);
 
   // Curated Recommendation Pool for the Dynamic Rotating Spotlight Hero
   const recommendedGroups = useMemo(() => {
@@ -551,8 +593,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </section>
       )}
 
-      {/* Continue Watching Row (Active Watch Progress) */}
-      {continueWatchingItems.length > 0 && (
+      {/* Continue Watching Row (Active Watch Progress - Collapsed by Series) */}
+      {continueWatchingList.length > 0 && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <div className="section-header" style={{ padding: '0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -562,16 +604,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </span>
             </div>
             <span style={{ fontSize: '0.74rem', color: 'var(--text-faint)', fontWeight: 600 }}>
-              {continueWatchingItems.length} in progress
+              {continueWatchingList.length} in progress
             </span>
           </div>
           <div className="scroll-row" style={{ display: 'flex', gap: '12px', overflowX: 'auto', padding: '4px 16px 12px' }}>
-            {continueWatchingItems.map(({ item }) => (
+            {continueWatchingList.map(({ group, item, history, episodeLabel }) => (
               <MediaCard
-                key={`cw_${item.id}`}
+                key={`cw_${group ? group.id : item.id}`}
                 item={item}
+                group={group}
+                episodeLabelBadge={episodeLabel}
+                overrideProgress={history}
                 isOffline={offlineIds.has(item.id)}
-                onSelect={onSelectMedia}
+                onSelect={(selectedItem) => {
+                  if (group && onSelectGroup) {
+                    onSelectGroup(group);
+                  } else {
+                    onSelectMedia(selectedItem);
+                  }
+                }}
                 onPlay={onPlayMedia}
                 width={CARD_W}
               />

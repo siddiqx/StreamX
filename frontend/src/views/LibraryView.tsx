@@ -14,7 +14,7 @@ interface LibraryViewProps {
   initialCategory?: string;
 }
 
-const CATS = ['All', 'Movies', 'TV Shows', 'Anime', 'Action', 'Sci-Fi', 'Romance', 'Comedy'];
+const CATS = ['All', 'Anime', 'Anime Movies', 'TV Shows', 'Movies', 'Action', 'Sci-Fi', 'Romance', 'Comedy'];
 type SortKey = 'newest' | 'rating' | 'size' | 'name';
 
 export const LibraryView: React.FC<LibraryViewProps> = ({
@@ -36,10 +36,17 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     return library.allGroups
       .filter(group => {
         if (selectedCat === 'All') return true;
-        if (selectedCat === 'Movies') return group.type === 'movie' || group.category === 'Movies';
-        if (selectedCat === 'TV Shows') return group.type === 'series' && group.category === 'TV Shows';
         if (selectedCat === 'Anime') {
-          return group.category === 'Anime' || group.genres.some(g => g.toLowerCase().includes('animation'));
+          return group.category === 'Anime';
+        }
+        if (selectedCat === 'Anime Movies') {
+          return group.category === 'Anime Movies';
+        }
+        if (selectedCat === 'TV Shows') {
+          return group.category === 'TV Shows';
+        }
+        if (selectedCat === 'Movies') {
+          return group.category === 'Movies';
         }
         // Genre matching (Action, Sci-Fi, Romance, Comedy, etc.)
         const matchGenre = group.genres.some(g => g.toLowerCase().includes(selectedCat.toLowerCase()));
@@ -64,9 +71,21 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     return media
       .filter(item => {
         if (selectedCat === 'All') return true;
-        if (selectedCat === 'Movies') return item.category === 'Movies';
-        if (selectedCat === 'TV Shows') return item.category === 'TV Shows';
-        if (selectedCat === 'Anime') return item.category === 'Anime';
+        const itemCat = item.category;
+        const isAnime = itemCat === 'Anime' || item.canonical_metadata?.genres?.some(g => g.toLowerCase().includes('animation'));
+        const runtime = item.canonical_metadata?.runtime || 0;
+        if (selectedCat === 'Anime') {
+          return isAnime && (runtime < 60 || !runtime);
+        }
+        if (selectedCat === 'Anime Movies') {
+          return isAnime && runtime >= 60;
+        }
+        if (selectedCat === 'TV Shows') {
+          return !isAnime && itemCat === 'TV Shows';
+        }
+        if (selectedCat === 'Movies') {
+          return !isAnime && (itemCat === 'Movies' || runtime >= 60);
+        }
         return item.canonical_metadata?.genres?.some(g => g.toLowerCase().includes(selectedCat.toLowerCase())) || false;
       })
       .sort((a, b) => {

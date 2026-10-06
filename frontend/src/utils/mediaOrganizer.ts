@@ -4,6 +4,12 @@
  * Automatically analyzes raw files and metadata, groups anime and TV series
  * with their canonical title and episode lists (e.g. 10 episodes -> 1 series card),
  * and structures movie and anime catalogues into Netflix-style genre shelves.
+ * 
+ * Strict Category Taxonomy:
+ * - Anime: Episodic Japanese anime series with episodes under an hour.
+ * - Anime Movies: Japanese anime feature films >= 60 minutes screen time.
+ * - TV Shows: Live-action / Hollywood / Western episodic series.
+ * - Movies: Live-action / Hollywood / international feature films >= 60 minutes.
  */
 
 import type { MediaItem } from '../types';
@@ -15,23 +21,26 @@ import {
   parseMediaMetadata,
 } from '../api';
 
+export type MediaTaxonomyCategory = 'Anime' | 'Anime Movies' | 'TV Shows' | 'Movies' | 'Other';
+
 export interface MediaEpisode {
   item: MediaItem;
   seasonNumber: number;
   episodeNumber: number;
-  episodeLabel: string; // e.g. "Ep 1", "S1:E3"
-  cleanTitle: string;
+  episodeLabel: string; // e.g. "Ep 7", "S1:E7"
+  cleanTitle: string;   // e.g. "Episode 7"
   quality: string;
   extension: string;
   isOffline: boolean;
 }
 
 export interface MediaGroup {
-  id: string; // unique key, e.g. "series_anime_trapped_in_a_dating_sim"
+  id: string; // unique key, e.g. "series_anime_the_fragrant_flower"
   type: 'series' | 'movie';
   title: string;
   originalTitle?: string;
-  category: 'Anime' | 'TV Shows' | 'Movies' | 'Other';
+  category: MediaTaxonomyCategory;
+  displayCategory: string;
   posterUrl?: string;
   backdropUrl?: string;
   year?: number;
@@ -61,8 +70,23 @@ export interface OrganizedLibrary {
   seriesGroups: MediaGroup[];
   movieGroups: MediaGroup[];
   animeSeries: MediaGroup[];
+  animeMovies: MediaGroup[];
   tvSeries: MediaGroup[];
+  liveActionMovies: MediaGroup[];
   genreShelves: GenreShelf[];
+}
+
+/**
+ * Clean and professional episode title resolver.
+ * Turns noisy raw uploader filenames like:
+ * "[AH] Fragrant Flower S1-E07 [720p ⌯ Sub] @Animes_Horizon.mkv"
+ * into clean, readable titles like "Episode 7".
+ */
+export function getCleanEpisodeTitle(filename: string, episodeNumber: number): string {
+  if (episodeNumber > 0) {
+    return `Episode ${episodeNumber}`;
+  }
+  return parseMediaMetadata(filename).cleanTitle || filename;
 }
 
 /**
@@ -169,6 +193,103 @@ function normalizeGroupKey(title: string): string {
 }
 
 /**
+ * Determines exact taxonomy differentiation based on user specification:
+ * - Anime: episodes under an hour.
+ * - Anime Movies: anime with more than an hour of screen time.
+ * - TV Shows: real shows like Hollywood / live-action series.
+ * - Movies: non-anime feature films longer than an hour.
+ */
+export function determineTaxonomy(
+  item: MediaItem,
+  epInfo: ReturnType<typeof extractEpisodeInfo>
+): {
+  category: MediaTaxonomyCategory;
+  isAnime: boolean;
+  isSeries: boolean;
+  isMovie: boolean;
+  displayCategory: string;
+} {
+  const rawLower = item.filename.toLowerCase();
+  const meta = item.canonical_metadata;
+  const genres = meta?.genres || [];
+  const genresLower = genres.map(g => g.toLowerCase());
+  const runtime = meta?.runtime || 0; // runtime in minutes
+
+  // 1. Identify Anime Content
+  const hasAnimeChannelTag = [
+    '@animes_horizon', '@animedynasty', '@anime_maniaac', '@animestation',
+    '@aniwatch', 'crunchyroll', 'horriblesubs', 'subsplease', 'erai-raws',
+    '[ah]', '[judas]', 'anime'
+  ].some(tag => rawLower.includes(tag));
+
+  const isAnimationGenre = genresLower.some(g => g.includes('animation') || g.includes('anime'));
+  const isExplicitAnimeCategory = item.category === 'Anime';
+
+  const isKnownAnimeTitle = [
+    'fragrant flower', 'kaoru hana', 'hyakkano', '100 girlfriends',
+    'world\'s end harem', 'trapped in a dating sim', 'otome game',
+    'kamui', 'your name', 'kimi no na wa', 'suzume', 'demon slayer',
+    'jujutsu kaisen', 'attack on titan', 'naruto', 'one piece', 'bleach',
+    'chainsaw man', 'solo leveling', 'frieren', 'bocchi', 'weathering with you',
+    'silent voice', 'spirited away'
+  ].some(t => rawLower.includes(t) || (meta?.title && meta.title.toLowerCase().includes(t)));
+
+  const isAnime = isExplicitAnimeCategory || hasAnimeChannelTag || isKnownAnimeTitle || (isAnimationGenre && (meta?.original_title || rawLower.includes('sub') || rawLower.includes('dual')));
+
+  // 2. Identify Format & Duration
+  // "movies mean files longer than an hour" (>= 60 mins)
+  // "Anime means episodes under an hour" (< 60 mins)
+  // "anime movies mean anime that has more than an hour of screen time" (>= 60 mins)
+  // "TV shows mean real shows like Hollywood series and like this"
+  const hasHourPlusRuntime = runtime >= 60;
+  const isExplicitMovie = meta?.media_type === 'movie';
+  const isExplicitTv = meta?.media_type === 'tv';
+
+  // Episodic detection
+  const isEpisodic = (epInfo.isSeries && !isExplicitMovie) || isExplicitTv;
+  const isMovieFormat = isExplicitMovie || (!isEpisodic && (hasHourPlusRuntime || item.size > 650 * 1024 * 1024));
+
+  if (isAnime) {
+    if (hasHourPlusRuntime || (!isEpisodic && isMovieFormat)) {
+      return {
+        category: 'Anime Movies',
+        isAnime: true,
+        isSeries: false,
+        isMovie: true,
+        displayCategory: 'Anime Movie',
+      };
+    } else {
+      return {
+        category: 'Anime',
+        isAnime: true,
+        isSeries: true,
+        isMovie: false,
+        displayCategory: 'Anime',
+      };
+    }
+  } else {
+    // Live-action / Hollywood / Western
+    if (isEpisodic && !hasHourPlusRuntime) {
+      return {
+        category: 'TV Shows',
+        isAnime: false,
+        isSeries: true,
+        isMovie: false,
+        displayCategory: 'TV Show',
+      };
+    } else {
+      return {
+        category: 'Movies',
+        isAnime: false,
+        isSeries: false,
+        isMovie: true,
+        displayCategory: 'Movie',
+      };
+    }
+  }
+}
+
+/**
  * Organizes raw MediaItems into canonical series groups and categorized genre shelves.
  */
 export function organizeMediaLibrary(
@@ -184,41 +305,37 @@ export function organizeMediaLibrary(
     const ext = rawFilename.split('.').pop()?.toUpperCase() || 'MKV';
     const isItemOffline = offlineIds.has(item.id);
 
-    // Determine category
-    const category = (item.category as 'Anime' | 'TV Shows' | 'Movies' | 'Other') || 'Other';
+    const taxonomy = determineTaxonomy(item, epInfo);
+    const isSeries = taxonomy.isSeries;
 
-    // Determine if it's a TV / Anime series episode
-    const isExplicitTv = item.canonical_metadata?.media_type === 'tv';
-    const isExplicitMovie = item.canonical_metadata?.media_type === 'movie';
-    const isAnimeOrShowCategory = category === 'Anime' || category === 'TV Shows';
-
-    // It is a series if metadata says tv, or it has episode patterns, or category is anime/tv with episode signs
-    const isSeries = isExplicitTv || (epInfo.isSeries && !isExplicitMovie) || (isAnimeOrShowCategory && epInfo.isSeries);
-
-    // Determine Parent Title and Group Key
+    // Determine Group Key & Title
     let groupTitle = '';
     let groupKey = '';
 
     if (isSeries) {
       if (item.canonical_metadata?.title) {
         groupTitle = item.canonical_metadata.title;
-        groupKey = `series_${item.canonical_metadata.provider_id || normalizeGroupKey(groupTitle)}`;
+        const provId = item.canonical_metadata.provider_id;
+        groupKey = provId ? `series_${taxonomy.category.toLowerCase()}_${provId}` : `series_${taxonomy.category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;
       } else {
         groupTitle = epInfo.seriesTitleCandidate || getMediaDisplayName(item);
-        groupKey = `series_${normalizeGroupKey(groupTitle)}`;
+        groupKey = `series_${taxonomy.category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;
       }
     } else {
-      // Standalone Movie or Single Video
-      groupTitle = getMediaDisplayName(item);
-      groupKey = `movie_${item.id}_${normalizeGroupKey(groupTitle)}`;
+      // Feature Film / Movie / Anime Movie
+      groupTitle = item.canonical_metadata?.title || getMediaDisplayName(item);
+      const provId = item.canonical_metadata?.provider_id;
+      groupKey = provId ? `movie_${taxonomy.category.toLowerCase()}_${provId}` : `movie_${taxonomy.category.toLowerCase()}_${item.id}_${normalizeGroupKey(groupTitle)}`;
     }
+
+    const cleanTitle = getCleanEpisodeTitle(item.filename, epInfo.episode);
 
     const episodeObj: MediaEpisode = {
       item,
       seasonNumber: epInfo.season,
       episodeNumber: epInfo.episode,
       episodeLabel: isSeries ? `Ep ${epInfo.episode}` : 'Feature',
-      cleanTitle: getMediaDisplayName(item),
+      cleanTitle,
       quality: tech.quality,
       extension: ext,
       isOffline: isItemOffline,
@@ -231,12 +348,7 @@ export function organizeMediaLibrary(
       if (isItemOffline) existing.offlineCount += 1;
       existing.isOffline = existing.offlineCount > 0;
 
-      // If any episode is Anime, upgrade entire group category to Anime
-      if (category === 'Anime') {
-        existing.category = 'Anime';
-      }
-
-      // Inherit poster/backdrop/metadata if existing lacked it
+      // Inherit richer poster/backdrop/metadata if existing lacked it
       if (!existing.posterUrl && getMediaPosterUrl(item)) {
         existing.posterUrl = getMediaPosterUrl(item);
       }
@@ -258,7 +370,8 @@ export function organizeMediaLibrary(
         type: isSeries ? 'series' : 'movie',
         title: groupTitle,
         originalTitle: item.canonical_metadata?.original_title,
-        category: category,
+        category: taxonomy.category,
+        displayCategory: taxonomy.displayCategory,
         posterUrl: getMediaPosterUrl(item),
         backdropUrl: getMediaBackdropUrl(item),
         year: getMediaDisplayYear(item),
@@ -278,14 +391,13 @@ export function organizeMediaLibrary(
     }
   }
 
-  // Sort episodes in each group (Season asc, Episode asc)
+  // Sort episodes in each series group (Season asc, Episode asc)
   for (const group of groupsMap.values()) {
     if (group.type === 'series') {
       group.episodes.sort((a, b) => {
         if (a.seasonNumber !== b.seasonNumber) return a.seasonNumber - b.seasonNumber;
         return a.episodeNumber - b.episodeNumber;
       });
-      // Set featuredItem as episode 1
       if (group.episodes.length > 0) {
         group.featuredItem = group.episodes[0].item;
       }
@@ -298,28 +410,37 @@ export function organizeMediaLibrary(
   const seriesGroups = allGroups.filter((g) => g.type === 'series');
   const movieGroups = allGroups.filter((g) => g.type === 'movie');
 
-  const animeSeries = seriesGroups.filter(
-    (g) => g.category === 'Anime' || g.genres.some((gn) => gn.toLowerCase().includes('animation'))
-  );
-  const tvSeries = seriesGroups.filter(
-    (g) => g.category === 'TV Shows' && !animeSeries.includes(g)
-  );
+  const animeSeries = seriesGroups.filter((g) => g.category === 'Anime');
+  const animeMovies = movieGroups.filter((g) => g.category === 'Anime Movies');
+  const tvSeries = seriesGroups.filter((g) => g.category === 'TV Shows');
+  const liveActionMovies = movieGroups.filter((g) => g.category === 'Movies');
 
-  // Dynamic Genre Shelves
+  // Dynamic Curated Shelves
   const genreShelves: GenreShelf[] = [];
 
   // 1. Anime Series Shelf
   if (animeSeries.length > 0) {
     genreShelves.push({
       id: 'anime_series',
-      title: 'Anime Series',
+      title: 'Trending Anime Series',
       iconName: 'Sparkles',
       items: animeSeries,
       categoryFilter: 'Anime',
     });
   }
 
-  // 2. TV Series Shelf
+  // 2. Anime Movies Shelf
+  if (animeMovies.length > 0) {
+    genreShelves.push({
+      id: 'anime_movies',
+      title: 'Anime Feature Films & Movies',
+      iconName: 'Film',
+      items: animeMovies,
+      categoryFilter: 'Anime Movies',
+    });
+  }
+
+  // 3. TV Series Shelf
   if (tvSeries.length > 0) {
     genreShelves.push({
       id: 'tv_series',
@@ -330,93 +451,79 @@ export function organizeMediaLibrary(
     });
   }
 
-  // 3. Animation & Anime Movies
-  const animationMovies = movieGroups.filter((g) =>
-    g.genres.some((gn) => gn.toLowerCase().includes('animation')) || g.category === 'Anime'
-  );
-  if (animationMovies.length > 0) {
+  // 4. Feature Films & Movies Shelf
+  if (liveActionMovies.length > 0) {
     genreShelves.push({
-      id: 'animation_movies',
-      title: 'Animation & Anime Movies',
-      iconName: 'Sparkles',
-      items: animationMovies,
+      id: 'live_movies',
+      title: 'Blockbuster Movies & Cinema',
+      iconName: 'Film',
+      items: liveActionMovies,
       categoryFilter: 'Movies',
     });
   }
 
-  // 4. Action & Adventure
-  const actionMovies = movieGroups.filter((g) =>
-    g.genres.some((gn) => {
-      const gl = gn.toLowerCase();
-      return gl.includes('action') || gl.includes('adventure');
-    })
-  );
-  if (actionMovies.length > 0) {
-    genreShelves.push({
-      id: 'action_movies',
-      title: 'Action & Adventure',
-      iconName: 'Flame',
-      items: actionMovies,
-      categoryFilter: 'Movies',
-    });
-  }
-
-  // 5. Sci-Fi & Fantasy
-  const scifiMovies = movieGroups.filter((g) =>
-    g.genres.some((gn) => {
-      const gl = gn.toLowerCase();
-      return gl.includes('sci-fi') || gl.includes('science fiction') || gl.includes('fantasy');
-    })
-  );
-  if (scifiMovies.length > 0) {
-    genreShelves.push({
-      id: 'scifi_movies',
-      title: 'Sci-Fi & Fantasy',
-      iconName: 'Compass',
-      items: scifiMovies,
-      categoryFilter: 'Movies',
-    });
-  }
-
-  // 6. Romance & Drama
-  const romanceMovies = movieGroups.filter((g) =>
+  // 5. Romance & Drama
+  const romanceShelf = allGroups.filter((g) =>
     g.genres.some((gn) => {
       const gl = gn.toLowerCase();
       return gl.includes('romance') || gl.includes('drama');
     })
   );
-  if (romanceMovies.length > 0) {
+  if (romanceShelf.length > 0) {
     genreShelves.push({
-      id: 'romance_movies',
+      id: 'romance_shelf',
       title: 'Romance & Drama',
       iconName: 'Heart',
-      items: romanceMovies,
-      categoryFilter: 'Movies',
+      items: romanceShelf,
+      categoryFilter: 'Romance',
     });
   }
 
-  // 7. Comedy
-  const comedyMovies = movieGroups.filter((g) =>
+  // 6. Action & Adventure
+  const actionShelf = allGroups.filter((g) =>
+    g.genres.some((gn) => {
+      const gl = gn.toLowerCase();
+      return gl.includes('action') || gl.includes('adventure');
+    })
+  );
+  if (actionShelf.length > 0) {
+    genreShelves.push({
+      id: 'action_shelf',
+      title: 'Action & Adventure',
+      iconName: 'Flame',
+      items: actionShelf,
+      categoryFilter: 'Action',
+    });
+  }
+
+  // 7. Sci-Fi & Fantasy
+  const scifiShelf = allGroups.filter((g) =>
+    g.genres.some((gn) => {
+      const gl = gn.toLowerCase();
+      return gl.includes('sci-fi') || gl.includes('science fiction') || gl.includes('fantasy');
+    })
+  );
+  if (scifiShelf.length > 0) {
+    genreShelves.push({
+      id: 'scifi_shelf',
+      title: 'Sci-Fi & Fantasy',
+      iconName: 'Compass',
+      items: scifiShelf,
+      categoryFilter: 'Sci-Fi',
+    });
+  }
+
+  // 8. Comedy
+  const comedyShelf = allGroups.filter((g) =>
     g.genres.some((gn) => gn.toLowerCase().includes('comedy'))
   );
-  if (comedyMovies.length > 0) {
+  if (comedyShelf.length > 0) {
     genreShelves.push({
-      id: 'comedy_movies',
+      id: 'comedy_shelf',
       title: 'Comedy',
       iconName: 'Laugh',
-      items: comedyMovies,
-      categoryFilter: 'Movies',
-    });
-  }
-
-  // 8. General Movies Shelf (if movies exist that didn't fit above or overall)
-  if (movieGroups.length > 0) {
-    genreShelves.push({
-      id: 'all_movies',
-      title: 'Feature Films & Movies',
-      iconName: 'Film',
-      items: movieGroups,
-      categoryFilter: 'Movies',
+      items: comedyShelf,
+      categoryFilter: 'Comedy',
     });
   }
 
@@ -425,7 +532,9 @@ export function organizeMediaLibrary(
     seriesGroups,
     movieGroups,
     animeSeries,
+    animeMovies,
     tvSeries,
+    liveActionMovies,
     genreShelves,
   };
 }
