@@ -46,6 +46,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
 
   const [streamMode, setStreamMode] = useState<'universal' | 'direct'>(isMkv ? 'universal' : 'direct');
   const [seekOffset, setSeekOffset] = useState<number>(0);
+  const [isAudioOnlyDetected, setIsAudioOnlyDetected] = useState(false);
+  const [transcodeForced, setTranscodeForced] = useState(false);
 
   const displayName = item ? getMediaDisplayName(item) : '';
   const backdrop = item ? getMediaBackdropUrl(item) : undefined;
@@ -61,7 +63,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
 
   const streamUrl = item
     ? (streamMode === 'universal'
-        ? getCompatibleStreamUrl(item.id, seekOffset > 0 ? seekOffset : undefined)
+        ? getCompatibleStreamUrl(item.id, seekOffset > 0 ? seekOffset : undefined, transcodeForced ? 'transcode' : 'auto')
         : getStreamUrl(item.id))
     : '';
 
@@ -310,21 +312,24 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             setCurrentTime(v.currentTime);
 
             // AUDIO-ONLY DETECTION WATCHDOG:
-            // If playing in direct stream and the browser demuxes audio but videoWidth remains 0,
-            // immediately switch to Universal MP4 stream so the video appears without interruption.
-            if (
-              streamMode === 'direct' &&
-              !v.paused &&
-              v.currentTime > 1.2 &&
-              v.videoWidth === 0
-            ) {
-              console.warn('Audio-only playback detected (videoWidth=0). Auto-switching to Universal MP4 stream...');
-              setStreamMode('universal');
-              setSeekOffset(0);
-              setCurrentTime(0);
-              setIsLoading(true);
-              v.src = getCompatibleStreamUrl(item.id);
-              v.play().catch(() => {});
+            // If playing and the browser demuxes audio but videoWidth remains 0:
+            if (!v.paused && v.currentTime > 1.2) {
+              if (v.videoWidth === 0) {
+                if (streamMode === 'direct') {
+                  console.warn('Audio-only playback detected (videoWidth=0). Auto-switching to Universal MP4 stream...');
+                  setStreamMode('universal');
+                  setSeekOffset(0);
+                  setCurrentTime(0);
+                  setIsLoading(true);
+                  v.src = getCompatibleStreamUrl(item.id, undefined, transcodeForced ? 'transcode' : 'auto');
+                  v.play().catch(() => {});
+                } else if (!isAudioOnlyDetected && v.currentTime > 3.0) {
+                  // Universal stream also lacks 10-bit hardware decode in this browser
+                  setIsAudioOnlyDetected(true);
+                }
+              } else if (v.videoWidth > 0 && isAudioOnlyDetected) {
+                setIsAudioOnlyDetected(false);
+              }
             }
           }
         }}
@@ -523,6 +528,96 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
               <Download size={15} />
               Download Stream Playlist (.m3u)
             </a>
+          </div>
+        </div>
+      )}
+
+      {/* Audio-Only Watchdog Warning Banner */}
+      {isAudioOnlyDetected && !playbackError && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '84px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 45,
+            width: 'calc(100% - 32px)',
+            maxWidth: '540px',
+            background: 'linear-gradient(135deg, rgba(234, 88, 12, 0.95) 0%, rgba(194, 65, 12, 0.98) 100%)',
+            backdropFilter: 'blur(16px)',
+            border: '1px solid rgba(255, 255, 255, 0.25)',
+            borderRadius: '16px',
+            padding: '14px 18px',
+            boxShadow: '0 12px 36px rgba(0,0,0,0.7)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            color: '#fff',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '1.25rem' }}>⚡</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>Audio Playing Without Video?</div>
+              <div style={{ fontSize: '0.74rem', opacity: 0.92, marginTop: '2px' }}>
+                This 10-bit MKV release requires VLC or external player for full 10-bit color decoding & subtitles.
+              </div>
+            </div>
+            <button
+              onClick={() => setIsAudioOnlyDetected(false)}
+              aria-label="Dismiss"
+              style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: '4px' }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handleLaunchVlc}
+              style={{
+                flex: 1,
+                padding: '9px 12px',
+                borderRadius: '10px',
+                background: '#fff',
+                color: '#c2410c',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+              }}
+            >
+              <ExternalLink size={14} />
+              Open in VLC (Instant 100% HD)
+            </button>
+            <button
+              onClick={() => {
+                setTranscodeForced(true);
+                setIsAudioOnlyDetected(false);
+                setIsLoading(true);
+                if (videoRef.current) {
+                  videoRef.current.src = getCompatibleStreamUrl(item.id, currentTime, 'transcode');
+                  videoRef.current.play().catch(() => {});
+                }
+              }}
+              style={{
+                padding: '9px 12px',
+                borderRadius: '10px',
+                background: 'rgba(255,255,255,0.2)',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '0.76rem',
+                border: '1px solid rgba(255,255,255,0.3)',
+                cursor: 'pointer',
+              }}
+            >
+              Force Web Transcode
+            </button>
           </div>
         </div>
       )}

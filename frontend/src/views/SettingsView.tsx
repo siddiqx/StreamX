@@ -542,8 +542,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <Row
           icon={<ShieldCheck size={18} color="#a5b4fc" />}
           label="StreamX Cinema Edition"
-          sub="Version 2.5 · Hardware-accelerated personal media catalogue"
-          right={<span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 700 }}>v2.5</span>}
+          sub="Version 2.6 · Hardware-accelerated personal media catalogue"
+          right={<span style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 700 }}>v2.6</span>}
         />
         <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', gap: '12px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1 }}>

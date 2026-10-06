@@ -286,7 +286,7 @@ _codec_cache: Dict[str, Dict[str, str]] = {}
 
 
 async def probe_media_codecs(drive_file_id: str, token: str) -> Dict[str, str]:
-    """Probe video and audio codecs using ffprobe (cached in-memory for zero repeated overhead)."""
+    """Probe video, audio codecs, and pixel format using ffprobe (cached in-memory for zero repeated overhead)."""
     if drive_file_id in _codec_cache:
         return _codec_cache[drive_file_id]
 
@@ -296,7 +296,7 @@ async def probe_media_codecs(drive_file_id: str, token: str) -> Dict[str, str]:
         "-v", "error",
         "-headers", f"Authorization: Bearer {token}\r\n",
         "-i", drive_url,
-        "-show_entries", "stream=codec_name,codec_type",
+        "-show_entries", "stream=codec_name,codec_type,pix_fmt",
         "-of", "json",
     ]
     try:
@@ -309,21 +309,23 @@ async def probe_media_codecs(drive_file_id: str, token: str) -> Dict[str, str]:
         data = json.loads(stdout.decode("utf-8", errors="ignore"))
         v_codec = "h264"
         a_codec = "aac"
+        pix_fmt = "yuv420p"
         for s in data.get("streams", []):
             if s.get("codec_type") == "video" and "codec_name" in s:
                 v_codec = s["codec_name"].lower()
+                pix_fmt = s.get("pix_fmt", "yuv420p").lower()
                 break
         for s in data.get("streams", []):
             if s.get("codec_type") == "audio" and "codec_name" in s:
                 a_codec = s["codec_name"].lower()
                 break
-        result = {"video": v_codec, "audio": a_codec}
+        result = {"video": v_codec, "audio": a_codec, "pix_fmt": pix_fmt}
         _codec_cache[drive_file_id] = result
         return result
     except Exception as e:
         logger.warning(f"ffprobe probe failed or timed out: {e}")
-        # Default to h264 which powers >95% of anime/series web releases
-        return {"video": "h264", "audio": "opus"}
+        # Default fallback
+        return {"video": "h264", "audio": "opus", "pix_fmt": "yuv420p"}
 
 
 @router.get("/{media_id}/stream/compatible")
@@ -353,15 +355,17 @@ async def stream_compatible_media(
     codecs = await probe_media_codecs(item.drive_file_id, creds.token)
     v_codec = codecs.get("video", "h264")
     a_codec = codecs.get("audio", "opus")
+    pix_fmt = codecs.get("pix_fmt", "yuv420p")
+    is_10bit = "10" in pix_fmt or "12" in pix_fmt
 
     # Fast input seek before input URL avoids decoding unnecessary frames
     seek_args = ["-ss", str(start), "-noaccurate_seek"] if start > 0 else []
 
     # Choose video strategy:
-    # 1. H.264/AVC: Direct packet copy into MP4 container (instant, zero CPU overhead, crystal clear).
-    # 2. HEVC/H.265: Direct packet copy with hvc1 tag for hardware accelerated playback.
-    # 3. Explicit transcode or unsupported codecs: ultrafast libx264 conversion.
-    if mode == "transcode" or (mode == "auto" and v_codec not in ("h264", "avc", "hevc")):
+    # 1. If 10-bit color or non-standard codec, transcode ultrafast to standard 8-bit H.264 (yuv420p)
+    #    so all mobile and desktop web browsers render the video frames without black screen.
+    # 2. Standard 8-bit H.264/AVC: Instant zero-CPU copy into MP4 container.
+    if mode == "transcode" or (mode == "auto" and (v_codec not in ("h264", "avc") or is_10bit)):
         video_flags = [
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
@@ -369,8 +373,6 @@ async def stream_compatible_media(
             "-tune", "zerolatency",
             "-crf", "23",
         ]
-    elif v_codec == "hevc":
-        video_flags = ["-c:v", "copy", "-tag:v", "hvc1"]
     else:
         video_flags = ["-c:v", "copy"]
 
@@ -388,6 +390,9 @@ async def stream_compatible_media(
         "-i", drive_url,
         "-map", "0:v:0",
         "-map", "0:a:0?",
+        "-sn", "-dn",
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
         *video_flags,
         *audio_flags,
         "-avoid_negative_ts", "make_zero",

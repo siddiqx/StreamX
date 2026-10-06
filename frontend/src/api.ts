@@ -188,8 +188,12 @@ export function getStreamUrl(mediaId: number): string {
   return `${API_BASE}/media/${mediaId}/stream`;
 }
 
-export function getCompatibleStreamUrl(mediaId: number, start?: number): string {
-  return `${API_BASE}/media/${mediaId}/stream/compatible${start ? `?start=${start}` : ''}`;
+export function getCompatibleStreamUrl(mediaId: number, start?: number, mode?: string): string {
+  const params = new URLSearchParams();
+  if (start && start > 0) params.set('start', start.toString());
+  if (mode) params.set('mode', mode);
+  const qs = params.toString();
+  return `${API_BASE}/media/${mediaId}/stream/compatible${qs ? `?${qs}` : ''}`;
 }
 
 export function getDownloadUrl(mediaId: number): string {

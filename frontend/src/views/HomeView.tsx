@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import {
   Play, Info, Radio, ArrowRight, Sparkles, Tv, Film,
-  Star, Clock, Flame, Heart, Compass, Laugh
+  Star, Clock, Flame, Heart, Compass, Laugh,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import type { MediaItem, TelegramTransfer } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
@@ -65,8 +66,34 @@ export const HomeView: React.FC<HomeViewProps> = ({
   // Automatically organize media into series groups, anime, and genre shelves
   const library = useMemo(() => organizeMediaLibrary(media, offlineIds), [media, offlineIds]);
 
-  // Pick first item that has a backdrop or canonical metadata, or fallback to first
-  const featuredGroup = library.allGroups.find(g => g.backdropUrl || g.posterUrl) || library.allGroups[0] || null;
+  // Curated Recommendation Pool for the Dynamic Rotating Spotlight Hero
+  const recommendedGroups = useMemo(() => {
+    const withArt = library.allGroups.filter(g => g.backdropUrl || g.posterUrl);
+    return withArt.length > 0 ? withArt : library.allGroups.slice(0, 8);
+  }, [library.allGroups]);
+
+  const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+  const [isHeroPaused, setIsHeroPaused] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Auto-cycle through recommendations every 6.5s
+  React.useEffect(() => {
+    if (recommendedGroups.length <= 1 || isHeroPaused) return;
+
+    const timer = setInterval(() => {
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setActiveHeroIndex(prev => (prev + 1) % recommendedGroups.length);
+        setIsTransitioning(false);
+      }, 300);
+    }, 6500);
+
+    return () => clearInterval(timer);
+  }, [recommendedGroups.length, isHeroPaused]);
+
+  // Selected hero group
+  const safeIndex = activeHeroIndex < recommendedGroups.length ? activeHeroIndex : 0;
+  const featuredGroup = recommendedGroups[safeIndex] || null;
   const featured = featuredGroup?.featuredItem || media[0] || null;
   const featuredTitle = featuredGroup ? featuredGroup.title : (featured ? getMediaDisplayName(featured) : '');
   const featuredYear = featuredGroup ? featuredGroup.year : (featured ? getMediaDisplayYear(featured) : null);
@@ -78,7 +105,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     setCurrentBackdrop(featuredBackdrop);
     setHeroError(false);
     setHasTriedBackdropProxy(false);
-  }, [featuredBackdrop]);
+  }, [featuredBackdrop, safeIndex]);
 
   const handleHeroBackdropError = () => {
     if (!hasTriedBackdropProxy && featuredBackdrop && featuredBackdrop.includes('image.tmdb.org')) {
@@ -87,6 +114,36 @@ export const HomeView: React.FC<HomeViewProps> = ({
     } else {
       setHeroError(true);
     }
+  };
+
+  const goToNextHero = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (recommendedGroups.length <= 1) return;
+    setIsTransitioning(true);
+    setTimeout(() => {
+      setActiveHeroIndex(prev => (prev + 1) % recommendedGroups.length);
+      setIsTransitioning(false);
+    }, 250);
+  };
+
+  const goToPrevHero = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (recommendedGroups.length <= 1) return;
+    setIsTransitioning(true);
+    setTimeout(() => {
+      setActiveHeroIndex(prev => (prev - 1 + recommendedGroups.length) % recommendedGroups.length);
+      setIsTransitioning(false);
+    }, 250);
+  };
+
+  const selectHero = (index: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (index === safeIndex) return;
+    setIsTransitioning(true);
+    setTimeout(() => {
+      setActiveHeroIndex(index);
+      setIsTransitioning(false);
+    }, 250);
   };
 
   const featuredRuntime = featuredGroup?.runtime
@@ -189,38 +246,68 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       )}
 
-      {/* Netflix-Style Featured Spotlight Hero */}
+      {/* Netflix-Style Featured Spotlight Hero with Animated Recommendations */}
       {featured ? (
         <section
           className="hero-spotlight animate-fade-in"
+          onMouseEnter={() => setIsHeroPaused(true)}
+          onMouseLeave={() => setIsHeroPaused(false)}
+          onTouchStart={() => setIsHeroPaused(true)}
+          onTouchEnd={() => setIsHeroPaused(false)}
           style={{
             margin: '0 16px',
-            minHeight: '300px',
+            minHeight: '330px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'flex-end',
             position: 'relative',
-            borderRadius: '20px',
+            borderRadius: '22px',
             overflow: 'hidden',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.8)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 12px 36px rgba(0,0,0,0.85)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            userSelect: 'none',
           }}
         >
-          {/* Backdrop artwork */}
+          {/* Subtle auto-progress bar at top of card */}
+          {recommendedGroups.length > 1 && !isHeroPaused && (
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, height: '3px',
+              background: 'rgba(255,255,255,0.08)', zIndex: 15, overflow: 'hidden',
+            }}>
+              <div
+                key={safeIndex}
+                style={{
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                  animation: 'heroProgress 6.5s linear forwards',
+                }}
+              />
+            </div>
+          )}
+
+          {/* Backdrop artwork with cross-fade & subtle zoom */}
           {currentBackdrop && !heroError ? (
             <img
               src={currentBackdrop}
-              alt=""
+              alt={featuredTitle}
               loading="eager"
               onError={handleHeroBackdropError}
               style={{
-                position: 'absolute', inset: 0, width: '100%', height: '100%',
-                objectFit: 'cover', objectPosition: 'center 20%', opacity: 0.55,
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                objectPosition: 'center 20%',
+                opacity: isTransitioning ? 0 : 0.6,
+                transform: isTransitioning ? 'scale(1.05)' : 'scale(1)',
+                transition: 'opacity 0.45s cubic-bezier(0.4,0,0.2,1), transform 0.8s cubic-bezier(0.4,0,0.2,1)',
               }}
             />
           ) : (
             <div style={{
-              position: 'absolute', inset: 0,
+              position: 'absolute',
+              inset: 0,
               background: 'radial-gradient(circle at 60% 30%, rgba(99,102,241,0.3) 0%, rgba(7,9,14,1) 85%)',
             }} />
           )}
@@ -235,14 +322,149 @@ export const HomeView: React.FC<HomeViewProps> = ({
             background: 'linear-gradient(to right, rgba(7,9,14,0.85) 0%, transparent 65%)',
           }} />
 
-          {/* Hero Content */}
+          {/* Side Next / Prev Arrows */}
+          {recommendedGroups.length > 1 && (
+            <>
+              <button
+                onClick={goToPrevHero}
+                aria-label="Previous recommendation"
+                style={{
+                  position: 'absolute',
+                  left: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  zIndex: 20,
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.45)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  opacity: 0.7,
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+              >
+                <ChevronLeft size={18} />
+              </button>
+
+              <button
+                onClick={goToNextHero}
+                aria-label="Next recommendation"
+                style={{
+                  position: 'absolute',
+                  right: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  zIndex: 20,
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.45)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  opacity: 0.7,
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+              >
+                <ChevronRight size={18} />
+              </button>
+            </>
+          )}
+
+          {/* Top Recommendation Badge & Slide Dots */}
           <div style={{
-            position: 'relative', zIndex: 2, padding: '22px 18px',
-            display: 'flex', flexDirection: 'column', gap: '10px',
+            position: 'absolute',
+            top: '16px',
+            left: '16px',
+            right: '16px',
+            zIndex: 15,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(99,102,241,0.22)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(99,102,241,0.45)',
+              borderRadius: '999px',
+              padding: '4px 10px',
+              color: '#c7d2fe',
+              fontSize: '0.68rem',
+              fontWeight: 800,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}>
+              <Sparkles size={11} color="#a5b4fc" />
+              <span>Recommended Watch</span>
+              {recommendedGroups.length > 1 && (
+                <span style={{ color: '#818cf8', fontWeight: 900, marginLeft: '2px' }}>
+                  · {safeIndex + 1}/{recommendedGroups.length}
+                </span>
+              )}
+            </div>
+
+            {/* Clickable Dots */}
+            {recommendedGroups.length > 1 && (
+              <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                {recommendedGroups.slice(0, 7).map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={(e) => selectHero(idx, e)}
+                    aria-label={`Go to slide ${idx + 1}`}
+                    style={{
+                      width: idx === safeIndex ? '18px' : '6px',
+                      height: '6px',
+                      borderRadius: '999px',
+                      background: idx === safeIndex ? '#818cf8' : 'rgba(255,255,255,0.3)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                      transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)',
+                      boxShadow: idx === safeIndex ? '0 0 8px rgba(129,140,248,0.6)' : 'none',
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Hero Content with Smooth Transition */}
+          <div style={{
+            position: 'relative',
+            zIndex: 10,
+            padding: '24px 18px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            opacity: isTransitioning ? 0 : 1,
+            transform: isTransitioning ? 'translateY(10px)' : 'translateY(0)',
+            transition: 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.16,1,0.3,1)',
           }}>
             {/* Metadata Badges strip */}
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
               <span className="badge-spec accent-purple">{featured.category}</span>
+              {featuredGroup?.type === 'series' && (
+                <span className="badge-spec accent-cyan">
+                  {featuredGroup.episodes.length} {featuredGroup.episodes.length === 1 ? 'Episode' : 'Episodes'}
+                </span>
+              )}
               {featuredYear && (
                 <span className="badge-spec accent-cyan">{featuredYear}</span>
               )}
@@ -272,7 +494,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
             {/* Canonical Title */}
             <h1 style={{
-              fontSize: 'clamp(1.3rem, 5.5vw, 1.85rem)',
+              fontSize: 'clamp(1.35rem, 5.5vw, 1.95rem)',
               fontWeight: 900,
               fontFamily: 'var(--font-display, inherit)',
               letterSpacing: '-0.03em',
@@ -288,7 +510,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {featuredOverview && (
               <p style={{
                 fontSize: '0.78rem',
-                color: 'rgba(241,245,249,0.8)',
+                color: 'rgba(241,245,249,0.85)',
                 lineHeight: 1.45,
                 margin: 0,
                 display: '-webkit-box',
@@ -302,7 +524,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </p>
             )}
 
-            {/* Action Buttons: Direct Play in VLC & Details */}
+            {/* Action Buttons: Direct Play & Details */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
               <button
                 className="btn-primary"
