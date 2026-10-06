@@ -88,8 +88,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ allMedia, offlineIds, on
           </p>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(105px, 1fr))',
-            gap: '10px',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(clamp(115px, 30vw, 155px), 1fr))',
+            gap: '12px',
           }}>
             {results.map(item => (
               <MediaCard key={item.id} item={item} isOffline={offlineIds.has(item.id)}

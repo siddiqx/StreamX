@@ -236,7 +236,24 @@ export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'orig
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
     return `https://image.tmdb.org/t/p/${size}/${path.replace(/^\//, '')}`;
   }
-  return item.poster_url;
+  if (item.poster_url) {
+    if (item.poster_url.startsWith('http://') || item.poster_url.startsWith('https://')) return item.poster_url;
+    if (item.poster_url.startsWith('/')) return `https://image.tmdb.org/t/p/${size}/${item.poster_url.replace(/^\//, '')}`;
+  }
+  if (item.metadata_json) {
+    try {
+      const parsed = JSON.parse(item.metadata_json);
+      if (parsed.poster_url) return parsed.poster_url;
+      if (parsed.poster_path) {
+        const p = parsed.poster_path;
+        if (p.startsWith('http://') || p.startsWith('https://')) return p;
+        return `https://image.tmdb.org/t/p/${size}/${p.replace(/^\//, '')}`;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
 }
 
 export function getMediaBackdropUrl(item: MediaItem, size: 'w780' | 'w1280' | 'original' = 'w1280'): string | undefined {
@@ -249,6 +266,11 @@ export function getMediaBackdropUrl(item: MediaItem, size: 'w780' | 'w1280' | 'o
     try {
       const parsed = JSON.parse(item.metadata_json);
       if (parsed.backdrop_url) return parsed.backdrop_url;
+      if (parsed.backdrop_path) {
+        const bp = parsed.backdrop_path;
+        if (bp.startsWith('http://') || bp.startsWith('https://')) return bp;
+        return `https://image.tmdb.org/t/p/${size}/${bp.replace(/^\//, '')}`;
+      }
     } catch {
       // ignore
     }

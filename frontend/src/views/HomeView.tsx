@@ -22,7 +22,7 @@ interface HomeViewProps {
   onOpenTransfers: () => void;
 }
 
-const CARD_W = 140;
+const CARD_W = 'clamp(126px, 34vw, 150px)';
 
 export const HomeView: React.FC<HomeViewProps> = ({
   media,
@@ -40,6 +40,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const featuredTitle = featured ? getMediaDisplayName(featured) : '';
   const featuredYear = featured ? getMediaDisplayYear(featured) : null;
   const featuredBackdrop = featured ? getMediaBackdropUrl(featured, 'w1280') : undefined;
+
+  React.useEffect(() => {
+    setHeroError(false);
+  }, [featuredBackdrop]);
   const featuredRuntime = featured ? formatRuntime(featured.canonical_metadata?.runtime) : undefined;
   const featuredRating = featured?.canonical_metadata?.rating;
   const featuredGenres = featured?.canonical_metadata?.genres || [];
@@ -162,10 +166,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <img
               src={featuredBackdrop}
               alt=""
+              loading="eager"
+              referrerPolicy="no-referrer"
+              crossOrigin="anonymous"
               onError={() => setHeroError(true)}
               style={{
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
-                objectFit: 'cover', objectPosition: 'center 20%', opacity: 0.52,
+                objectFit: 'cover', objectPosition: 'center 20%', opacity: 0.55,
               }}
             />
           ) : (
@@ -256,23 +263,23 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
               <button
                 className="btn-primary"
-                style={{ flex: 1.3, height: '44px', minHeight: '44px', fontSize: '0.88rem' }}
+                style={{ flex: 1.3, height: '48px', minHeight: '48px', fontSize: '0.9rem' }}
                 onClick={() => onPlayMedia(featured)}
               >
-                <Play size={16} fill="#fff" />
+                <Play size={17} fill="#fff" />
                 Stream
               </button>
 
               <button
                 className="btn-secondary"
                 style={{
-                  flex: 1, height: '44px', minHeight: '44px', fontSize: '0.82rem',
+                  flex: 1, height: '48px', minHeight: '48px', fontSize: '0.84rem',
                   background: 'rgba(249,115,22,0.18)', border: '1px solid rgba(249,115,22,0.4)',
                   color: '#fdba74', fontWeight: 800,
                 }}
                 onClick={handleHeroVlc}
               >
-                <ExternalLink size={15} />
+                <ExternalLink size={16} />
                 VLC
               </button>
 
@@ -280,13 +287,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onClick={() => onSelectMedia(featured)}
                 aria-label="Details"
                 style={{
-                  width: '44px', height: '44px', flexShrink: 0, borderRadius: '12px',
+                  width: '48px', height: '48px', flexShrink: 0, borderRadius: '12px',
                   background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: 'pointer', color: '#fff',
                 }}
               >
-                <Info size={18} />
+                <Info size={19} />
               </button>
             </div>
           </div>

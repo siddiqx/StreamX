@@ -18,14 +18,17 @@ class MetadataWorker:
         self.task: Optional[asyncio.Task] = None
 
     async def reconcile_incomplete_jobs(self) -> None:
-        """Recover jobs left in PROCESSING from dead or restarted processes."""
+        """Recover jobs left in PROCESSING or RETRYING on process restart."""
         async with AsyncSessionLocal() as session:
-            stmt = select(MetadataJob).where(MetadataJob.status == MetadataJobStatus.PROCESSING)
+            stmt = select(MetadataJob).where(
+                MetadataJob.status.in_([MetadataJobStatus.PROCESSING, MetadataJobStatus.RETRYING])
+            )
             res = await session.execute(stmt)
             jobs = res.scalars().all()
             for j in jobs:
                 log_event("RECONCILING_METADATA_JOB", job_id=j.id, media_id=j.media_id)
                 j.status = MetadataJobStatus.PENDING
+                j.scheduled_at = utc_now()
                 j.started_at = None
             if jobs:
                 await session.commit()

@@ -54,11 +54,16 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const [isSelecting, setIsSelecting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
+  const backdropUrl = item ? (getMediaBackdropUrl(item, 'w1280') || getMediaPosterUrl(item, 'original')) : undefined;
+
+  React.useEffect(() => {
+    setBackdropError(false);
+  }, [backdropUrl]);
+
   if (!item) return null;
 
   const title = getMediaDisplayName(item);
   const year = getMediaDisplayYear(item);
-  const backdropUrl = getMediaBackdropUrl(item, 'w1280') || getMediaPosterUrl(item, 'original');
   const runtime = formatRuntime(item.canonical_metadata?.runtime);
   const rating = item.canonical_metadata?.rating;
   const genres = item.canonical_metadata?.genres || [];
@@ -179,11 +184,13 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         <div style={{ overflowY: 'auto', flex: 1 }}>
 
           {/* Hero Backdrop Header */}
-          <div style={{ position: 'relative', height: '240px', background: '#0a0d17', flexShrink: 0 }}>
+          <div style={{ position: 'relative', height: 'clamp(180px, 26vh, 230px)', background: '#0a0d17', flexShrink: 0 }}>
             {backdropUrl && !backdropError ? (
               <img
                 src={backdropUrl}
                 alt={title}
+                referrerPolicy="no-referrer"
+                crossOrigin="anonymous"
                 onError={() => setBackdropError(true)}
                 style={{
                   width: '100%', height: '100%', objectFit: 'cover',
@@ -196,26 +203,28 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 background: 'radial-gradient(circle at 50% 30%, rgba(99,102,241,0.3) 0%, rgba(9,12,20,1) 85%)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <Film size={64} color="#818cf8" style={{ opacity: 0.3 }} />
+                <Film size={54} color="#818cf8" style={{ opacity: 0.3 }} />
               </div>
             )}
 
             {/* Gradient Scrims */}
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(9,12,20,1) 0%, rgba(9,12,20,0.4) 60%, transparent 100%)' }} />
 
-            {/* Close Button */}
+            {/* Close Button with generous touch target */}
             <button
               onClick={onClose}
               aria-label="Close"
               style={{
-                position: 'absolute', top: '14px', right: '14px',
-                width: '34px', height: '34px', borderRadius: '50%',
-                background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)',
+                position: 'absolute', top: '12px', right: '12px',
+                width: '40px', height: '40px', borderRadius: '50%',
+                background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
                 border: '1px solid rgba(255,255,255,0.2)', display: 'flex',
                 alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer',
+                touchAction: 'manipulation',
               }}
             >
-              <X size={16} />
+              <X size={18} />
             </button>
 
             {/* Badges on Bottom of Hero */}
@@ -599,6 +608,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                         <img
                           src={cand.poster_url}
                           alt=""
+                          referrerPolicy="no-referrer"
+                          crossOrigin="anonymous"
                           style={{ width: '48px', height: '72px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }}
                         />
                       ) : (

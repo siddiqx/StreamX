@@ -114,8 +114,8 @@ def parse_filename(filename: str) -> ParsedMedia:
     episode: Optional[int] = None
     media_type = "movie"
 
-    # Pattern A: S01E01 or S04E28 or S01 - E03 or s01e1100
-    se_match = re.search(r"\bS(\d{1,2})\s*[-_]?\s*E(\d{1,4})\b", working, re.I)
+    # Pattern A: S01E01, S04E28, S01 - E03, S1 - 10, S1-10
+    se_match = re.search(r"\bS(\d{1,2})\s*[-_]?\s*(?:E|Ep|Episode)?\s*(\d{1,4})\b", working, re.I)
     if se_match:
         season = int(se_match.group(1))
         episode = int(se_match.group(2))
@@ -141,15 +141,24 @@ def parse_filename(filename: str) -> ParsedMedia:
                 media_type = "tv"
                 title_part = working[:se_word_match.start()]
             else:
-                # Pattern D: Anime absolute episode numbering: "Title - 01" or "Title 1100"
-                anime_ep_match = re.search(r"\s+-\s+(\d{1,4})(?:\s+|$)", working)
-                if anime_ep_match:
-                    season = 1
-                    episode = int(anime_ep_match.group(1))
+                # Pattern D: Standalone Season e.g. "Title S01" or "Title S01 Episode" or "Title Season 1"
+                s_only_match = re.search(
+                    r"\b(?:S|Season)\s*(\d{1,2})\s*(?:Episode|Ep)?\b", working, re.I
+                )
+                if s_only_match:
+                    season = int(s_only_match.group(1))
                     media_type = "tv"
-                    title_part = working[:anime_ep_match.start()]
+                    title_part = working[:s_only_match.start()]
                 else:
-                    title_part = working
+                    # Pattern E: Anime absolute episode numbering: "Title - 01" or "Title 1100"
+                    anime_ep_match = re.search(r"\s+-\s+(\d{1,4})(?:\s+|$)", working)
+                    if anime_ep_match:
+                        season = 1
+                        episode = int(anime_ep_match.group(1))
+                        media_type = "tv"
+                        title_part = working[:anime_ep_match.start()]
+                    else:
+                        title_part = working
 
     # 7. Extract Year (1900-2099)
     # Be careful not to treat episode numbers or 1080 as year

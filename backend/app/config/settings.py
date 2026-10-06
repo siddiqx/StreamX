@@ -36,7 +36,9 @@ class Settings(BaseSettings):
     MAX_RETRIES: int = Field(default=3, description="Bounded retry attempts")
 
     # TMDB Metadata Provider
-    TMDB_API_KEY: Optional[str] = Field(default=None, description="The Movie Database (TMDB) API Key")
+    TMDB_API_KEY: Optional[str] = Field(
+        default="c7bc083ba4fab7297c0312a6e4c1fee2", description="The Movie Database (TMDB) API Key"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

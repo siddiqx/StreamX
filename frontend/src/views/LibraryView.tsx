@@ -69,7 +69,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)', fontWeight: 500 }}>
             {filteredMedia.length} {filteredMedia.length === 1 ? 'item' : 'items'}
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(105px, 1fr))', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(clamp(115px, 30vw, 155px), 1fr))', gap: '12px' }}>
             {filteredMedia.map(item => (
               <MediaCard key={item.id} item={item} isOffline={offlineIds.has(item.id)}
                 onSelect={onSelectMedia} onPlay={onPlayMedia} />

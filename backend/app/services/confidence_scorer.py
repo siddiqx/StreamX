@@ -98,7 +98,7 @@ def calculate_match_confidence(parsed: ParsedMedia, candidate: CandidateMatch) -
 
 
 def rank_candidates(
-    parsed: ParsedMedia, candidates: list[CandidateMatch], high_threshold: float = 0.85, low_threshold: float = 0.65
+    parsed: ParsedMedia, candidates: list[CandidateMatch], high_threshold: float = 0.80, low_threshold: float = 0.35
 ) -> Tuple[Optional[CandidateMatch], float, str]:
     """Score all candidates and return (best_candidate, best_score, status).
 

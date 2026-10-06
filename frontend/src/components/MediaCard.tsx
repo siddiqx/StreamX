@@ -32,6 +32,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect,
 
   const Icon = getCategoryIcon(item.category);
 
+  React.useEffect(() => {
+    setImageError(false);
+  }, [posterUrl]);
+
   return (
     <div
       style={{
@@ -48,6 +52,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect,
         flexShrink: 0,
         border: '1px solid rgba(255,255,255,0.08)',
         userSelect: 'none',
+        touchAction: 'manipulation',
       }}
       onClick={() => onSelect(item)}
       onPointerDown={() => setPressed(true)}
@@ -60,6 +65,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect,
           src={posterUrl}
           alt={title}
           loading="lazy"
+          referrerPolicy="no-referrer"
+          crossOrigin="anonymous"
           onError={() => setImageError(true)}
           style={{
             width: '100%',
@@ -251,8 +258,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect,
           }}
           aria-label="Play"
           style={{
-            width: '26px',
-            height: '26px',
+            width: '32px',
+            height: '32px',
             borderRadius: '50%',
             background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
             border: 'none',
@@ -262,10 +269,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, isOffline, onSelect,
             color: '#fff',
             cursor: 'pointer',
             flexShrink: 0,
-            boxShadow: '0 2px 8px rgba(99,102,241,0.5)',
+            boxShadow: '0 2px 10px rgba(99,102,241,0.6)',
+            touchAction: 'manipulation',
           }}
         >
-          <Play size={10} fill="#fff" style={{ marginLeft: '1px' }} />
+          <Play size={12} fill="#fff" style={{ marginLeft: '1px' }} />
         </button>
       </div>
     </div>
