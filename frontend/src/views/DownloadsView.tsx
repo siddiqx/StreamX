@@ -162,17 +162,24 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                       {mediaItem && (
                         <button
                           onClick={() => launchVlcWithTracking(mediaItem)}
-                          aria-label="Play in VLC"
-                          title="Play in VLC"
+                          aria-label="Play"
+                          title="Play"
                           style={{
-                            width: '36px', height: '36px', borderRadius: '50%', border: 'none',
-                            background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-                            boxShadow: '0 2px 10px rgba(249,115,22,0.4)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: 'pointer', color: '#fff',
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '50%',
+                            border: 'none',
+                            background: '#ffffff',
+                            boxShadow: '0 2px 10px rgba(255,255,255,0.2), 0 2px 6px rgba(0,0,0,0.5)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            color: '#090d16',
+                            transition: 'all 0.15s ease',
                           }}
                         >
-                          <Play size={14} fill="#fff" style={{ marginLeft: '1px' }} />
+                          <Play size={14} fill="#090d16" style={{ marginLeft: '1px' }} />
                         </button>
                       )}
 

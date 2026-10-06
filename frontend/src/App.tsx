@@ -342,8 +342,8 @@ export const App: React.FC = () => {
           background: 'rgba(15, 23, 42, 0.94)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid rgba(249, 115, 22, 0.45)',
-          boxShadow: '0 12px 36px rgba(0,0,0,0.7), 0 0 20px rgba(249,115,22,0.25)',
+          border: '1px solid rgba(255, 255, 255, 0.16)',
+          boxShadow: '0 12px 36px rgba(0,0,0,0.8), 0 0 20px rgba(99,102,241,0.25)',
           borderRadius: '9999px',
           padding: '10px 22px',
           display: 'flex',
@@ -361,8 +361,8 @@ export const App: React.FC = () => {
             width: '8px',
             height: '8px',
             borderRadius: '50%',
-            background: '#f97316',
-            boxShadow: '0 0 8px #f97316',
+            background: '#6366f1',
+            boxShadow: '0 0 10px #6366f1',
             flexShrink: 0,
           }} />
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{toast.message}</span>

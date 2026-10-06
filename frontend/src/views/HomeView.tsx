@@ -295,48 +295,53 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 className="btn-primary"
                 style={{
-                  flex: 1.5,
-                  height: '48px',
-                  minHeight: '48px',
+                  flex: 1,
+                  height: '44px',
+                  minHeight: '44px',
                   fontSize: '0.94rem',
                   fontWeight: 800,
-                  background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-                  boxShadow: '0 4px 20px rgba(249,115,22,0.45)',
+                  background: '#ffffff',
+                  color: '#090d16',
+                  boxShadow: '0 4px 18px rgba(255,255,255,0.2), 0 2px 8px rgba(0,0,0,0.5)',
                   border: 'none',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
                   cursor: 'pointer',
-                  borderRadius: '14px',
+                  borderRadius: '12px',
+                  transition: 'all 0.15s ease',
+                  letterSpacing: '0.01em',
                 }}
                 onClick={handleHeroStream}
               >
-                <Play size={18} fill="#fff" />
-                Play in VLC
+                <Play size={18} fill="#090d16" />
+                Play
               </button>
 
               <button
                 onClick={handleHeroClick}
                 aria-label="Details"
+                title="Details"
                 style={{
-                  flex: 1,
-                  height: '48px',
-                  borderRadius: '14px',
-                  background: 'rgba(255,255,255,0.12)',
-                  border: '1px solid rgba(255,255,255,0.2)',
+                  width: '44px',
+                  height: '44px',
+                  minWidth: '44px',
+                  borderRadius: '12px',
+                  background: 'rgba(255,255,255,0.14)',
+                  backdropFilter: 'blur(16px)',
+                  WebkitBackdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(255,255,255,0.22)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '6px',
                   cursor: 'pointer',
-                  color: '#fff',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
+                  color: '#ffffff',
+                  flexShrink: 0,
+                  transition: 'all 0.15s ease',
                 }}
               >
-                <Info size={17} />
-                Details
+                <Info size={18} strokeWidth={2.4} />
               </button>
             </div>
           </div>

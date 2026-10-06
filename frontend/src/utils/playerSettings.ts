@@ -59,14 +59,14 @@ export async function launchVlcWithTracking(
   const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent);
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 
-  const toastMessage = `Opening "${title}" in VLC...`;
+  const toastMessage = `Opening "${title}"...`;
   if (onStatusUpdate) onStatusUpdate(toastMessage);
 
   // Notify UI toast
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('streamx_toast', {
-        detail: { message: `Opening in VLC Media Player · Progress tracked`, type: 'vlc' },
+        detail: { message: `Playing "${title}" · Progress synced`, type: 'play' },
       })
     );
   }
@@ -82,8 +82,8 @@ export async function launchVlcWithTracking(
       const vlcProto = getVlcProtocolUrl(item.id);
       window.location.href = vlcProto;
     }
-    if (onStatusUpdate) onStatusUpdate('✓ Opened in VLC App');
-    return { success: true, message: 'Opening VLC app...' };
+    if (onStatusUpdate) onStatusUpdate('✓ Playing in App');
+    return { success: true, message: 'Opening...' };
   }
 
   // 3. Desktop: Try local backend host launcher if localhost:8000 is running
@@ -93,15 +93,15 @@ export async function launchVlcWithTracking(
       signal: AbortSignal.timeout(600),
     });
     if (localRes.ok) {
-      if (onStatusUpdate) onStatusUpdate('✓ VLC Player opened on PC');
-      return { success: true, message: 'VLC Player launched on PC' };
+      if (onStatusUpdate) onStatusUpdate('✓ Playing on PC');
+      return { success: true, message: 'Launched on PC' };
     }
   } catch {}
 
   if (API_BASE.includes('localhost') || API_BASE.includes('127.0.0.1')) {
     const hostRes = await openVlcOnHost(item.id);
     if (hostRes.success) {
-      if (onStatusUpdate) onStatusUpdate('✓ VLC Player opened on PC');
+      if (onStatusUpdate) onStatusUpdate('✓ Playing on PC');
       return hostRes;
     }
   }
@@ -124,6 +124,6 @@ export async function launchVlcWithTracking(
     } catch {}
   }, 500);
 
-  if (onStatusUpdate) onStatusUpdate('✓ Launched VLC Stream');
-  return { success: true, message: 'Launching VLC Media Player...' };
+  if (onStatusUpdate) onStatusUpdate('✓ Starting stream');
+  return { success: true, message: 'Starting stream...' };
 }

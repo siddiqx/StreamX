@@ -272,32 +272,34 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </div>
             )}
 
-            {/* Primary Actions: Direct Play in VLC & Modern Download Bar */}
+            {/* Primary Actions: Direct Play & Modern Download Bar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {/* Single Direct Play CTA (0 options menu, 100% VLC) */}
+              {/* Single Direct Play CTA (0 options menu, instant launch) */}
               <button
                 className="btn-primary"
                 onClick={handleOpenVlc}
                 disabled={isLaunchingVlc}
                 style={{
-                  height: '50px',
-                  borderRadius: '14px',
-                  background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-                  boxShadow: '0 6px 24px rgba(249,115,22,0.45)',
+                  height: '46px',
+                  borderRadius: '12px',
+                  background: '#ffffff',
+                  color: '#090d16',
+                  boxShadow: '0 4px 20px rgba(255,255,255,0.22), 0 2px 8px rgba(0,0,0,0.5)',
                   fontSize: '0.96rem',
                   fontWeight: 800,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '10px',
+                  gap: '8px',
                   cursor: isLaunchingVlc ? 'wait' : 'pointer',
                   border: 'none',
-                  color: '#fff',
                   opacity: isLaunchingVlc ? 0.75 : 1,
+                  transition: 'all 0.15s ease',
+                  letterSpacing: '0.01em',
                 }}
               >
-                <Play size={20} fill="#fff" />
-                {isLaunchingVlc ? 'Opening VLC...' : 'Play in VLC'}
+                <Play size={18} fill="#090d16" />
+                {isLaunchingVlc ? 'Opening...' : 'Play'}
               </button>
 
               {/* Modern Professional Download Bar */}
@@ -419,16 +421,23 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                         >
                           <button
                             onClick={() => handleOpenVlcForEpisode(ep.item)}
-                            aria-label={`Play ${ep.episodeLabel} in VLC`}
+                            aria-label={`Play ${ep.episodeLabel}`}
                             style={{
-                              width: '34px', height: '34px', borderRadius: '9px',
-                              background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-                              border: 'none', color: '#fff', display: 'flex',
-                              alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                              boxShadow: '0 2px 10px rgba(249,115,22,0.4)',
+                              width: '34px',
+                              height: '34px',
+                              borderRadius: '10px',
+                              background: '#ffffff',
+                              border: 'none',
+                              color: '#090d16',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              boxShadow: '0 2px 10px rgba(255,255,255,0.18)',
+                              transition: 'all 0.15s ease',
                             }}
                           >
-                            <Play size={14} fill="#fff" style={{ marginLeft: '1px' }} />
+                            <Play size={14} fill="#090d16" style={{ marginLeft: '1px' }} />
                           </button>
 
                           <button
