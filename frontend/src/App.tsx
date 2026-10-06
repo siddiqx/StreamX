@@ -9,7 +9,6 @@ import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
 import { TransferModal } from './components/TransferModal';
 import { MediaDetailModal } from './components/MediaDetailModal';
-import { VideoPlayerModal } from './components/VideoPlayerModal';
 import { HomeView } from './views/HomeView';
 import { SearchView } from './views/SearchView';
 import { LibraryView } from './views/LibraryView';
@@ -33,7 +32,6 @@ export const App: React.FC = () => {
 
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
-  const [playingMedia, setPlayingMedia] = useState<MediaItem | null>(null);
   const [toast, setToast] = useState<{ message: string; type?: string } | null>(null);
   const [isTransfersOpen, setIsTransfersOpen] = useState(false);
 
@@ -353,11 +351,6 @@ export const App: React.FC = () => {
         }}
       />
 
-      <VideoPlayerModal
-        item={playingMedia}
-        onClose={() => setPlayingMedia(null)}
-        isOffline={playingMedia ? offlineIds.has(playingMedia.id) : false}
-      />
 
       {/* Floating Status Notification Toast */}
       {toast && (

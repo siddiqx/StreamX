@@ -13,7 +13,6 @@ import {
   getMediaBackdropUrl,
   getMediaDisplayName,
   getMediaDisplayYear,
-  API_BASE,
 } from '../api';
 
 import { getWatchHistory } from '../utils/watchHistory';
@@ -43,7 +42,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onViewAllLibrary,
   onOpenTransfers,
 }) => {
-  const [heroError, setHeroError] = useState(false);
   const [historyItems, setHistoryItems] = useState<WatchHistoryItem[]>(getWatchHistory);
 
   React.useEffect(() => {
@@ -74,19 +72,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const [isHeroPaused, setIsHeroPaused] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
 
-  // Auto-cycle through recommendations every 6.5s
+  // Preload top recommended backdrops so transitions are instantaneous and silky smooth
+  React.useEffect(() => {
+    recommendedGroups.slice(0, 8).forEach(g => {
+      const url = g.backdropUrl || (g.featuredItem ? getMediaBackdropUrl(g.featuredItem, 'w1280') : undefined);
+      if (url) {
+        const img = new Image();
+        img.src = url;
+      }
+    });
+  }, [recommendedGroups]);
+
+  // Relaxed, natural 11s rotation timer without disruptive jumping
   React.useEffect(() => {
     if (recommendedGroups.length <= 1 || isHeroPaused) return;
 
     const timer = setInterval(() => {
-      setIsTransitioning(true);
-      setTimeout(() => {
-        setActiveHeroIndex(prev => (prev + 1) % recommendedGroups.length);
-        setIsTransitioning(false);
-      }, 300);
-    }, 6500);
+      setActiveHeroIndex(prev => (prev + 1) % recommendedGroups.length);
+    }, 11000);
 
     return () => clearInterval(timer);
   }, [recommendedGroups.length, isHeroPaused]);
@@ -97,53 +101,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const featured = featuredGroup?.featuredItem || media[0] || null;
   const featuredTitle = featuredGroup ? featuredGroup.title : (featured ? getMediaDisplayName(featured) : '');
   const featuredYear = featuredGroup ? featuredGroup.year : (featured ? getMediaDisplayYear(featured) : null);
-  const featuredBackdrop = featuredGroup?.backdropUrl || (featured ? getMediaBackdropUrl(featured, 'w1280') : undefined);
-  const [currentBackdrop, setCurrentBackdrop] = useState<string | undefined>(featuredBackdrop);
-  const [hasTriedBackdropProxy, setHasTriedBackdropProxy] = useState(false);
-
-  React.useEffect(() => {
-    setCurrentBackdrop(featuredBackdrop);
-    setHeroError(false);
-    setHasTriedBackdropProxy(false);
-  }, [featuredBackdrop, safeIndex]);
-
-  const handleHeroBackdropError = () => {
-    if (!hasTriedBackdropProxy && featuredBackdrop && featuredBackdrop.includes('image.tmdb.org')) {
-      setHasTriedBackdropProxy(true);
-      setCurrentBackdrop(`${API_BASE}/media/image-proxy?url=${encodeURIComponent(featuredBackdrop)}`);
-    } else {
-      setHeroError(true);
-    }
-  };
 
   const goToNextHero = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (recommendedGroups.length <= 1) return;
-    setIsTransitioning(true);
-    setTimeout(() => {
-      setActiveHeroIndex(prev => (prev + 1) % recommendedGroups.length);
-      setIsTransitioning(false);
-    }, 250);
+    setActiveHeroIndex(prev => (prev + 1) % recommendedGroups.length);
   };
 
   const goToPrevHero = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (recommendedGroups.length <= 1) return;
-    setIsTransitioning(true);
-    setTimeout(() => {
-      setActiveHeroIndex(prev => (prev - 1 + recommendedGroups.length) % recommendedGroups.length);
-      setIsTransitioning(false);
-    }, 250);
+    setActiveHeroIndex(prev => (prev - 1 + recommendedGroups.length) % recommendedGroups.length);
   };
 
   const selectHero = (index: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (index === safeIndex) return;
-    setIsTransitioning(true);
-    setTimeout(() => {
-      setActiveHeroIndex(index);
-      setIsTransitioning(false);
-    }, 250);
+    setActiveHeroIndex(index);
   };
 
   const featuredRuntime = featuredGroup?.runtime
@@ -268,69 +241,67 @@ export const HomeView: React.FC<HomeViewProps> = ({
             userSelect: 'none',
           }}
         >
-          {/* Subtle auto-progress bar at top of card */}
-          {recommendedGroups.length > 1 && !isHeroPaused && (
-            <div style={{
-              position: 'absolute', top: 0, left: 0, right: 0, height: '3px',
-              background: 'rgba(255,255,255,0.08)', zIndex: 15, overflow: 'hidden',
-            }}>
-              <div
-                key={safeIndex}
-                style={{
-                  height: '100%',
-                  background: 'linear-gradient(90deg, #6366f1, #a855f7)',
-                  animation: 'heroProgress 6.5s linear forwards',
-                }}
-              />
-            </div>
-          )}
+          {/* Multi-layered cinematic cross-dissolve artwork */}
+          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+            {recommendedGroups.slice(0, 8).map((grp, idx) => {
+              const bgUrl = grp.backdropUrl || (grp.featuredItem ? getMediaBackdropUrl(grp.featuredItem, 'w1280') : undefined);
+              if (!bgUrl) return null;
+              const isCurrent = idx === safeIndex;
+              return (
+                <img
+                  key={grp.id || idx}
+                  src={bgUrl}
+                  alt={grp.title}
+                  loading="eager"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    objectPosition: 'center 20%',
+                    opacity: isCurrent ? 0.68 : 0,
+                    transform: isCurrent ? 'scale(1)' : 'scale(1.04)',
+                    transition: 'opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1), transform 1.8s cubic-bezier(0.2, 0.8, 0.2, 1)',
+                    pointerEvents: 'none',
+                  }}
+                />
+              );
+            })}
+          </div>
 
-          {/* Backdrop artwork with cross-fade & subtle zoom */}
-          {currentBackdrop && !heroError ? (
-            <img
-              src={currentBackdrop}
-              alt={featuredTitle}
-              loading="eager"
-              onError={handleHeroBackdropError}
-              style={{
-                position: 'absolute',
-                inset: 0,
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                objectPosition: 'center 20%',
-                opacity: isTransitioning ? 0 : 0.6,
-                transform: isTransitioning ? 'scale(1.05)' : 'scale(1)',
-                transition: 'opacity 0.45s cubic-bezier(0.4,0,0.2,1), transform 0.8s cubic-bezier(0.4,0,0.2,1)',
-              }}
-            />
-          ) : (
-            <div style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'radial-gradient(circle at 60% 30%, rgba(99,102,241,0.3) 0%, rgba(7,9,14,1) 85%)',
-            }} />
-          )}
+          {/* Deep ambient fallback if backdrop fails to load */}
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(circle at 65% 25%, rgba(99,102,241,0.22) 0%, rgba(7,9,14,0.92) 80%)',
+            zIndex: 0,
+            pointerEvents: 'none',
+          }} />
 
-          {/* Vignette Gradients */}
+          {/* Vignette Gradients for cinematic contrast and text readability */}
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.6) 55%, transparent 100%)',
+            background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.65) 55%, transparent 100%)',
+            zIndex: 2,
+            pointerEvents: 'none',
           }} />
           <div style={{
             position: 'absolute', inset: 0,
             background: 'linear-gradient(to right, rgba(7,9,14,0.85) 0%, transparent 65%)',
+            zIndex: 2,
+            pointerEvents: 'none',
           }} />
 
-          {/* Side Next / Prev Arrows */}
+          {/* Side Next / Prev Chevrons */}
           {recommendedGroups.length > 1 && (
             <>
               <button
                 onClick={goToPrevHero}
-                aria-label="Previous recommendation"
+                aria-label="Previous title"
                 style={{
                   position: 'absolute',
-                  left: '10px',
+                  left: '12px',
                   top: '50%',
                   transform: 'translateY(-50%)',
                   zIndex: 20,
@@ -339,7 +310,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   borderRadius: '50%',
                   background: 'rgba(0,0,0,0.45)',
                   backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.15)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,255,255,0.12)',
                   color: '#fff',
                   display: 'flex',
                   alignItems: 'center',
@@ -351,15 +323,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
                 onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
               >
-                <ChevronLeft size={18} />
+                <ChevronLeft size={17} />
               </button>
 
               <button
                 onClick={goToNextHero}
-                aria-label="Next recommendation"
+                aria-label="Next title"
                 style={{
                   position: 'absolute',
-                  right: '10px',
+                  right: '12px',
                   top: '50%',
                   transform: 'translateY(-50%)',
                   zIndex: 20,
@@ -368,7 +340,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   borderRadius: '50%',
                   background: 'rgba(0,0,0,0.45)',
                   backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.15)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,255,255,0.12)',
                   color: '#fff',
                   display: 'flex',
                   alignItems: 'center',
@@ -380,83 +353,61 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
                 onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
               >
-                <ChevronRight size={18} />
+                <ChevronRight size={17} />
               </button>
             </>
           )}
 
-          {/* Top Recommendation Badge & Slide Dots */}
-          <div style={{
-            position: 'absolute',
-            top: '16px',
-            left: '16px',
-            right: '16px',
-            zIndex: 15,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}>
+          {/* Minimalist Top-Right Pagination Dots */}
+          {recommendedGroups.length > 1 && (
             <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
+              position: 'absolute',
+              top: '16px',
+              right: '16px',
+              zIndex: 15,
+              display: 'flex',
               gap: '6px',
-              background: 'rgba(99,102,241,0.22)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(99,102,241,0.45)',
+              alignItems: 'center',
+              padding: '6px 11px',
+              background: 'rgba(0,0,0,0.45)',
+              backdropFilter: 'blur(14px)',
+              WebkitBackdropFilter: 'blur(14px)',
               borderRadius: '999px',
-              padding: '4px 10px',
-              color: '#c7d2fe',
-              fontSize: '0.68rem',
-              fontWeight: 800,
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
+              border: '1px solid rgba(255,255,255,0.1)',
             }}>
-              <Sparkles size={11} color="#a5b4fc" />
-              <span>Recommended Watch</span>
-              {recommendedGroups.length > 1 && (
-                <span style={{ color: '#818cf8', fontWeight: 900, marginLeft: '2px' }}>
-                  · {safeIndex + 1}/{recommendedGroups.length}
-                </span>
-              )}
+              {recommendedGroups.slice(0, 6).map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={(e) => selectHero(idx, e)}
+                  aria-label={`Slide ${idx + 1}`}
+                  style={{
+                    width: idx === safeIndex ? '16px' : '5px',
+                    height: '5px',
+                    borderRadius: '999px',
+                    background: idx === safeIndex ? '#ffffff' : 'rgba(255,255,255,0.3)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    transition: 'all 0.35s cubic-bezier(0.4,0,0.2,1)',
+                  }}
+                />
+              ))}
             </div>
+          )}
 
-            {/* Clickable Dots */}
-            {recommendedGroups.length > 1 && (
-              <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                {recommendedGroups.slice(0, 7).map((_, idx) => (
-                  <button
-                    key={idx}
-                    onClick={(e) => selectHero(idx, e)}
-                    aria-label={`Go to slide ${idx + 1}`}
-                    style={{
-                      width: idx === safeIndex ? '18px' : '6px',
-                      height: '6px',
-                      borderRadius: '999px',
-                      background: idx === safeIndex ? '#818cf8' : 'rgba(255,255,255,0.3)',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: 0,
-                      transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)',
-                      boxShadow: idx === safeIndex ? '0 0 8px rgba(129,140,248,0.6)' : 'none',
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Hero Content with Smooth Transition */}
-          <div style={{
-            position: 'relative',
-            zIndex: 10,
-            padding: '24px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-            opacity: isTransitioning ? 0 : 1,
-            transform: isTransitioning ? 'translateY(10px)' : 'translateY(0)',
-            transition: 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.16,1,0.3,1)',
-          }}>
+          {/* Hero Content with Smooth Keyframe Transition */}
+          <div
+            key={safeIndex}
+            style={{
+              position: 'relative',
+              zIndex: 10,
+              padding: '24px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              animation: 'heroContentFade 0.65s cubic-bezier(0.16,1,0.3,1)',
+            }}
+          >
             {/* Metadata Badges strip */}
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
               <span className="badge-spec accent-purple">{featured.category}</span>
@@ -524,19 +475,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </p>
             )}
 
-            {/* Action Buttons: Direct Play & Details */}
+            {/* Action Buttons: Direct Play in VLC & Details */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
               <button
                 className="btn-primary"
                 style={{
                   flex: 1,
-                  height: '44px',
-                  minHeight: '44px',
+                  height: '46px',
+                  minHeight: '46px',
                   fontSize: '0.94rem',
                   fontWeight: 800,
                   background: '#ffffff',
                   color: '#090d16',
-                  boxShadow: '0 4px 18px rgba(255,255,255,0.2), 0 2px 8px rgba(0,0,0,0.5)',
+                  boxShadow: '0 4px 18px rgba(255,255,255,0.22), 0 2px 8px rgba(0,0,0,0.5)',
                   border: 'none',
                   display: 'flex',
                   alignItems: 'center',
@@ -550,7 +501,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onClick={handleHeroStream}
               >
                 <Play size={18} fill="#090d16" />
-                Play
+                Play in VLC
               </button>
 
               <button
@@ -558,9 +509,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 aria-label="Details"
                 title="Details"
                 style={{
-                  width: '44px',
-                  height: '44px',
-                  minWidth: '44px',
+                  width: '46px',
+                  height: '46px',
+                  minWidth: '46px',
                   borderRadius: '12px',
                   background: 'rgba(255,255,255,0.14)',
                   backdropFilter: 'blur(16px)',
@@ -575,7 +526,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   transition: 'all 0.15s ease',
                 }}
               >
-                <Info size={18} strokeWidth={2.4} />
+                <Info size={19} strokeWidth={2.4} />
               </button>
             </div>
           </div>
