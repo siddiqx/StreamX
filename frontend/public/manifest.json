@@ -1,0 +1,19 @@
+{
+  "name": "StreamX Cinema",
+  "short_name": "StreamX",
+  "description": "Personal Cinema & High-Performance Media Streaming Cloud",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#07090e",
+  "theme_color": "#07090e",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["entertainment", "video", "multimedia"]
+}

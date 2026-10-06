@@ -48,23 +48,26 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTransfers, onOpenTransfers
         </span>
       </div>
 
-      <button
-        onClick={onOpenTransfers}
-        style={{
-          display: 'flex', alignItems: 'center', gap: '7px',
-          background: activeCount > 0 ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
-          border: `1px solid ${activeCount > 0 ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
-          borderRadius: 'var(--radius-full)', padding: '7px 14px', cursor: 'pointer',
-          color: activeCount > 0 ? '#c7d2fe' : 'var(--text-faint)',
-          fontSize: '0.78rem', fontWeight: 700, transition: 'all 0.2s', minHeight: '36px',
-        }}
-      >
-        <div className="beacon-dot" style={{
-          background: activeCount > 0 ? '#6366f1' : '#10b981',
-          boxShadow: activeCount > 0 ? '0 0 8px #6366f1' : '0 0 8px #10b981', flexShrink: 0,
-        }} />
-        <span>{activeCount > 0 ? `${activeCount} Syncing` : 'Connected'}</span>
-      </button>
+      {activeCount > 0 && (
+        <button
+          onClick={onOpenTransfers}
+          aria-label="Active Transfers"
+          style={{
+            display: 'flex', alignItems: 'center', gap: '7px',
+            background: 'rgba(99,102,241,0.15)',
+            border: '1px solid rgba(99,102,241,0.35)',
+            borderRadius: 'var(--radius-full)', padding: '5px 12px', cursor: 'pointer',
+            color: '#c7d2fe',
+            fontSize: '0.74rem', fontWeight: 700, transition: 'all 0.2s', minHeight: '30px',
+          }}
+        >
+          <div className="beacon-dot" style={{
+            background: '#6366f1',
+            boxShadow: '0 0 8px #6366f1', flexShrink: 0,
+          }} />
+          <span>{activeCount} Syncing</span>
+        </button>
+      )}
     </header>
   );
 };
