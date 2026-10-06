@@ -12,7 +12,7 @@ from app.db.models import Media, MetadataEntity
 from app.schemas.media import MediaResponse, MetadataEntityResponse, MetadataSelectRequest
 from app.services.drive_service import drive_service
 from app.services.metadata_service import metadata_service
-from app.utils.filenames import resolve_mime_type, sanitize_filename
+from app.utils.filenames import make_content_disposition, resolve_mime_type, sanitize_filename
 from app.utils.logging import logger
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
@@ -245,12 +245,11 @@ async def stream_media(
             await res.aclose()
             await client.aclose()
 
-    clean_name = sanitize_filename(item.filename)
     content_type = resolve_mime_type(item.filename, item.mime_type)
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": content_type,
-        "Content-Disposition": f'inline; filename="{clean_name}"',
+        "Content-Disposition": make_content_disposition("inline", item.filename),
     }
     if "Content-Range" in res.headers:
         headers["Content-Range"] = res.headers["Content-Range"]
@@ -420,13 +419,12 @@ async def stream_compatible_media(
             except ProcessLookupError:
                 pass
 
-    clean_name = sanitize_filename(item.filename)
     return StreamingResponse(
         transcode_generator(),
         media_type="video/mp4",
         headers={
             "Content-Type": "video/mp4",
-            "Content-Disposition": f'inline; filename="{clean_name}.mp4"',
+            "Content-Disposition": make_content_disposition("inline", f"{item.filename}.mp4"),
             "Accept-Ranges": "none",
             "Cache-Control": "no-cache",
         },
@@ -491,10 +489,10 @@ async def get_m3u_playlist(
     m3u_content = f"#EXTM3U\n#EXTINF:-1,{clean_title}\n{stream_url}\n"
 
     return Response(
-        content=m3u_content,
-        media_type="application/x-mpegurl",
+        content=m3u_content.encode("utf-8"),
+        media_type="application/x-mpegurl; charset=utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="{clean_title}.m3u"',
+            "Content-Disposition": make_content_disposition("attachment", f"{clean_title}.m3u"),
             "Cache-Control": "no-cache",
         },
     )
@@ -524,11 +522,10 @@ async def download_media(
             await res.aclose()
             await client.aclose()
 
-    clean_name = sanitize_filename(item.filename)
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": f'attachment; filename="{clean_name}"',
+        "Content-Disposition": make_content_disposition("attachment", item.filename),
     }
     if "Content-Range" in res.headers:
         headers["Content-Range"] = res.headers["Content-Range"]

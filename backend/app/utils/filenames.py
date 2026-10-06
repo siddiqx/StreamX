@@ -61,3 +61,22 @@ def resolve_mime_type(filename: str, fallback_mime: Optional[str] = None) -> str
         return "video/quicktime"
     return fallback_mime or "video/mp4"
 
+
+def make_content_disposition(disposition_type: str, filename: str) -> str:
+    """Format Content-Disposition with ASCII fallback and RFC 5987 UTF-8 filename.
+
+    Guarantees that HTTP headers are strictly ASCII/Latin-1 encodable, preventing
+    UnicodeEncodeError in ASGI servers (Uvicorn/Starlette) for files containing
+    Unicode characters, symbols, or emojis (e.g. \u232f).
+    """
+    from urllib.parse import quote
+
+    clean = sanitize_filename(filename)
+    # Replace non-ASCII characters for the ASCII fallback parameter
+    ascii_clean = clean.encode("ascii", "replace").decode("ascii").replace("?", "_")
+    ascii_clean = ascii_clean.replace('"', "").replace("\r", "").replace("\n", "")
+    if not ascii_clean:
+        ascii_clean = "streamx_media"
+    utf8_encoded = quote(clean.replace("\r", "").replace("\n", ""), safe="")
+    return f"{disposition_type}; filename=\"{ascii_clean}\"; filename*=UTF-8''{utf8_encoded}"
+
