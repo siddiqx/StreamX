@@ -1,9 +1,12 @@
-const CACHE_NAME = 'streamx-v5';
+const CACHE_NAME = 'streamx-v6';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/favicon.svg'
+  '/favicon.svg',
+  '/streamx-logo.png',
+  '/icon-192.png',
+  '/icon-512.png'
 ];
 
 self.addEventListener('install', (e) => {

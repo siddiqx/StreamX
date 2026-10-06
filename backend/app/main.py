@@ -53,6 +53,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.workers.metadata_worker import metadata_worker
     metadata_task = asyncio.create_task(metadata_worker.start())
 
+    # Auto-heal unenriched or failed library items on startup
+    try:
+        from app.services.metadata_service import metadata_service
+        asyncio.create_task(metadata_service.backfill_library(force=False))
+    except Exception as e:
+        logger.warning(f"Metadata auto-healing schedule warning: {e}")
+
     yield
 
     # Graceful shutdown

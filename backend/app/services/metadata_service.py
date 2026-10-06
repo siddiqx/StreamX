@@ -185,9 +185,23 @@ class MetadataService:
                     meta["backdrop_url"] = details.full_backdrop_url()
                     m.metadata_json = json.dumps(meta)
 
-                # Refine media category if obvious
-                if details.media_type == "tv" and m.category == "Other":
+                # Refine media category deterministically based on canonical metadata & tags
+                origin_countries = []
+                if details.raw_metadata and isinstance(details.raw_metadata, dict):
+                    origin_countries = details.raw_metadata.get("origin_country", [])
+
+                is_anime_signal = (
+                    ("Animation" in details.genres and any(c in ["JP", "Japan", "ja"] for c in origin_countries))
+                    or any(tok in m.filename.lower() for tok in ["anime", "animestation", "animedynasty", "aniwatch", "anime_maniaac", "sub", "crunchyroll", "horriblesubs"])
+                    or ("Animation" in details.genres and any(k in (details.original_title or "").lower() for k in ["wa", "no", "to", "ga", "wo"]))
+                )
+
+                if is_anime_signal:
+                    m.category = "Anime"
+                elif details.media_type == "tv":
                     m.category = "TV Shows"
+                elif details.media_type == "movie":
+                    m.category = "Movies"
 
                 await session.commit()
                 log_event(

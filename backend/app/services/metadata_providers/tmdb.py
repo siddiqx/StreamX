@@ -125,7 +125,7 @@ class TMDBProvider(MetadataProvider):
             data_fallback = await self._request(endpoint, params=fallback_params)
             results = data_fallback.get("results", []) if data_fallback else []
 
-        # If still zero results and media_type was tv, try searching multi or movie as fallback
+        # If still zero results, try searching multi as fallback
         if not results:
             multi_params = {
                 "query": clean_query,
@@ -138,6 +138,18 @@ class TMDBProvider(MetadataProvider):
                     r for r in multi_data.get("results", [])
                     if r.get("media_type") in ("movie", "tv")
                 ]
+
+        # If still zero results and query has multiple words, progressively trim trailing tokens
+        if not results and len(clean_query.split()) > 1:
+            words = clean_query.split()
+            for drop_count in range(1, min(3, len(words))):
+                sub_query = " ".join(words[:-drop_count]).strip()
+                if len(sub_query) >= 3:
+                    sub_data = await self._request("/search/multi", params={"query": sub_query, "include_adult": "false", "language": "en-US"})
+                    if sub_data and sub_data.get("results"):
+                        results = [r for r in sub_data.get("results", []) if r.get("media_type") in ("movie", "tv")]
+                        if results:
+                            break
 
         candidates: List[CandidateMatch] = []
         for item in results:

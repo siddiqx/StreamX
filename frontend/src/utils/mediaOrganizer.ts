@@ -78,57 +78,75 @@ export function extractEpisodeInfo(filename: string): {
   // Strip extension
   working = working.replace(/\.(mkv|mp4|avi|mov|m4v|webm|ts|flv)$/i, '');
 
-  // Strip leading tags like @Channel_Name
-  working = working.replace(/^@\w+[\.\s\-_]*/, '');
-  working = working.replace(/[\.\s\-_]*@\w+/g, '');
+  // Strip telegram tags
+  working = working.replace(/@\w+[\.\s\-_]*/g, '').replace(/[\.\s\-_]*@\w+/g, '');
+
+  let season = 1;
+  let episode = 1;
+  let isSeries = false;
+
+  // 1. Check for LEADING Episode / Season pattern (e.g. "EP09 - The Fragrant Flower" or "Episode 09 - ...")
+  const leadingEp = working.match(/^(?:S(\d{1,2})\s*[-_.]?\s*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})\s*[-_.:\s]+/i);
+  if (leadingEp) {
+    season = leadingEp[1] ? parseInt(leadingEp[1], 10) : 1;
+    episode = parseInt(leadingEp[2], 10);
+    isSeries = true;
+    working = working.substring(leadingEp[0].length);
+  }
+
+  // 2. Identify quality / codec boundary to stop title before uploader tags (e.g. [1080p] AnimeDynasty)
+  const qBoundary = working.match(/(\[?\b(2160p|4k|1080p|1080i|720p|480p|bluray|web-?dl|webrip|hdrip|hevc|x264|x265)\b\]?)/i);
+  if (qBoundary && qBoundary.index !== undefined) {
+    working = working.substring(0, qBoundary.index);
+  }
 
   // Strip bracketed release noise e.g. [Dual], [1080p], [Sub]
   const cleanedBrackets = working.replace(/\[.*?\]/g, ' ');
 
   // Normalize dots and underscores
   const normalized = cleanedBrackets.replace(/[\._]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  let season = 1;
-  let episode = 1;
-  let isSeries = false;
   let seriesTitle = normalized;
 
-  // Pattern 1: S01E03 or S1 - 10 or S01 - E03 or S1E10
-  const seMatch = normalized.match(/\bS(\d{1,2})\s*[-_]?\s*(?:E|Ep|Episode)?\s*(\d{1,4})\b/i);
-  if (seMatch) {
-    season = parseInt(seMatch[1], 10);
-    episode = parseInt(seMatch[2], 10);
-    isSeries = true;
-    seriesTitle = normalized.substring(0, seMatch.index).trim();
-  } else {
-    // Pattern 2: 1x04 or 02x12
-    const xMatch = normalized.match(/\b(\d{1,2})x(\d{1,4})\b/i);
-    if (xMatch) {
-      season = parseInt(xMatch[1], 10);
-      episode = parseInt(xMatch[2], 10);
+  // 3. If episode not yet found, check in normalized title area
+  if (!isSeries) {
+    // Pattern 1: S01E03 or S1 - 10 or S01 - E03 or S1E10
+    const seMatch = normalized.match(/\bS(\d{1,2})\s*(?:[-_.]?\s*(?:E|Ep|Episode)|[-_.])\s*(\d{1,4})\b/i);
+    if (seMatch && seMatch.index !== undefined) {
+      season = parseInt(seMatch[1], 10);
+      episode = parseInt(seMatch[2], 10);
       isSeries = true;
-      seriesTitle = normalized.substring(0, xMatch.index).trim();
+      seriesTitle = normalized.substring(0, seMatch.index).trim();
     } else {
-      // Pattern 3: Episode 10 or Ep 05
-      const epMatch = normalized.match(/\b(?:Episode|Ep)\s*(\d{1,4})\b/i);
-      if (epMatch) {
+      // Pattern 2: Standalone E08, EP09, Ep 08, Episode 8
+      const epMatch = normalized.match(/\b(?:Episode|Ep|EP|E)\s*(\d{1,4})\b/i);
+      if (epMatch && epMatch.index !== undefined) {
+        season = 1;
         episode = parseInt(epMatch[1], 10);
         isSeries = true;
         seriesTitle = normalized.substring(0, epMatch.index).trim();
       } else {
-        // Pattern 4: Anime absolute episode numbering "Title - 03" or "Title - 10"
-        const dashMatch = normalized.match(/\s+-\s+(\d{1,4})(?:\s+|$)/);
-        if (dashMatch) {
-          episode = parseInt(dashMatch[1], 10);
+        // Pattern 3: 1x04 or 02x12
+        const xMatch = normalized.match(/\b(\d{1,2})x(\d{1,4})\b/i);
+        if (xMatch && xMatch.index !== undefined) {
+          season = parseInt(xMatch[1], 10);
+          episode = parseInt(xMatch[2], 10);
           isSeries = true;
-          seriesTitle = normalized.substring(0, dashMatch.index).trim();
+          seriesTitle = normalized.substring(0, xMatch.index).trim();
+        } else {
+          // Pattern 4: Anime absolute episode numbering "Title - 03" or "Title - 10"
+          const dashMatch = normalized.match(/\s+-\s+(\d{1,4})(?:\s+|$)/);
+          if (dashMatch && dashMatch.index !== undefined) {
+            episode = parseInt(dashMatch[1], 10);
+            isSeries = true;
+            seriesTitle = normalized.substring(0, dashMatch.index).trim();
+          }
         }
       }
     }
   }
 
   // Clean trailing hyphens or noise from seriesTitleCandidate
-  seriesTitle = seriesTitle.replace(/\s*-\s*$/, '').trim();
+  seriesTitle = seriesTitle.replace(/\s+-\s*$/, '').replace(/^\s*-\s+/, '').trim();
 
   return {
     isSeries,
@@ -144,6 +162,7 @@ export function extractEpisodeInfo(filename: string): {
 function normalizeGroupKey(title: string): string {
   return title
     .toLowerCase()
+    .replace(/^the\s+/, '')
     .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, '_')
     .trim();
@@ -176,7 +195,7 @@ export function organizeMediaLibrary(
     // It is a series if metadata says tv, or it has episode patterns, or category is anime/tv with episode signs
     const isSeries = isExplicitTv || (epInfo.isSeries && !isExplicitMovie) || (isAnimeOrShowCategory && epInfo.isSeries);
 
-    // Determine Parent Title
+    // Determine Parent Title and Group Key
     let groupTitle = '';
     let groupKey = '';
 
@@ -186,7 +205,7 @@ export function organizeMediaLibrary(
         groupKey = `series_${item.canonical_metadata.provider_id || normalizeGroupKey(groupTitle)}`;
       } else {
         groupTitle = epInfo.seriesTitleCandidate || getMediaDisplayName(item);
-        groupKey = `series_${category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;
+        groupKey = `series_${normalizeGroupKey(groupTitle)}`;
       }
     } else {
       // Standalone Movie or Single Video
@@ -212,7 +231,12 @@ export function organizeMediaLibrary(
       if (isItemOffline) existing.offlineCount += 1;
       existing.isOffline = existing.offlineCount > 0;
 
-      // Keep poster/backdrop if existing lacked it
+      // If any episode is Anime, upgrade entire group category to Anime
+      if (category === 'Anime') {
+        existing.category = 'Anime';
+      }
+
+      // Inherit poster/backdrop/metadata if existing lacked it
       if (!existing.posterUrl && getMediaPosterUrl(item)) {
         existing.posterUrl = getMediaPosterUrl(item);
       }
@@ -221,6 +245,12 @@ export function organizeMediaLibrary(
       }
       if (!existing.overview && item.canonical_metadata?.overview) {
         existing.overview = item.canonical_metadata.overview;
+      }
+      if (!existing.rating && item.canonical_metadata?.rating) {
+        existing.rating = item.canonical_metadata.rating;
+      }
+      if (existing.genres.length === 0 && item.canonical_metadata?.genres) {
+        existing.genres = item.canonical_metadata.genres;
       }
     } else {
       const newGroup: MediaGroup = {

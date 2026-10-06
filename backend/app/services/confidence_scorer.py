@@ -31,7 +31,11 @@ def compute_string_similarity(a: str, b: str) -> float:
     words_b = set(norm_b.split())
     if words_a and words_b:
         jaccard = len(words_a & words_b) / len(words_a | words_b)
-        ratio = max(ratio, (ratio + jaccard) / 2)
+        overlap = len(words_a & words_b) / min(len(words_a), len(words_b))
+        if norm_a in norm_b or norm_b in norm_a or overlap >= 0.99:
+            ratio = max(ratio, 0.90)
+        else:
+            ratio = max(ratio, (ratio + jaccard) / 2)
 
     return min(1.0, max(0.0, ratio))
 

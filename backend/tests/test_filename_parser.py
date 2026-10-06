@@ -111,3 +111,21 @@ def test_channel_tagged_movie():
     assert p.year == 2016
     assert p.media_type == "movie"
     assert p.quality == "720p"
+
+
+def test_leading_episode_with_uploader_suffix():
+    p = parse_filename("EP09 - The Fragrant Flower [1080p] AnimeDynasty.mkv")
+    assert p.clean_title == "The Fragrant Flower"
+    assert p.season == 1
+    assert p.episode == 9
+    assert p.media_type == "tv"
+    assert p.quality == "1080p"
+
+
+def test_standalone_episode_with_bracket_sub():
+    p = parse_filename("Fragrant Flower E08 [1080p Sub].mkv")
+    assert p.clean_title == "Fragrant Flower"
+    assert p.season == 1
+    assert p.episode == 8
+    assert p.media_type == "tv"
+    assert p.quality == "1080p"

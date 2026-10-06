@@ -25,21 +25,29 @@ from app.utils.logging import log_event, logger
 def detect_category(filename: str) -> str:
     """Classify media into Movies, TV Shows, Anime, or Other."""
     name_lower = filename.lower()
+    # 1. Anime takes precedence if anime keywords or fansub tags are present
     if any(
         term in name_lower
         for term in [
-            "s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09",
-            "season", "episode", "ep0", "ep1", "e01", "e02", "e03", "e04",
-        ]
-    ):
-        return "TV Shows"
-    if any(
-        term in name_lower
-        for term in [
-            "anime", "sub", "dub", "crunchyroll", "horriblesubs", "judas",
+            "anime", "animestation", "animedynasty", "aniwatch", "anime_maniaac",
+            "crunchyroll", "horriblesubs", "judas", "subsplease", "erai-raws",
+            "sub", "dub", "dual-audio", "dual", "esub"
         ]
     ):
         return "Anime"
+
+    # 2. TV Series patterns
+    if any(
+        term in name_lower
+        for term in [
+            "season", "episode", "s0", "s1", "s2", "s3", "s4", "s5",
+            "ep0", "ep1", "ep2", "ep3", "ep4", "ep5", "ep6", "ep7", "ep8", "ep9",
+            "e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9",
+        ]
+    ):
+        return "TV Shows"
+
+    # 3. Movies
     if any(
         ext in name_lower
         for ext in [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".webm"]
