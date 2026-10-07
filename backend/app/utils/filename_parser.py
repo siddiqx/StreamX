@@ -229,6 +229,8 @@ def parse_filename(filename: str) -> ParsedMedia:
     clean_title = re.sub(r"\s+-\s*$", "", clean_title)
     clean_title = re.sub(r"^\s*-\s+", "", clean_title)
     clean_title = re.sub(r"\(\s*\)", "", clean_title)
+    clean_title = re.sub(r"[\(\[\{\s\-_]+$", "", clean_title).strip()
+    clean_title = re.sub(r"^[\)\]\}\s\-_]+", "", clean_title).strip()
     clean_title = re.sub(r"\s+", " ", clean_title).strip()
 
     # Fallback if title became empty

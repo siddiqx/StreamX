@@ -304,6 +304,9 @@ export function getMediaDisplayYear(item: MediaItem): number | undefined {
 }
 
 export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'original' = 'w500'): string | undefined {
+  if (item.poster_override && item.poster_override.trim()) {
+    return item.poster_override.trim();
+  }
   if (item.canonical_metadata?.poster_path) {
     const path = item.canonical_metadata.poster_path;
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
@@ -330,6 +333,9 @@ export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'orig
 }
 
 export function getMediaBackdropUrl(item: MediaItem, size: 'w780' | 'w1280' | 'original' = 'w1280'): string | undefined {
+  if (item.backdrop_override && item.backdrop_override.trim()) {
+    return item.backdrop_override.trim();
+  }
   if (item.canonical_metadata?.backdrop_path) {
     const path = item.canonical_metadata.backdrop_path;
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
@@ -376,16 +382,68 @@ export async function searchMetadataCandidates(mediaId: number, query?: string):
   }
 }
 
-export async function selectMetadata(mediaId: number, providerId: string, mediaType = 'movie'): Promise<boolean> {
+export async function selectMetadata(mediaId: number, providerId: string, mediaType = 'movie', applyToSeries = true): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/select`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider_id: providerId, media_type: mediaType }),
+      body: JSON.stringify({ provider_id: providerId, media_type: mediaType, apply_to_series: applyToSeries }),
     });
     return res.ok;
   } catch (err) {
     console.warn('Failed selecting metadata:', err);
+    return false;
+  }
+}
+
+export async function patchMediaMetadata(
+  mediaId: number,
+  patch: {
+    title?: string;
+    year?: number;
+    category?: string;
+    overview?: string;
+    poster_override?: string;
+    backdrop_override?: string;
+  }
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed patching metadata:', err);
+    return false;
+  }
+}
+
+export async function setPosterOverride(mediaId: number, posterUrl: string | null): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/poster`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ poster_url: posterUrl }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed setting poster override:', err);
+    return false;
+  }
+}
+
+export async function setBackdropOverride(mediaId: number, backdropUrl: string | null): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/backdrop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backdrop_url: backdropUrl }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed setting backdrop override:', err);
     return false;
   }
 }
@@ -421,6 +479,17 @@ export async function fetchMetadataStats(): Promise<any | null> {
     return await res.json();
   } catch (err) {
     console.warn('Failed fetching metadata stats:', err);
+    return null;
+  }
+}
+
+export async function fetchMediaDiagnostics(mediaId: number): Promise<any | null> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/diagnostics`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('Failed fetching media diagnostics:', err);
     return null;
   }
 }

@@ -51,6 +51,18 @@ class MetadataJobStatus(str, enum.Enum):
     RETRYING = "RETRYING"
 
 
+class MediaTaxonomy(str, enum.Enum):
+    MOVIE = "MOVIE"
+    TV_SERIES = "TV_SERIES"
+    TV_EPISODE = "TV_EPISODE"
+    ANIME_SERIES = "ANIME_SERIES"
+    ANIME_EPISODE = "ANIME_EPISODE"
+    ANIME_MOVIE = "ANIME_MOVIE"
+    DOCUMENTARY = "DOCUMENTARY"
+    DOCUMENTARY_SERIES = "DOCUMENTARY_SERIES"
+    OTHER = "OTHER"
+
+
 class MetadataEntity(Base):
     __tablename__ = "metadata_entities"
 
@@ -58,6 +70,7 @@ class MetadataEntity(Base):
     provider = Column(String(64), default="tmdb", nullable=False, index=True)
     provider_id = Column(String(128), nullable=False, index=True)
     media_type = Column(String(32), nullable=False, index=True)  # "movie", "tv"
+    category = Column(String(64), nullable=True, index=True)  # MOVIE, TV_SERIES, ANIME_SERIES, ANIME_MOVIE
     title = Column(String(512), nullable=False, index=True)
     original_title = Column(String(512), nullable=True)
     release_date = Column(String(32), nullable=True)
@@ -68,6 +81,8 @@ class MetadataEntity(Base):
     rating = Column(Float, nullable=True)
     runtime = Column(Integer, nullable=True)
     genres_json = Column(Text, nullable=True)  # JSON array string e.g. ["Action", "Sci-Fi"]
+    original_language = Column(String(32), nullable=True)
+    origin_country = Column(String(64), nullable=True)
     metadata_json = Column(Text, nullable=True)  # JSON string for provider-specific extras
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
@@ -83,9 +98,18 @@ class Media(Base):
     filename = Column(String(512), nullable=False, index=True)
     size = Column(BigInteger, nullable=False)
     mime_type = Column(String(128), nullable=False)
-    category = Column(String(64), default="Other", index=True)
+    category = Column(String(64), default="Other", index=True)  # Display shelf category (Movies, TV Shows, Anime, Anime Movies, Other)
+    media_type = Column(String(32), default="MOVIE", nullable=True, index=True)  # MediaTaxonomy enum value
     poster_url = Column(String(1024), nullable=True)
+    poster_override = Column(String(1024), nullable=True)
+    backdrop_override = Column(String(1024), nullable=True)
     metadata_json = Column(Text, nullable=True)
+
+    # Technical metadata parsed from file
+    season = Column(Integer, nullable=True, index=True)
+    episode = Column(Integer, nullable=True, index=True)
+    quality = Column(String(64), nullable=True)
+    release_group = Column(String(128), nullable=True)
 
     # Metadata enrichment columns
     metadata_entity_id = Column(

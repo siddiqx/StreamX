@@ -8,11 +8,23 @@ export type MetadataStatus =
   | 'FAILED'
   | 'RETRYING';
 
+export type MediaTaxonomy =
+  | 'MOVIE'
+  | 'TV_SERIES'
+  | 'TV_EPISODE'
+  | 'ANIME_SERIES'
+  | 'ANIME_EPISODE'
+  | 'ANIME_MOVIE'
+  | 'DOCUMENTARY'
+  | 'DOCUMENTARY_SERIES'
+  | 'OTHER';
+
 export interface CanonicalMetadata {
   id: number;
   provider: string;
   provider_id: string;
   media_type: string;
+  category?: string;
   title: string;
   original_title?: string;
   release_date?: string;
@@ -23,6 +35,8 @@ export interface CanonicalMetadata {
   rating?: number;
   runtime?: number;
   genres: string[];
+  original_language?: string;
+  origin_country?: string;
 }
 
 export interface MediaItem {
@@ -32,8 +46,15 @@ export interface MediaItem {
   size: number;
   mime_type: string;
   category: string;
+  media_type?: string;
   poster_url?: string;
+  poster_override?: string;
+  backdrop_override?: string;
   metadata_json?: string;
+  season?: number;
+  episode?: number;
+  quality?: string;
+  release_group?: string;
   metadata_entity_id?: number;
   metadata_status?: MetadataStatus;
   metadata_confidence?: number;
@@ -114,4 +135,49 @@ export interface MetadataStats {
   processing: number;
   retrying: number;
   match_percentage: number;
+}
+
+export interface MetadataDiagnostics {
+  media_id: number;
+  original_filename: string;
+  mime_type: string;
+  is_media_file: boolean;
+  parsed: {
+    clean_title: string;
+    year?: number;
+    media_type: string;
+    season?: number;
+    episode?: number;
+    quality?: string;
+    release_group?: string;
+  };
+  category: string;
+  media_type: string;
+  metadata_status: string;
+  metadata_confidence?: number;
+  metadata_locked: boolean;
+  poster_override?: string;
+  backdrop_override?: string;
+  resolved_poster_url?: string;
+  resolved_backdrop_url?: string;
+  canonical_entity?: {
+    id: number;
+    provider: string;
+    provider_id: string;
+    title: string;
+    year?: number;
+    media_type: string;
+    category?: string;
+    rating?: number;
+    origin_country?: string;
+    original_language?: string;
+  } | null;
+  candidates_scored: Array<{
+    provider_id: string;
+    title: string;
+    media_type: string;
+    year?: number;
+    confidence: number;
+    popularity?: number;
+  }>;
 }

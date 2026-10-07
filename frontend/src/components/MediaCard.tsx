@@ -310,6 +310,24 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               <Layers size={9} />
               {episodeCount} {episodeCount === 1 ? 'Ep' : 'Eps'}
             </span>
+          ) : (group?.versions && group.versions.length > 1) ? (
+            <span style={{
+              background: 'rgba(14,165,233,0.88)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              borderRadius: '6px',
+              padding: '2px 6px',
+              fontSize: '0.6rem',
+              fontWeight: 800,
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+              boxShadow: '0 2px 8px rgba(14,165,233,0.4)',
+            }}>
+              <Layers size={9} />
+              {group.versions.length} Versions
+            </span>
           ) : null}
 
           {/* Offline downloaded badge */}

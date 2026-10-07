@@ -11,6 +11,7 @@ class MetadataEntityResponse(BaseModel):
     provider: str
     provider_id: str
     media_type: str
+    category: Optional[str] = None
     title: str
     original_title: Optional[str] = None
     release_date: Optional[str] = None
@@ -21,6 +22,8 @@ class MetadataEntityResponse(BaseModel):
     rating: Optional[float] = None
     runtime: Optional[int] = None
     genres: List[str] = []
+    original_language: Optional[str] = None
+    origin_country: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -44,8 +47,17 @@ class MediaResponse(BaseModel):
     size: int
     mime_type: str
     category: str
+    media_type: Optional[str] = "MOVIE"
     poster_url: Optional[str] = None
+    poster_override: Optional[str] = None
+    backdrop_override: Optional[str] = None
     metadata_json: Optional[str] = None
+
+    # Technical metadata parsed from file
+    season: Optional[int] = None
+    episode: Optional[int] = None
+    quality: Optional[str] = None
+    release_group: Optional[str] = None
 
     # Enriched metadata fields
     metadata_entity_id: Optional[int] = None
@@ -68,3 +80,24 @@ class MediaResponse(BaseModel):
 class MetadataSelectRequest(BaseModel):
     provider_id: str
     media_type: str = "movie"
+    apply_to_series: bool = True
+
+
+class MetadataPatchRequest(BaseModel):
+    title: Optional[str] = None
+    year: Optional[int] = None
+    category: Optional[str] = None
+    overview: Optional[str] = None
+    poster_override: Optional[str] = None
+    backdrop_override: Optional[str] = None
+
+
+MediaPatchRequest = MetadataPatchRequest
+
+
+class PosterOverrideRequest(BaseModel):
+    poster_url: Optional[str] = None
+
+
+class BackdropOverrideRequest(BaseModel):
+    backdrop_url: Optional[str] = None

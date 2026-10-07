@@ -2,10 +2,11 @@ import React, { useState, useMemo } from 'react';
 import {
   X, Play, Download, Film, ShieldAlert,
   Star, Search, Loader2, Check, CheckCircle2,
-  Tv, Sparkles, MonitorPlay, Zap, ChevronDown, ChevronUp
+  Tv, Sparkles, MonitorPlay, Zap, ChevronDown, ChevronUp,
+  Lock, Unlock, RefreshCw, Image as ImageIcon, Activity
 } from 'lucide-react';
-import type { MediaItem, MetadataCandidate } from '../types';
-import type { MediaGroup, MediaEpisode } from '../utils/mediaOrganizer';
+import type { MediaItem, MetadataCandidate, MetadataDiagnostics } from '../types';
+import type { MediaGroup, MediaEpisode, MediaVersion } from '../utils/mediaOrganizer';
 import {
   formatBytes,
   formatRuntime,
@@ -16,6 +17,12 @@ import {
   parseMediaMetadata,
   searchMetadataCandidates,
   selectMetadata,
+  setPosterOverride,
+  setBackdropOverride,
+  unlockMetadata,
+  reprocessMetadata,
+  fetchMediaDiagnostics,
+  patchMediaMetadata,
   API_BASE,
 } from '../api';
 import { launchVlcWithTracking } from '../utils/playerSettings';
@@ -60,11 +67,19 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   // Manual Metadata Correction Modal State
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [activeModalTab, setActiveModalTab] = useState<'search' | 'overrides' | 'diagnostics'>('search');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [isSelecting, setIsSelecting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  // Custom Overrides & Diagnostics state
+  const [customPosterInput, setCustomPosterInput] = useState('');
+  const [customBackdropInput, setCustomBackdropInput] = useState('');
+  const [isSavingOverrides, setIsSavingOverrides] = useState(false);
+  const [diagnosticsData, setDiagnosticsData] = useState<MetadataDiagnostics | null>(null);
+  const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(false);
 
   const item = rawItem || group?.featuredItem || null;
   const isSeriesGroup = group?.type === 'series';
@@ -239,7 +254,10 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   const handleOpenSearch = async () => {
     setShowSearchModal(true);
+    setActiveModalTab('search');
     setSearchQuery(title);
+    setCustomPosterInput(item?.poster_override || item?.poster_url || '');
+    setCustomBackdropInput(item?.backdrop_override || '');
     setIsSearching(true);
     const results = await searchMetadataCandidates(item.id, title);
     setCandidates(results);
@@ -257,7 +275,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   const handleSelectCandidate = async (cand: MetadataCandidate) => {
     setIsSelecting(true);
-    const ok = await selectMetadata(item.id, cand.provider_id, cand.media_type);
+    const ok = await selectMetadata(item.id, cand.provider_id, cand.media_type, true);
     setIsSelecting(false);
     if (ok) {
       setShowSearchModal(false);
@@ -287,6 +305,54 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         });
       }
     }
+  };
+
+  const handleSaveOverrides = async () => {
+    setIsSavingOverrides(true);
+    await setPosterOverride(item.id, customPosterInput.trim() || null);
+    await setBackdropOverride(item.id, customBackdropInput.trim() || null);
+    setIsSavingOverrides(false);
+    setActionMessage('✓ Custom artwork overrides saved and permanently locked.');
+    setTimeout(() => setActionMessage(null), 4000);
+    if (onItemUpdated) {
+      onItemUpdated({
+        ...item,
+        poster_override: customPosterInput.trim() || undefined,
+        backdrop_override: customBackdropInput.trim() || undefined,
+        metadata_locked: true,
+      });
+    }
+    setShowSearchModal(false);
+  };
+
+  const handleToggleUnlock = async () => {
+    if (item.metadata_locked) {
+      await unlockMetadata(item.id);
+      setActionMessage('✓ Metadata unlocked for auto-enrichment.');
+      if (onItemUpdated) {
+        onItemUpdated({ ...item, metadata_locked: false });
+      }
+    } else {
+      await patchMediaMetadata(item.id, { title: item.canonical_metadata?.title || title });
+      setActionMessage('✓ Metadata locked.');
+      if (onItemUpdated) {
+        onItemUpdated({ ...item, metadata_locked: true, metadata_status: 'MANUAL' });
+      }
+    }
+    setTimeout(() => setActionMessage(null), 4000);
+  };
+
+  const handleReprocess = async () => {
+    await reprocessMetadata(item.id, true);
+    setActionMessage('✓ Re-enqueued for metadata enrichment.');
+    setTimeout(() => setActionMessage(null), 4000);
+  };
+
+  const handleLoadDiagnostics = async () => {
+    setIsLoadingDiagnostics(true);
+    const diag = await fetchMediaDiagnostics(item.id);
+    setDiagnosticsData(diag);
+    setIsLoadingDiagnostics(false);
   };
 
   return (
@@ -1078,6 +1144,144 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </div>
             )}
 
+{/* Available Versions Shelf for Multi-Quality Movies (Section 23) */}
+            {group && group.type === 'movie' && group.versions && group.versions.length > 1 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      fontSize: '0.98rem',
+                      fontWeight: 800,
+                      color: '#fff',
+                      fontFamily: 'var(--font-display, inherit)',
+                    }}>
+                      Available Versions
+                    </span>
+                    <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 700 }}>
+                      ({group.versions.length})
+                    </span>
+                  </div>
+                  <span style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    color: '#60a5fa',
+                    background: 'rgba(59,130,246,0.14)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(59,130,246,0.25)',
+                  }}>
+                    Multi-Quality Asset
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {group.versions.map((ver: MediaVersion) => {
+                    const verItem = ver.item;
+                    const verTech = parseMediaMetadata(verItem.filename);
+                    const verExt = ver.extension || verItem.filename.split('.').pop()?.toUpperCase() || 'MKV';
+                    const isVerActive = verItem.id === item.id;
+                    const verOffline = ver.isOffline ?? (offlineIds?.has(verItem.id) || false);
+
+                    return (
+                      <div
+                        key={verItem.id}
+                        style={{
+                          background: isVerActive ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.035)',
+                          border: isVerActive ? '1px solid rgba(99,102,241,0.45)' : '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: '12px',
+                          padding: '10px 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{
+                              fontWeight: 800,
+                              fontSize: '0.82rem',
+                              color: '#fff',
+                              background: 'rgba(255,255,255,0.08)',
+                              padding: '2px 7px',
+                              borderRadius: '5px',
+                            }}>
+                              {verItem.quality || verTech.quality || 'HD'}
+                            </span>
+                            <span style={{ fontSize: '0.76rem', color: '#94a3b8', fontWeight: 600 }}>
+                              {verExt} · {formatBytes(verItem.size)}
+                            </span>
+                            {isVerActive && (
+                              <span style={{ fontSize: '0.68rem', color: '#818cf8', fontWeight: 800 }}>
+                                Active Selection
+                              </span>
+                            )}
+                          </div>
+                          <p style={{
+                            fontSize: '0.70rem',
+                            color: '#64748b',
+                            margin: '3px 0 0',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}>
+                            {verItem.filename}
+                          </p>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <button
+                            onClick={() => handleOpenVlcForEpisode(verItem)}
+                            title="Stream this version in VLC"
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: '8px',
+                              background: isVerActive ? '#ffffff' : 'rgba(255,255,255,0.12)',
+                              border: 'none',
+                              color: isVerActive ? '#090d16' : '#fff',
+                              fontSize: '0.74rem',
+                              fontWeight: 800,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Play size={12} fill={isVerActive ? '#090d16' : '#fff'} />
+                            Stream
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (verOffline) {
+                                onDeleteDownload(verItem);
+                              } else {
+                                onStartDownload(verItem);
+                              }
+                            }}
+                            title={verOffline ? 'Downloaded' : 'Download file'}
+                            style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              background: verOffline ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.06)',
+                              border: verOffline ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.12)',
+                              color: verOffline ? '#10b981' : '#cbd5e1',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {verOffline ? <Check size={14} strokeWidth={2.5} /> : <Download size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Technical Specifications Bar */}
             <div style={{
               display: 'flex',
@@ -1092,19 +1296,34 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Zap size={14} color="#818cf8" />
                 <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#e2e8f0' }}>
-                  {techMeta.quality} · {extension} · {formatBytes(item.size)}
+                  {item.quality || techMeta.quality} · {extension} · {formatBytes(item.size)}
                 </span>
               </div>
 
-              <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
-                Direct Stream
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {item.metadata_locked && (
+                  <span style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    color: '#fbbf24',
+                    background: 'rgba(251,191,36,0.14)',
+                    padding: '2px 7px',
+                    borderRadius: '5px',
+                    border: '1px solid rgba(251,191,36,0.3)',
+                  }}>
+                    LOCKED
+                  </span>
+                )}
+                <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
+                  Direct Stream
+                </span>
+              </div>
             </div>
 
           </div>
         </div>
 
-        {/* Manual TMDB Correction Sub-Modal */}
+        {/* Unified Media Management Modal (Search TMDB, Artwork Overrides, Diagnostics) */}
         {showSearchModal && (
           <div
             style={{
@@ -1123,8 +1342,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
             <div
               style={{
                 width: '100%',
-                maxWidth: '540px',
-                maxHeight: '80vh',
+                maxWidth: '600px',
+                maxHeight: '85vh',
                 background: '#0d131f',
                 borderRadius: '20px 20px 0 0',
                 border: '1px solid rgba(255,255,255,0.12)',
@@ -1134,17 +1353,73 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               }}
               onClick={e => e.stopPropagation()}
             >
-              {/* Header */}
+              {/* Modal Navigation Header */}
               <div style={{
-                padding: '16px 20px',
+                padding: '14px 20px',
                 borderBottom: '1px solid rgba(255,255,255,0.08)',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
               }}>
-                <span style={{ fontSize: '0.94rem', fontWeight: 800, color: '#fff' }}>
-                  Search TMDB Match
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    onClick={() => setActiveModalTab('search')}
+                    style={{
+                      background: activeModalTab === 'search' ? 'rgba(99,102,241,0.25)' : 'transparent',
+                      border: activeModalTab === 'search' ? '1px solid rgba(99,102,241,0.5)' : 'none',
+                      color: activeModalTab === 'search' ? '#fff' : '#94a3b8',
+                      padding: '5px 12px',
+                      borderRadius: '8px',
+                      fontSize: '0.82rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    TMDB Search
+                  </button>
+                  <button
+                    onClick={() => setActiveModalTab('overrides')}
+                    style={{
+                      background: activeModalTab === 'overrides' ? 'rgba(99,102,241,0.25)' : 'transparent',
+                      border: activeModalTab === 'overrides' ? '1px solid rgba(99,102,241,0.5)' : 'none',
+                      color: activeModalTab === 'overrides' ? '#fff' : '#94a3b8',
+                      padding: '5px 12px',
+                      borderRadius: '8px',
+                      fontSize: '0.82rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <ImageIcon size={13} />
+                    Custom Artwork
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveModalTab('diagnostics');
+                      handleLoadDiagnostics();
+                    }}
+                    style={{
+                      background: activeModalTab === 'diagnostics' ? 'rgba(99,102,241,0.25)' : 'transparent',
+                      border: activeModalTab === 'diagnostics' ? '1px solid rgba(99,102,241,0.5)' : 'none',
+                      color: activeModalTab === 'diagnostics' ? '#fff' : '#94a3b8',
+                      padding: '5px 12px',
+                      borderRadius: '8px',
+                      fontSize: '0.82rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <Activity size={13} />
+                    Diagnostics
+                  </button>
+                </div>
+
                 <button
                   onClick={() => setShowSearchModal(false)}
                   style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
@@ -1153,123 +1428,333 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 </button>
               </div>
 
-              {/* Search Form */}
-              <form onSubmit={handleExecuteSearch} style={{ padding: '12px 16px', display: 'flex', gap: '8px' }}>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Enter canonical movie or show title..."
-                  style={{
-                    flex: 1,
-                    height: '42px',
-                    borderRadius: '10px',
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    color: '#fff',
-                    padding: '0 12px',
-                    fontSize: '0.84rem',
-                    outline: 'none',
-                  }}
-                />
-                <button
-                  type="submit"
-                  disabled={isSearching}
-                  style={{
-                    height: '42px',
-                    padding: '0 16px',
-                    borderRadius: '10px',
-                    background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-                    border: 'none',
-                    color: '#fff',
-                    fontWeight: 700,
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}
-                >
-                  {isSearching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
-                  Search
-                </button>
-              </form>
+              {/* Action Message Alert */}
+              {actionMessage && (
+                <div style={{
+                  background: 'rgba(16,185,129,0.18)',
+                  borderBottom: '1px solid rgba(16,185,129,0.3)',
+                  padding: '8px 20px',
+                  color: '#6ee7b7',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                }}>
+                  {actionMessage}
+                </div>
+              )}
 
-              {/* Candidate Results */}
-              <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {candidates.length === 0 && !isSearching ? (
-                  <p style={{ textAlign: 'center', color: '#64748b', fontSize: '0.82rem', padding: '30px 0' }}>
-                    No TMDB matches found. Try modifying the search keywords.
-                  </p>
-                ) : (
-                  candidates.map(cand => (
-                    <div
-                      key={cand.provider_id}
+              {/* TAB 1: TMDB Candidate Search */}
+              {activeModalTab === 'search' && (
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                  <form onSubmit={handleExecuteSearch} style={{ padding: '12px 16px', display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="Enter canonical movie or show title..."
                       style={{
+                        flex: 1,
+                        height: '42px',
+                        borderRadius: '10px',
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        color: '#fff',
+                        padding: '0 12px',
+                        fontSize: '0.84rem',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSearching}
+                      style={{
+                        height: '42px',
+                        padding: '0 16px',
+                        borderRadius: '10px',
+                        background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                        border: 'none',
+                        color: '#fff',
+                        fontWeight: 700,
+                        fontSize: '0.82rem',
+                        cursor: 'pointer',
                         display: 'flex',
-                        gap: '12px',
-                        padding: '10px',
-                        borderRadius: '12px',
-                        background: 'rgba(255,255,255,0.04)',
-                        border: '1px solid rgba(255,255,255,0.08)',
+                        alignItems: 'center',
+                        gap: '6px',
                       }}
                     >
-                      {cand.poster_url ? (
-                        <img
-                          src={cand.poster_url}
-                          alt=""
-                          loading="lazy"
-                          style={{ width: '48px', height: '72px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }}
-                        />
-                      ) : (
-                        <div style={{ width: '48px', height: '72px', background: '#1e293b', borderRadius: '6px', flexShrink: 0 }} />
-                      )}
-                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                        <div>
-                          <p style={{ fontSize: '0.84rem', fontWeight: 800, color: '#fff', margin: 0 }}>
-                            {cand.title} {cand.release_year ? `(${cand.release_year})` : ''}
-                          </p>
-                          <span style={{ fontSize: '0.64rem', color: '#818cf8', fontWeight: 700, textTransform: 'uppercase' }}>
-                            {cand.media_type === 'tv' ? 'TV Show' : 'Movie'} · ID: {cand.provider_id}
-                          </span>
-                          {cand.overview && (
-                            <p style={{
-                              fontSize: '0.72rem',
-                              color: '#94a3b8',
-                              margin: '4px 0 0',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                            }}>
-                              {cand.overview}
-                            </p>
-                          )}
-                        </div>
+                      {isSearching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                      Search
+                    </button>
+                  </form>
 
-                        <button
-                          onClick={() => handleSelectCandidate(cand)}
-                          disabled={isSelecting}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {candidates.length === 0 && !isSearching ? (
+                      <p style={{ textAlign: 'center', color: '#64748b', fontSize: '0.82rem', padding: '30px 0' }}>
+                        No TMDB matches found. Try modifying the search keywords.
+                      </p>
+                    ) : (
+                      candidates.map(cand => (
+                        <div
+                          key={cand.provider_id}
                           style={{
-                            alignSelf: 'flex-start',
-                            marginTop: '6px',
-                            padding: '4px 12px',
-                            borderRadius: '6px',
-                            background: '#10b981',
-                            border: 'none',
-                            color: '#fff',
-                            fontSize: '0.72rem',
-                            fontWeight: 800,
-                            cursor: 'pointer',
+                            display: 'flex',
+                            gap: '12px',
+                            padding: '10px',
+                            borderRadius: '12px',
+                            background: 'rgba(255,255,255,0.04)',
+                            border: '1px solid rgba(255,255,255,0.08)',
                           }}
                         >
-                          Select This Match
-                        </button>
+                          {cand.poster_url ? (
+                            <img
+                              src={cand.poster_url}
+                              alt=""
+                              loading="lazy"
+                              style={{ width: '48px', height: '72px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }}
+                            />
+                          ) : (
+                            <div style={{ width: '48px', height: '72px', background: '#1e293b', borderRadius: '6px', flexShrink: 0 }} />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                            <div>
+                              <p style={{ fontSize: '0.84rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                                {cand.title} {cand.release_year ? `(${cand.release_year})` : ''}
+                              </p>
+                              <span style={{ fontSize: '0.64rem', color: '#818cf8', fontWeight: 700, textTransform: 'uppercase' }}>
+                                {cand.media_type === 'tv' ? 'TV Show' : 'Movie'} · ID: {cand.provider_id}
+                              </span>
+                              {cand.overview && (
+                                <p style={{
+                                  fontSize: '0.72rem',
+                                  color: '#94a3b8',
+                                  margin: '4px 0 0',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                }}>
+                                  {cand.overview}
+                                </p>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => handleSelectCandidate(cand)}
+                              disabled={isSelecting}
+                              style={{
+                                alignSelf: 'flex-start',
+                                marginTop: '6px',
+                                padding: '4px 12px',
+                                borderRadius: '6px',
+                                background: '#10b981',
+                                border: 'none',
+                                color: '#fff',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Select & Lock Match
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: Custom Artwork Overrides & Lock State (Sections 15, 16, 17) */}
+              {activeModalTab === 'overrides' && (
+                <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                      Custom Poster Image URL
+                    </label>
+                    <input
+                      type="text"
+                      value={customPosterInput}
+                      onChange={e => setCustomPosterInput(e.target.value)}
+                      placeholder="https://... or /path/to/poster.jpg"
+                      style={{
+                        width: '100%',
+                        height: '40px',
+                        borderRadius: '10px',
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        color: '#fff',
+                        padding: '0 12px',
+                        fontSize: '0.82rem',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                      Custom Backdrop / Banner URL
+                    </label>
+                    <input
+                      type="text"
+                      value={customBackdropInput}
+                      onChange={e => setCustomBackdropInput(e.target.value)}
+                      placeholder="https://... or /path/to/backdrop.jpg"
+                      style={{
+                        width: '100%',
+                        height: '40px',
+                        borderRadius: '10px',
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        color: '#fff',
+                        padding: '0 12px',
+                        fontSize: '0.82rem',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
+                  {/* Artwork Preview Strip */}
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+                    {customPosterInput && (
+                      <div style={{ width: '80px', height: '118px', borderRadius: '8px', overflow: 'hidden', background: '#1e293b', border: '1px solid rgba(255,255,255,0.2)' }}>
+                        <img src={customPosterInput} alt="Poster preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => (e.currentTarget.style.display = 'none')} />
+                      </div>
+                    )}
+                    {customBackdropInput && (
+                      <div style={{ flex: 1, height: '118px', borderRadius: '8px', overflow: 'hidden', background: '#1e293b', border: '1px solid rgba(255,255,255,0.2)' }}>
+                        <img src={customBackdropInput} alt="Backdrop preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => (e.currentTarget.style.display = 'none')} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                    <button
+                      onClick={handleSaveOverrides}
+                      disabled={isSavingOverrides}
+                      style={{
+                        flex: 1,
+                        height: '42px',
+                        borderRadius: '10px',
+                        background: 'linear-gradient(135deg, #10b981, #059669)',
+                        border: 'none',
+                        color: '#fff',
+                        fontSize: '0.82rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {isSavingOverrides ? 'Saving...' : 'Save & Lock Artwork'}
+                    </button>
+                    <button
+                      onClick={handleToggleUnlock}
+                      style={{
+                        padding: '0 16px',
+                        height: '42px',
+                        borderRadius: '10px',
+                        background: item.metadata_locked ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.06)',
+                        border: item.metadata_locked ? '1px solid rgba(239,68,68,0.35)' : '1px solid rgba(255,255,255,0.15)',
+                        color: item.metadata_locked ? '#f87171' : '#cbd5e1',
+                        fontSize: '0.80rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      {item.metadata_locked ? <Unlock size={14} /> : <Lock size={14} />}
+                      {item.metadata_locked ? 'Unlock Metadata' : 'Lock Metadata'}
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleReprocess}
+                    style={{
+                      width: '100%',
+                      height: '38px',
+                      borderRadius: '10px',
+                      background: 'rgba(99,102,241,0.15)',
+                      border: '1px solid rgba(99,102,241,0.35)',
+                      color: '#a5b4fc',
+                      fontSize: '0.80rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <RefreshCw size={13} />
+                    Force Reprocess from Providers
+                  </button>
+                </div>
+              )}
+
+              {/* TAB 3: Diagnostic Inspection View (Section 44) */}
+              {activeModalTab === 'diagnostics' && (
+                <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {isLoadingDiagnostics ? (
+                    <div style={{ padding: '40px 0', textAlign: 'center', color: '#94a3b8' }}>
+                      <Loader2 size={24} className="animate-spin" style={{ margin: '0 auto 8px' }} />
+                      <p style={{ margin: 0, fontSize: '0.82rem' }}>Loading diagnostic pipeline traces...</p>
+                    </div>
+                  ) : diagnosticsData ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.78rem' }}>
+                      <div style={{ background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <span style={{ color: '#94a3b8', display: 'block', fontSize: '0.70rem' }}>Raw Filename</span>
+                        <code style={{ color: '#fff', wordBreak: 'break-all', fontWeight: 600 }}>{diagnosticsData.original_filename}</code>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                        <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 12px', borderRadius: '10px' }}>
+                          <span style={{ color: '#94a3b8', display: 'block', fontSize: '0.70rem' }}>Parsed Title</span>
+                          <span style={{ color: '#67e8f9', fontWeight: 800 }}>{diagnosticsData.parsed?.clean_title || diagnosticsData.original_filename}</span>
+                        </div>
+                        <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 12px', borderRadius: '10px' }}>
+                          <span style={{ color: '#94a3b8', display: 'block', fontSize: '0.70rem' }}>Detected Taxonomy</span>
+                          <span style={{ color: '#a5b4fc', fontWeight: 800 }}>{diagnosticsData.category} ({diagnosticsData.media_type})</span>
+                        </div>
+                        <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 12px', borderRadius: '10px' }}>
+                          <span style={{ color: '#94a3b8', display: 'block', fontSize: '0.70rem' }}>Season / Episode</span>
+                          <span style={{ color: '#fff', fontWeight: 700 }}>
+                            {diagnosticsData.parsed?.season ? `S${diagnosticsData.parsed.season}` : 'N/A'}{diagnosticsData.parsed?.episode ? `E${diagnosticsData.parsed.episode}` : ''}
+                          </span>
+                        </div>
+                        <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 12px', borderRadius: '10px' }}>
+                          <span style={{ color: '#94a3b8', display: 'block', fontSize: '0.70rem' }}>Status / Confidence</span>
+                          <span style={{ color: (diagnosticsData.metadata_confidence ?? 0) >= 0.8 ? '#10b981' : '#f59e0b', fontWeight: 800 }}>
+                            {diagnosticsData.metadata_status} ({((diagnosticsData.metadata_confidence ?? 0) * 100).toFixed(0)}%)
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <span style={{ color: '#94a3b8', display: 'block', fontSize: '0.70rem' }}>Selected Provider Match</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                          <span style={{ color: '#fff', fontWeight: 800 }}>{diagnosticsData.canonical_entity?.title || 'None'}</span>
+                          <span style={{ color: '#818cf8', fontWeight: 700 }}>TMDB ID: {diagnosticsData.canonical_entity?.provider_id || 'N/A'}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '10px' }}>
+                        <span style={{ color: '#94a3b8', display: 'block', fontSize: '0.70rem', marginBottom: '6px' }}>Resolved Artwork Sources</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.72rem' }}>
+                          <div><span style={{ color: '#cbd5e1' }}>Poster:</span> <span style={{ color: '#6ee7b7' }}>{diagnosticsData.poster_override ? 'Custom Override' : diagnosticsData.resolved_poster_url ? 'TMDB / Cache' : 'Auto Generated'}</span></div>
+                          <div><span style={{ color: '#cbd5e1' }}>Backdrop:</span> <span style={{ color: '#6ee7b7' }}>{diagnosticsData.backdrop_override ? 'Custom Override' : diagnosticsData.resolved_backdrop_url ? 'TMDB / Cache' : 'Fallback Backdrop'}</span></div>
+                          <div><span style={{ color: '#cbd5e1' }}>Locked:</span> <span style={{ color: diagnosticsData.metadata_locked ? '#fbbf24' : '#94a3b8' }}>{diagnosticsData.metadata_locked ? 'YES (Immutable)' : 'NO (Auto-enrichable)'}</span></div>
+                        </div>
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', color: '#64748b', padding: '30px 0' }}>
+                      Click Diagnostics tab to inspect pipeline traces.
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
           </div>
         )}

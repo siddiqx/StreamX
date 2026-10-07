@@ -7,6 +7,7 @@ router = APIRouter(prefix="/metadata", tags=["Metadata Operations"])
 
 
 @router.get("/stats")
+@router.get("/status")
 async def get_metadata_stats():
     """Retrieve metadata catalog health metrics and match percentage."""
     return await metadata_service.get_metadata_stats()

@@ -22,38 +22,15 @@ from app.utils.filenames import format_bytes, resolve_mime_type
 from app.utils.logging import log_event, logger
 
 
+from app.utils.filename_parser import parse_filename
+from app.utils.media_classifier import classify_media, is_media_file, MediaTaxonomy
+
+
 def detect_category(filename: str) -> str:
-    """Classify media into Movies, TV Shows, Anime, or Other."""
-    name_lower = filename.lower()
-    # 1. Anime takes precedence if anime keywords or fansub tags are present
-    if any(
-        term in name_lower
-        for term in [
-            "anime", "animestation", "animedynasty", "aniwatch", "anime_maniaac",
-            "crunchyroll", "horriblesubs", "judas", "subsplease", "erai-raws",
-            "sub", "dub", "dual-audio", "dual", "esub"
-        ]
-    ):
-        return "Anime"
-
-    # 2. TV Series patterns
-    if any(
-        term in name_lower
-        for term in [
-            "season", "episode", "s0", "s1", "s2", "s3", "s4", "s5",
-            "ep0", "ep1", "ep2", "ep3", "ep4", "ep5", "ep6", "ep7", "ep8", "ep9",
-            "e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9",
-        ]
-    ):
-        return "TV Shows"
-
-    # 3. Movies
-    if any(
-        ext in name_lower
-        for ext in [".mkv", ".mp4", ".avi", ".mov", ".m4v", ".webm"]
-    ):
-        return "Movies"
-    return "Other"
+    """Classify media into Movies, TV Shows, Anime, Anime Movies, or Other using multi-signal classifier."""
+    parsed = parse_filename(filename)
+    _, cat = classify_media(parsed, raw_filename=filename)
+    return cat
 
 
 class TransferWorker:
@@ -290,13 +267,14 @@ class TransferWorker:
         current_offset = start_offset
         drive_file_id = None
         buffer = bytearray()
-        target_chunk_size = settings.CHUNK_BUFFER_SIZE_BYTES  # 8MB chunk buffer
+        target_chunk_size = settings.CHUNK_BUFFER_SIZE_BYTES  # 8MB chunk buffer for Drive
+        mtproto_slice_size = 128 * 1024  # 128KB MTProto wire limit for Telegram
 
         async for raw_slice in client.iter_download(
             target_message.media,
             offset=start_offset,
-            chunk_size=target_chunk_size,
-            request_size=target_chunk_size,
+            chunk_size=mtproto_slice_size,
+            request_size=mtproto_slice_size,
         ):
             buffer.extend(raw_slice)
 
@@ -312,6 +290,15 @@ class TransferWorker:
                     total_size=actual_size,
                 )
                 current_offset += len(chunk_bytes)
+
+                pct = int((current_offset / actual_size) * 100) if actual_size > 0 else 0
+                log_event(
+                    "TRANSFER_CHUNK_UPLOADED",
+                    transfer_id=transfer_id,
+                    bytes_uploaded=current_offset,
+                    total_bytes=actual_size,
+                    progress_pct=pct,
+                )
 
                 # Update transfer progress in SQLite
                 async with AsyncSessionLocal() as session:
@@ -355,6 +342,10 @@ class TransferWorker:
 
         # 5. Catalog in Media Table & Update State to COMPLETED
         media_id = None
+        parsed_tech = parse_filename(filename)
+        taxonomy_type, shelf_cat = classify_media(parsed_tech, raw_filename=filename, mime_type=mime_type)
+        is_media = is_media_file(filename, mime_type)
+
         async with AsyncSessionLocal() as session:
             # Add to permanent Media catalog
             media = Media(
@@ -362,7 +353,12 @@ class TransferWorker:
                 filename=filename,
                 size=actual_size,
                 mime_type=mime_type,
-                category=category,
+                category=shelf_cat,
+                media_type=taxonomy_type.value,
+                season=parsed_tech.season,
+                episode=parsed_tech.episode,
+                quality=parsed_tech.quality,
+                release_group=parsed_tech.release_group,
             )
             session.add(media)
 
@@ -378,8 +374,8 @@ class TransferWorker:
             await session.refresh(media)
             media_id = media.id
 
-        # Automatically enqueue metadata enrichment job
-        if media_id:
+        # Automatically enqueue metadata enrichment job ONLY for video media
+        if media_id and is_media:
             try:
                 from app.services.metadata_service import metadata_service
                 await metadata_service.enqueue_media_for_enrichment(media_id)

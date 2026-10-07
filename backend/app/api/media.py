@@ -9,10 +9,18 @@ from sqlalchemy.orm import selectinload
 
 from app.db.database import get_db
 from app.db.models import Media, MetadataEntity
-from app.schemas.media import MediaResponse, MetadataEntityResponse, MetadataSelectRequest
+from app.schemas.media import (
+    BackdropOverrideRequest,
+    MediaPatchRequest,
+    MediaResponse,
+    MetadataEntityResponse,
+    MetadataSelectRequest,
+    PosterOverrideRequest,
+)
 from app.services.drive_service import drive_service
 from app.services.metadata_service import metadata_service
 from app.utils.filenames import make_content_disposition, resolve_mime_type, sanitize_filename
+from app.utils.image_resolver import get_media_backdrop_url, get_media_poster_url
 from app.utils.logging import logger
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
@@ -34,6 +42,7 @@ def format_media_item(item: Media) -> MediaResponse:
             provider=entity.provider,
             provider_id=entity.provider_id,
             media_type=entity.media_type,
+            category=entity.category,
             title=entity.title,
             original_title=entity.original_title,
             release_date=entity.release_date,
@@ -44,7 +53,24 @@ def format_media_item(item: Media) -> MediaResponse:
             rating=entity.rating,
             runtime=entity.runtime,
             genres=genres,
+            original_language=entity.original_language,
+            origin_country=entity.origin_country,
         )
+
+    # Use centralized image resolver for posters & backdrops
+    resolved_poster = get_media_poster_url(item, item.metadata_entity)
+    resolved_backdrop = get_media_backdrop_url(item, item.metadata_entity)
+
+    # Maintain backwards-compatible backdrop_url inside metadata_json
+    meta_dict = {}
+    if item.metadata_json:
+        try:
+            meta_dict = json.loads(item.metadata_json)
+        except Exception:
+            meta_dict = {}
+    if resolved_backdrop:
+        meta_dict["backdrop_url"] = resolved_backdrop
+    updated_meta_json = json.dumps(meta_dict) if meta_dict else item.metadata_json
 
     return MediaResponse(
         id=item.id,
@@ -52,9 +78,16 @@ def format_media_item(item: Media) -> MediaResponse:
         filename=item.filename,
         size=item.size,
         mime_type=item.mime_type,
-        category=item.category,
-        poster_url=item.poster_url,
-        metadata_json=item.metadata_json,
+        category=item.category or "Other",
+        media_type=item.media_type or "MOVIE",
+        poster_url=resolved_poster,
+        poster_override=item.poster_override,
+        backdrop_override=item.backdrop_override,
+        metadata_json=updated_meta_json,
+        season=item.season,
+        episode=item.episode,
+        quality=item.quality,
+        release_group=item.release_group,
         metadata_entity_id=item.metadata_entity_id,
         metadata_status=item.metadata_status.value if hasattr(item.metadata_status, "value") else str(item.metadata_status),
         metadata_confidence=item.metadata_confidence,
@@ -176,6 +209,31 @@ async def get_media_item(
     return format_media_item(item)
 
 
+@router.get("/{media_id}/metadata", response_model=MediaResponse)
+async def get_media_metadata(
+    media_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> MediaResponse:
+    """Retrieve full canonical metadata details for a media item."""
+    stmt = select(Media).options(selectinload(Media.metadata_entity)).where(Media.id == media_id)
+    result = await db.execute(stmt)
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    return format_media_item(item)
+
+
+@router.get("/{media_id}/metadata/diagnostics")
+async def get_media_metadata_diagnostics(
+    media_id: int,
+):
+    """Section 44: Inspect how filename was parsed, candidate scores, and lock state."""
+    res = await metadata_service.get_metadata_diagnostics(media_id)
+    if "error" in res:
+        raise HTTPException(status_code=404, detail=res["error"])
+    return res
+
+
 @router.post("/{media_id}/metadata/search")
 async def search_candidates_for_media(
     media_id: int,
@@ -186,15 +244,62 @@ async def search_candidates_for_media(
 
 
 @router.post("/{media_id}/metadata/select")
+@router.post("/{media_id}/metadata/apply")
 async def select_metadata_for_media(
     media_id: int,
     req: MetadataSelectRequest,
 ):
-    """Manually link media item to a specific TMDB entity and lock it."""
-    success = await metadata_service.manually_select_metadata(media_id, req.provider_id, req.media_type)
+    """Manually link media item to a specific TMDB entity and lock it (applies across series if requested)."""
+    success = await metadata_service.manually_select_metadata(
+        media_id, req.provider_id, req.media_type, apply_to_series=req.apply_to_series
+    )
     if not success:
         raise HTTPException(status_code=400, detail="Failed to retrieve or assign metadata for selected item.")
     return {"status": "ok", "message": "Metadata assigned and locked."}
+
+
+@router.patch("/{media_id}/metadata")
+async def patch_media_metadata(
+    media_id: int,
+    req: MediaPatchRequest,
+):
+    """Explicitly patch title, year, category, overview, poster override, or backdrop override."""
+    success = await metadata_service.manual_update_metadata(
+        media_id=media_id,
+        title=req.title,
+        year=req.year,
+        category=req.category,
+        overview=req.overview,
+        poster_override=req.poster_override,
+        backdrop_override=req.backdrop_override,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Media item not found.")
+    return {"status": "ok", "message": "Media metadata updated and locked."}
+
+
+@router.post("/{media_id}/metadata/poster")
+async def override_media_poster(
+    media_id: int,
+    req: PosterOverrideRequest,
+):
+    """Manually set or clear custom poster override."""
+    success = await metadata_service.set_poster_override(media_id, req.poster_url)
+    if not success:
+        raise HTTPException(status_code=404, detail="Media item not found.")
+    return {"status": "ok", "message": "Poster override updated."}
+
+
+@router.post("/{media_id}/metadata/backdrop")
+async def override_media_backdrop(
+    media_id: int,
+    req: BackdropOverrideRequest,
+):
+    """Manually set or clear custom backdrop override."""
+    success = await metadata_service.set_backdrop_override(media_id, req.backdrop_url)
+    if not success:
+        raise HTTPException(status_code=404, detail="Media item not found.")
+    return {"status": "ok", "message": "Backdrop override updated."}
 
 
 @router.post("/{media_id}/metadata/reprocess")
