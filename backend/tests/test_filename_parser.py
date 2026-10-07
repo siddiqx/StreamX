@@ -1,7 +1,9 @@
 """Unit tests for StreamX Deterministic Filename Parser."""
 
 import pytest
+from app.services.metadata_providers.base import CanonicalMetadata
 from app.utils.filename_parser import parse_filename
+from app.utils.media_classifier import MediaTaxonomy, classify_media
 
 
 def test_interstellar_movie():
@@ -96,6 +98,65 @@ def test_anime_fansub_brackets():
     assert p.episode == 1
     assert p.media_type == "tv"
     assert p.release_group == "GROUP"
+
+    
+def test_bracketed_season_and_episode_tags():
+    p = parse_filename("[S 01] [EP 01] Elfen Lied.mkv")
+    assert p.clean_title == "Elfen Lied"
+    assert p.season == 1
+    assert p.episode == 1
+    assert p.media_type == "tv"
+
+
+def test_bracketed_episode_tags_after_release_group():
+    p = parse_filename("[SubsPlease] [S 02] [EP 03] Example Series.mkv")
+    assert p.clean_title == "Example Series"
+    assert p.season == 2
+    assert p.episode == 3
+    assert p.media_type == "tv"
+    assert p.release_group == "SubsPlease"
+
+
+def test_leading_season_episode_filename():
+    p = parse_filename("1x01 Locke and Key.mkv")
+    assert p.clean_title == "Locke and Key"
+    assert p.season == 1
+    assert p.episode == 1
+    assert p.media_type == "tv"
+
+
+def test_bracketed_anime_episode_classifies_from_provider_data():
+    filename = "[] [S 01] [EP 01] [] Elfen Lied.mkv"
+    p = parse_filename(filename)
+    details = CanonicalMetadata(
+        provider="tmdb",
+        provider_id="123",
+        media_type="tv",
+        title="Elfen Lied",
+        genres=["Animation", "Drama"],
+        raw_metadata={"original_language": "ja", "origin_country": ["JP"]},
+    )
+    taxonomy, category = classify_media(p, details, raw_filename=filename)
+    assert p.clean_title == "Elfen Lied"
+    assert taxonomy == MediaTaxonomy.ANIME_EPISODE
+    assert category == "Anime"
+
+
+def test_leading_episode_classifies_as_tv_show_from_provider_data():
+    filename = "1x01 Locke and Key.mkv"
+    p = parse_filename(filename)
+    details = CanonicalMetadata(
+        provider="tmdb",
+        provider_id="456",
+        media_type="tv",
+        title="Locke & Key",
+        genres=["Drama", "Mystery"],
+        raw_metadata={"original_language": "en", "origin_country": ["US"]},
+    )
+    taxonomy, category = classify_media(p, details, raw_filename=filename)
+    assert p.clean_title == "Locke and Key"
+    assert taxonomy == MediaTaxonomy.TV_EPISODE
+    assert category == "TV Shows"
 
 
 def test_future_year_unknown():

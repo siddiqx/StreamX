@@ -97,6 +97,41 @@ def parse_filename(filename: str) -> ParsedMedia:
     working = re.sub(r"@\w+[\.\s\-_]*", "", working)
     working = re.sub(r"[\.\s\-_]*@\w+", "", working)
 
+    season: Optional[int] = None
+    episode: Optional[int] = None
+    media_type = "movie"
+
+    # Extract bracketed episode markers before the leading bracket can be mistaken for a release group.
+    bracketed_season_episode = re.search(
+        r"\[\s*(?:S|Season)\s*(\d{1,2})\s*\]\s*"
+        r"\[\s*(?:EP|Episode|Ep|E)\s*(\d{1,4})\s*\]",
+        working,
+        re.I,
+    )
+    if bracketed_season_episode:
+        season = int(bracketed_season_episode.group(1))
+        episode = int(bracketed_season_episode.group(2))
+        media_type = "tv"
+        working = working[:bracketed_season_episode.start()] + " " + working[bracketed_season_episode.end():]
+    else:
+        bracketed_episode = re.search(
+            r"\[\s*(?:(?:S|Season)\s*(\d{1,2})\s*[-_. ]*\s*)?"
+            r"(?:EP|Episode|Ep|E)\s*(\d{1,4})\s*\]",
+            working,
+            re.I,
+        )
+        if bracketed_episode:
+            season = int(bracketed_episode.group(1)) if bracketed_episode.group(1) else 1
+            episode = int(bracketed_episode.group(2))
+            media_type = "tv"
+            working = working[:bracketed_episode.start()] + " " + working[bracketed_episode.end():]
+        else:
+            bracketed_season = re.search(r"\[\s*(?:S|Season)\s*(\d{1,2})\s*\]", working, re.I)
+            if bracketed_season:
+                season = int(bracketed_season.group(1))
+                media_type = "tv"
+                working = working[:bracketed_season.start()] + " " + working[bracketed_season.end():]
+
     # 5. Handle leading bracketed release group e.g. "[Group] Title" or "[Fansub]"
     bracket_group_match = re.match(r"^\[([^\]]+)\]\s*", working)
     if bracket_group_match:
@@ -104,23 +139,27 @@ def parse_filename(filename: str) -> ParsedMedia:
             release_group = bracket_group_match.group(1).strip()
         working = working[bracket_group_match.end():]
 
-    season: Optional[int] = None
-    episode: Optional[int] = None
-    media_type = "movie"
-
     # 6. Check for LEADING Episode / Season pattern (e.g. "EP09 - The Fragrant Flower" or "Episode 09 - ...")
     leading_ep_match = re.match(
         r"^(?:S(\d{1,2})\s*[-_.]?\s*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})\s*[-_.:\s]+",
         working,
         re.I,
     )
-    if leading_ep_match:
+    if episode is None and leading_ep_match:
         s_val = leading_ep_match.group(1)
         ep_val = leading_ep_match.group(2)
         season = int(s_val) if s_val else 1
         episode = int(ep_val)
         media_type = "tv"
         working = working[leading_ep_match.end():]
+    elif episode is None:
+        # Also accept library-style prefixes such as "1x01 Series Title".
+        leading_se_x_match = re.match(r"^(\d{1,2})x(\d{1,4})\s*[-_.:\s]+", working, re.I)
+        if leading_se_x_match:
+            season = int(leading_se_x_match.group(1))
+            episode = int(leading_se_x_match.group(2))
+            media_type = "tv"
+            working = working[leading_se_x_match.end():]
 
     # 7. Identify quality / codec boundary to isolate title area from uploader noise
     q_boundary = re.search(
