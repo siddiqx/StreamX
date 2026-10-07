@@ -123,15 +123,23 @@ def parse_filename(filename: str) -> ParsedMedia:
         working = re.sub(np, " ", working, flags=re.I)
 
     # 4a. Strip Telegram @channel tags BEFORE underscore normalization
-    # Pattern matches @Word, @Word_More_Words, @Word123, etc.
-    # Must run before step 5 so that @Aniwatch_India_In is fully consumed
-    # rather than leaving _India_In behind after underscores become spaces.
-    working = re.sub(r"@[A-Za-z][A-Za-z0-9_™©®]*", " ", working)
+    # Carefully scope matches so underscore-delimited titles (e.g. @SeriesArchiveX™_What_If_S01E01...)
+    # are not swallowed into the channel tag match.
+    # 1) Channels with branding/trademark symbols (e.g. @SeriesArchiveX™)
+    working = re.sub(r"@[A-Za-z0-9_]+[™©®]", " ", working)
+    # 2) Channel tags with underscore compounds followed by non-word/delimiter (e.g. @Aniwatch_India_In - ...)
+    working = re.sub(r"@[A-Za-z][A-Za-z0-9_]*(?=\s*[-:–—|]|\s|\[|\]|\(|\))", " ", working)
+    # 3) Channel tags at end before extension or bracket (e.g. ... @Index_Station.mkv)
+    working = re.sub(r"(?<=\s|[\]\)])@[A-Za-z][A-Za-z0-9_]*(?=\.(?:[a-zA-Z0-9]{2,4})$|$)", " ", working, flags=re.I)
+    # 4) Leading single-word channel tag before dot or underscore (e.g. @Hk.Your.Name or @Channel_Title)
+    working = re.sub(r"^@[A-Za-z0-9]+(?=[\._])", " ", working)
+    # 5) Any remaining simple @channel (single alphanumeric word)
+    working = re.sub(r"@[A-Za-z0-9]+", " ", working)
 
     # 5. NORMALIZE SEPARATORS (dots and underscores -> spaces)
     working = working.replace(".", " ").replace("_", " ")
 
-    # 5a. Second-pass @channel strip: catch any tags that survived (e.g. after bracket removal)
+    # 5a. Second-pass @channel strip: catch any tags that survived
     working = re.sub(r"@[A-Za-z][A-Za-z0-9\s™©®]*?(?=\s|$)", " ", working)
 
     season: Optional[int] = None

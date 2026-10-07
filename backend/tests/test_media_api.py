@@ -82,3 +82,8 @@ async def test_media_catalog_and_search_api(clean_media_db):
         res_single = await client.get(f"/media/{m1_id}")
         assert res_single.status_code == 200
         assert res_single.json()["drive_file_id"] == "test_drive_file_interstellar"
+
+        # Test sync endpoint
+        res_sync = await client.post("/media/sync")
+        assert res_sync.status_code in (200, 503)
+

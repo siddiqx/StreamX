@@ -157,6 +157,20 @@ async def list_categories(
     return [{"category": row[0], "count": row[1]} for row in rows]
 
 
+@router.post("/sync")
+async def sync_media_library() -> Dict[str, Any]:
+    """Trigger synchronization of Google Drive library media files into database."""
+    if not drive_service.is_configured():
+        raise HTTPException(status_code=503, detail="Google Drive service not configured")
+    try:
+        synced_count = await drive_service.sync_library_to_db()
+        return {"status": "ok", "synced_count": synced_count}
+    except Exception as e:
+        logger.error(f"Manual library sync failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/image-proxy")
 async def proxy_image(url: str = Query(..., description="The TMDB or CDN image URL to proxy")):
     """Safely proxy metadata/poster images (e.g. from TMDB) to bypass ISP/client CORS or domain blocks."""
