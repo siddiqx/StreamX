@@ -261,3 +261,53 @@ def test_no_false_positive_episode_on_movie():
     assert p.year == 2019
     assert p.episode is None
     assert p.media_type == "movie"
+
+
+# ---------------------------------------------------------------------------
+# @channel underscore-suffix leakage regressions
+# ---------------------------------------------------------------------------
+
+def test_channel_underscore_compound_stripped():
+    """@Aniwatch_India_In must be fully stripped — not leave 'India In' in title."""
+    p = parse_filename("@Aniwatch_India_In - Trapped in a Dating Sim S01 Episode.mkv")
+    assert p.clean_title == "Trapped in a Dating Sim"
+    assert p.season == 1
+    assert p.media_type == "tv"
+    # Episode keyword with no number — no episode extracted, but title clean
+    assert p.episode is None
+
+
+def test_channel_index_station_stripped():
+    """@Index_Station suffix must not bleed 'Station' into the title."""
+    p = parse_filename("Kamui Hes Behind You S01 - E11 [Sub] 720p @Index_Station.mkv")
+    assert p.clean_title == "Kamui Hes Behind You"
+    assert p.season == 1
+    assert p.episode == 11
+    assert p.media_type == "tv"
+
+
+def test_channel_animes_horizon_stripped():
+    """@Animes_Horizon suffix must not bleed 'Horizon' into the title."""
+    p = parse_filename("[AH] Fragrant Flower S1-E07 [720p ? Sub] @Animes_Horizon.mkv")
+    assert p.clean_title == "Fragrant Flower"
+    assert p.season == 1
+    assert p.episode == 7
+    assert p.media_type == "tv"
+
+
+def test_channel_anime_maniaac_stripped():
+    """@Anime_Maniaac suffix must be fully stripped."""
+    p = parse_filename("World's End Harem S1 - 10 [720p] [Sub] @Anime_Maniaac.mkv")
+    assert "Maniaac" not in p.clean_title
+    assert p.season == 1
+    assert p.episode == 10
+    assert p.media_type == "tv"
+
+
+def test_channel_prefix_with_bracket():
+    """[@Anime_Fury] leading tag must be fully stripped, not leave residue."""
+    p = parse_filename("[@Anime_Fury] [S-01] [EP-01] [720p] Elfen Lied [Dual].mkv")
+    assert p.clean_title == "Elfen Lied"
+    assert p.season == 1
+    assert p.episode == 1
+    assert p.media_type == "tv"

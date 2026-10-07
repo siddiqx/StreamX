@@ -122,12 +122,17 @@ def parse_filename(filename: str) -> ParsedMedia:
     for np in pre_noise:
         working = re.sub(np, " ", working, flags=re.I)
 
+    # 4a. Strip Telegram @channel tags BEFORE underscore normalization
+    # Pattern matches @Word, @Word_More_Words, @Word123, etc.
+    # Must run before step 5 so that @Aniwatch_India_In is fully consumed
+    # rather than leaving _India_In behind after underscores become spaces.
+    working = re.sub(r"@[A-Za-z][A-Za-z0-9_™©®]*", " ", working)
+
     # 5. NORMALIZE SEPARATORS (dots and underscores -> spaces)
-    # This prevents @channel_with_underscores from swallowing adjacent title words
     working = working.replace(".", " ").replace("_", " ")
 
-    # 6. Strip Telegram @channel tags and uploader symbols
-    working = re.sub(r"@[a-zA-Z0-9™©®]+", " ", working)
+    # 5a. Second-pass @channel strip: catch any tags that survived (e.g. after bracket removal)
+    working = re.sub(r"@[A-Za-z][A-Za-z0-9\s™©®]*?(?=\s|$)", " ", working)
 
     season: Optional[int] = None
     episode: Optional[int] = None
@@ -181,6 +186,9 @@ def parse_filename(filename: str) -> ParsedMedia:
             episode = int(ep_match.group(1))
             media_type = "tv"
             working = working[:ep_match.start()] + " " + working[ep_match.end():]
+        else:
+            # Strip dangling Episode/EP keyword with no number (e.g. "...S01 Episode.mkv")
+            working = re.sub(r"\b(?:EP|Episode|Ep)\b", " ", working, flags=re.I)
 
     # Pattern 4b: Standalone E01 (but not just any number)
     if episode is None:
