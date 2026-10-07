@@ -129,3 +129,18 @@ def test_standalone_episode_with_bracket_sub():
     assert p.episode == 8
     assert p.media_type == "tv"
     assert p.quality == "1080p"
+
+
+def test_numeric_movie_title_not_episode():
+    p = parse_filename("Apollo.13.1995.1080p.BluRay.mkv")
+    assert p.clean_title == "Apollo"
+    assert p.year == 1995
+    assert p.media_type == "movie"
+
+
+def test_absolute_anime_episode_without_hardcoded_title():
+    p = parse_filename("One.Piece.1100.1080p.mkv")
+    assert p.clean_title == "One Piece"
+    assert p.season == 1
+    assert p.episode == 1100
+    assert p.media_type == "tv"

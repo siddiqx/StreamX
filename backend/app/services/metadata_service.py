@@ -351,8 +351,9 @@ class MetadataService:
                     ):
                         sibling_tax, sibling_cat = classify_media(sib_parsed, details, raw_filename=sibling.filename)
                         sibling.metadata_entity_id = entity.id
-                        sibling.metadata_status = MetadataStatus.MATCHED
+                        sibling.metadata_status = MetadataStatus.MANUAL
                         sibling.metadata_confidence = 1.0
+                        sibling.metadata_locked = True
                         sibling.category = sibling_cat
                         sibling.media_type = sibling_tax.value
                         if details.poster_path and not sibling.poster_override:
@@ -432,6 +433,7 @@ class MetadataService:
                 return False
             media.poster_override = poster_url.strip() if (poster_url and poster_url.strip()) else None
             media.metadata_locked = True
+            media.metadata_status = MetadataStatus.MANUAL
             await session.commit()
             log_event("POSTER_OVERRIDE_UPDATED", media_id=media_id, poster_url=media.poster_override)
             return True
@@ -444,20 +446,24 @@ class MetadataService:
                 return False
             media.backdrop_override = backdrop_url.strip() if (backdrop_url and backdrop_url.strip()) else None
             media.metadata_locked = True
+            media.metadata_status = MetadataStatus.MANUAL
             await session.commit()
             log_event("BACKDROP_OVERRIDE_UPDATED", media_id=media_id, backdrop_url=media.backdrop_override)
             return True
 
     async def unlock_metadata(self, media_id: int) -> bool:
-        """Unlock media item so it can be reprocessed automatically."""
+        """Unlock media item and immediately return it to the automatic enrichment pipeline."""
         async with AsyncSessionLocal() as session:
             media = await session.get(Media, media_id)
             if not media:
                 return False
             media.metadata_locked = False
+            media.metadata_status = MetadataStatus.PENDING
             await session.commit()
-            log_event("METADATA_UNLOCKED", media_id=media_id)
-            return True
+
+        await self.enqueue_media_for_enrichment(media_id)
+        log_event("METADATA_UNLOCKED", media_id=media_id)
+        return True
 
     async def reprocess_media(self, media_id: int, force: bool = False) -> bool:
         """Enqueue single media item for metadata reprocessing."""

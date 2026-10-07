@@ -209,12 +209,19 @@ def parse_filename(filename: str) -> ParsedMedia:
             year = int(year_match_rest.group(1))
             title_part = working_clean[:year_match_rest.start()]
 
-    # Anime numeric episode number without hyphen e.g. "One.Piece.1100.1080p"
+    # Absolute episode numbers are common in anime releases (e.g. "One.Piece.1100"),
+    # but a generic numeric-title heuristic breaks legitimate movies such as "Apollo 13".
+    # Only treat them as episode numbers when there is strong anime evidence or the number
+    # is in the high-range normally used by long-running absolute-numbered series.
     if media_type == "movie" and not year:
         ep_num_match = re.search(r"\b(\d{2,4})\b", title_part)
+        anime_signal = re.search(
+            r"(?i)\b(anime|subsplease|horriblesubs|erai-raws|crunchyroll|animestation|aniwatch)\b",
+            raw,
+        )
         if ep_num_match:
             candidate_num = int(ep_num_match.group(1))
-            if candidate_num not in range(1900, 2099):
+            if candidate_num >= 100 or anime_signal:
                 media_type = "tv"
                 season = 1
                 episode = candidate_num

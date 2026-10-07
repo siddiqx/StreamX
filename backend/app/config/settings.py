@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # TMDB Metadata Provider
     TMDB_API_KEY: Optional[str] = Field(
-        default="c7bc083ba4fab7297c0312a6e4c1fee2", description="The Movie Database (TMDB) API Key"
+        default=None, description="The Movie Database (TMDB) API key or v4 read token"
     )
 
     model_config = SettingsConfigDict(

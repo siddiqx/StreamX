@@ -296,7 +296,20 @@ export function organizeMediaLibrary(
 
   for (const item of items) {
     const rawFilename = item.filename;
-    const epInfo = extractEpisodeInfo(rawFilename);
+    const parsedEpInfo = extractEpisodeInfo(rawFilename);
+    const serverTaxonomy = (item.media_type || '').toUpperCase();
+    const epInfo = {
+      ...parsedEpInfo,
+      isSeries:
+        parsedEpInfo.isSeries ||
+        serverTaxonomy === 'TV_SERIES' ||
+        serverTaxonomy === 'TV_EPISODE' ||
+        serverTaxonomy === 'ANIME_SERIES' ||
+        serverTaxonomy === 'ANIME_EPISODE' ||
+        serverTaxonomy === 'DOCUMENTARY_SERIES',
+      season: item.season ?? parsedEpInfo.season,
+      episode: item.episode ?? parsedEpInfo.episode,
+    };
     const tech = parseMediaMetadata(rawFilename);
     const ext = rawFilename.split('.').pop()?.toUpperCase() || 'MKV';
     const isItemOffline = offlineIds.has(item.id);
@@ -397,6 +410,18 @@ export function organizeMediaLibrary(
     }
   }
 
+  // Prefer an enriched item for the group hero/modal, while keeping episode/version
+  // ordering deterministic. This prevents an un-enriched first episode from masking a
+  // canonical poster/title that another file in the same group already resolved.
+  const itemRichness = (candidate: MediaItem): number => {
+    let score = 0;
+    if (candidate.canonical_metadata) score += 100;
+    if (candidate.canonical_metadata?.overview) score += 10;
+    if (getMediaPosterUrl(candidate)) score += 10;
+    if (getMediaBackdropUrl(candidate)) score += 5;
+    return score;
+  };
+
   // Sort episodes in series groups, and sort versions in movie groups
   for (const group of groupsMap.values()) {
     if (group.type === 'series') {
@@ -404,8 +429,11 @@ export function organizeMediaLibrary(
         if (a.seasonNumber !== b.seasonNumber) return a.seasonNumber - b.seasonNumber;
         return a.episodeNumber - b.episodeNumber;
       });
-      if (group.episodes.length > 0) {
-        group.featuredItem = group.episodes[0].item;
+      const candidates = group.episodes
+        .map(e => e.item)
+        .sort((a, b) => itemRichness(b) - itemRichness(a));
+      if (candidates.length > 0) {
+        group.featuredItem = candidates[0];
       }
     } else {
       // Movie version sorting: 4K UHD > 1080p > 720p > 480p

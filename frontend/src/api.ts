@@ -76,11 +76,17 @@ export function setCachedTransfers(transfers: TelegramTransfer[]): void {
 }
 
 export async function fetchMedia(category?: string): Promise<MediaItem[]> {
-  const url = category ? `${API_BASE}/media?category=${encodeURIComponent(category)}` : `${API_BASE}/media`;
+  const url = category
+    ? `${API_BASE}/media?category=${encodeURIComponent(category)}`
+    : `${API_BASE}/media`;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
     clearTimeout(timeoutId);
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -105,6 +111,20 @@ export async function fetchMedia(category?: string): Promise<MediaItem[]> {
       } catch {}
     }
     return getCachedMedia();
+  }
+}
+
+export async function fetchMediaById(mediaId: number): Promise<MediaItem | null> {
+  try {
+    const res = await fetch(`${API_BASE}/media/${mediaId}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('API error fetching media item:', err);
+    return null;
   }
 }
 

@@ -125,19 +125,49 @@ class TMDBProvider(MetadataProvider):
             data_fallback = await self._request(endpoint, params=fallback_params)
             results = data_fallback.get("results", []) if data_fallback else []
 
-        # If still zero results, try searching multi as fallback
+        # Normalize release-name punctuation before giving up on the directed search.
         if not results:
+            normalized_query = re.sub(r"[._-]+", " ", clean_query)
+            normalized_query = re.sub(r"\\s+", " ", normalized_query).strip()
+            if normalized_query and normalized_query.casefold() != clean_query.casefold():
+                normalized_params = {
+                    "query": normalized_query,
+                    "include_adult": "false",
+                    "language": "en-US",
+                    "page": 1,
+                }
+                if year:
+                    if media_type == "movie":
+                        normalized_params["year"] = str(year)
+                    else:
+                        normalized_params["first_air_date_year"] = str(year)
+                normalized_data = await self._request(endpoint, params=normalized_params)
+                results = normalized_data.get("results", []) if normalized_data else []
+
+        # Rescue with multi-search whenever directed search produced too few candidates.
+        if len(results) < 5:
             multi_params = {
                 "query": clean_query,
                 "include_adult": "false",
                 "language": "en-US",
+                "page": 1,
             }
             multi_data = await self._request("/search/multi", params=multi_params)
             if multi_data:
-                results = [
-                    r for r in multi_data.get("results", [])
-                    if r.get("media_type") in ("movie", "tv")
-                ]
+                existing = {
+                    ((r.get("media_type") or media_type), str(r.get("id")))
+                    for r in results
+                    if r.get("id") is not None
+                }
+                for candidate in multi_data.get("results", []):
+                    candidate_type = candidate.get("media_type")
+                    candidate_id = candidate.get("id")
+                    if candidate_type not in ("movie", "tv") or candidate_id is None:
+                        continue
+                    key = (candidate_type, str(candidate_id))
+                    if key not in existing:
+                        results.append(candidate)
+                        existing.add(key)
 
         # If still zero results and query has multiple words, progressively trim trailing tokens
         if not results and len(clean_query.split()) > 1:

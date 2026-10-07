@@ -66,26 +66,16 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       });
   }, [library, selectedCat, sortBy]);
 
-  // Filter & Sort Raw Files
+  // Filter & Sort Raw Files using the server's authoritative taxonomy.
+  // Runtime and filename guesses must never decide Anime vs Anime Movies.
   const filteredFiles = useMemo(() => {
     return media
       .filter(item => {
         if (selectedCat === 'All') return true;
-        const itemCat = item.category;
-        const isAnime = itemCat === 'Anime' || item.canonical_metadata?.genres?.some(g => g.toLowerCase().includes('animation'));
-        const runtime = item.canonical_metadata?.runtime || 0;
-        if (selectedCat === 'Anime') {
-          return isAnime && (runtime < 60 || !runtime);
-        }
-        if (selectedCat === 'Anime Movies') {
-          return isAnime && runtime >= 60;
-        }
-        if (selectedCat === 'TV Shows') {
-          return !isAnime && itemCat === 'TV Shows';
-        }
-        if (selectedCat === 'Movies') {
-          return !isAnime && (itemCat === 'Movies' || runtime >= 60);
-        }
+        if (selectedCat === 'Anime') return item.media_type === 'ANIME_SERIES' || item.media_type === 'ANIME_EPISODE' || item.category === 'Anime';
+        if (selectedCat === 'Anime Movies') return item.media_type === 'ANIME_MOVIE' || item.category === 'Anime Movies';
+        if (selectedCat === 'TV Shows') return item.media_type === 'TV_SERIES' || item.media_type === 'TV_EPISODE' || item.media_type === 'DOCUMENTARY_SERIES' || item.category === 'TV Shows';
+        if (selectedCat === 'Movies') return item.media_type === 'MOVIE' || item.media_type === 'DOCUMENTARY' || item.category === 'Movies';
         return item.canonical_metadata?.genres?.some(g => g.toLowerCase().includes(selectedCat.toLowerCase())) || false;
       })
       .sort((a, b) => {

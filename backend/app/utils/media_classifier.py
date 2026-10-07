@@ -82,6 +82,14 @@ def has_anime_signals(
         origin_countries = []
         if details.raw_metadata and isinstance(details.raw_metadata, dict):
             origin_countries = details.raw_metadata.get("origin_country", [])
+            if not origin_countries:
+                production_countries = details.raw_metadata.get("production_countries", [])
+                if isinstance(production_countries, list):
+                    origin_countries = [
+                        c.get("iso_3166_1") or c.get("name")
+                        for c in production_countries
+                        if isinstance(c, dict)
+                    ]
             if isinstance(origin_countries, str):
                 origin_countries = [origin_countries]
         
@@ -89,11 +97,15 @@ def has_anime_signals(
         if details.raw_metadata and isinstance(details.raw_metadata, dict):
             orig_lang = (details.raw_metadata.get("original_language") or "").lower()
 
-        # Primary Anime Rule: Animation genre + Japanese origin / language
-        if is_animation and (orig_lang == "ja" or any(c in ["JP", "Japan", "JPN"] for c in origin_countries)):
+        # Primary Anime Rule: canonical animation + Japanese origin/language.
+        # This handles both TV anime and anime films without relying on title hardcoding.
+        if is_animation and (
+            orig_lang == "ja"
+            or any(str(c).upper() in {"JP", "JPN"} or str(c).lower() == "japan" for c in origin_countries)
+        ):
             return True
 
-        # Secondary: Animation genre + release group is a known anime fansub
+        # Secondary provider-backed signal: known anime release group.
         if is_animation and parsed.release_group and parsed.release_group.lower() in ANIME_FANSUB_GROUPS:
             return True
 

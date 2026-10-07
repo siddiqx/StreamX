@@ -33,5 +33,5 @@ services:
       - key: GOOGLE_REFRESH_TOKEN
         sync: false
       - key: TMDB_API_KEY
-        value: c7bc083ba4fab7297c0312a6e4c1fee2
+        sync: false
 

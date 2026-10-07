@@ -24,6 +24,7 @@ import {
   fetchMediaDiagnostics,
   patchMediaMetadata,
   API_BASE,
+  fetchMediaById,
 } from '../api';
 import { launchVlcWithTracking } from '../utils/playerSettings';
 import {
@@ -308,21 +309,34 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   };
 
   const handleSaveOverrides = async () => {
+    if (!item) return;
     setIsSavingOverrides(true);
-    await setPosterOverride(item.id, customPosterInput.trim() || null);
-    await setBackdropOverride(item.id, customBackdropInput.trim() || null);
-    setIsSavingOverrides(false);
-    setActionMessage('✓ Custom artwork overrides saved and permanently locked.');
-    setTimeout(() => setActionMessage(null), 4000);
-    if (onItemUpdated) {
-      onItemUpdated({
-        ...item,
-        poster_override: customPosterInput.trim() || undefined,
-        backdrop_override: customBackdropInput.trim() || undefined,
-        metadata_locked: true,
-      });
+    try {
+      const [posterOk, backdropOk] = await Promise.all([
+        setPosterOverride(item.id, customPosterInput.trim() || null),
+        setBackdropOverride(item.id, customBackdropInput.trim() || null),
+      ]);
+
+      if (!posterOk || !backdropOk) {
+        setActionMessage('Could not save one or more artwork overrides.');
+        return;
+      }
+
+      // Re-read the canonical server representation so the UI never relies on
+      // optimistic local state that differs from the persisted database row.
+      const refreshed = await fetchMediaById(item.id);
+      if (!refreshed) {
+        setActionMessage('Artwork was saved, but the updated media record could not be refreshed.');
+        return;
+      }
+
+      setActionMessage('✓ Custom artwork overrides saved and permanently locked.');
+      setTimeout(() => setActionMessage(null), 4000);
+      onItemUpdated?.(refreshed);
+      setShowSearchModal(false);
+    } finally {
+      setIsSavingOverrides(false);
     }
-    setShowSearchModal(false);
   };
 
   const handleToggleUnlock = async () => {
