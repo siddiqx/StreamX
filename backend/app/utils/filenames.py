@@ -13,8 +13,9 @@ def sanitize_filename(filename: str, default_name: str = "streamx_file.bin") -> 
     if not filename or not filename.strip():
         return default_name
 
-    # Strip directory components (e.g., ../ or C:\)
-    name = os.path.basename(filename.strip())
+    # Normalize backslashes to forward slashes before os.path.basename for cross-platform safety
+    clean_path = filename.strip().replace("\\", "/")
+    name = os.path.basename(clean_path)
 
     # Replace illegal filesystem characters with underscores
     name = ILLEGAL_CHARS.sub("_", name)
