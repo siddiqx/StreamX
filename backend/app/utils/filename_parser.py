@@ -73,16 +73,7 @@ def parse_filename(filename: str) -> ParsedMedia:
         if "." in working and len(working.rsplit(".", 1)[-1]) in (2, 3, 4):
             working = working.rsplit(".", 1)[0]
 
-    # 2. Extract release group if explicitly delimited by trailing dash
-    release_group = None
-    group_match = re.search(r"-([A-Za-z0-9_]+)$", working)
-    if group_match:
-        cand_group = group_match.group(1)
-        if not re.match(r"^(1080p|720p|2160p|480p|x264|x265|HEVC)$", cand_group, re.I):
-            release_group = cand_group
-            working = working[:-len(group_match.group(0))]
-
-    # 3. Detect Quality
+    # 2. Extract Quality from raw filename
     quality = "1080p"
     if re.search(r"\b(2160p|4k|uhd)\b", raw, re.I):
         quality = "4K UHD"
@@ -93,190 +84,166 @@ def parse_filename(filename: str) -> ParsedMedia:
     elif re.search(r"\b480p\b", raw, re.I):
         quality = "480p"
 
-    # 4. Remove Telegram channel tags (@ChannelName) anywhere in string
-    working = re.sub(r"@\w+[\.\s\-_]*", "", working)
-    working = re.sub(r"[\.\s\-_]*@\w+", "", working)
+    # 3. Extract release group BEFORE bracket stripping
+    # Pattern A: Leading [GroupName] at start of filename
+    release_group: Optional[str] = None
+    leading_group_match = re.match(r"^\[([^\[\]]+)\]", working)
+    if leading_group_match:
+        group_text = leading_group_match.group(1).strip()
+        # Only treat as release group if it's not a noise token, season/ep marker, or resolution
+        if group_text and not re.match(
+            r"^(?:S\s*\d|EP\s*\d|\d+p|dual|multi|sub|esub|dubbed|1080|720|480|2160|4k|uhd|hd)$",
+            group_text, re.I
+        ) and group_text not in ("", " "):
+            release_group = group_text
+
+    # Pattern B: Trailing -GroupName before extension (e.g. "Title.2014.1080p.BluRay.x264-GROUP")
+    if not release_group:
+        trailing_group = re.search(r"-([A-Za-z][A-Za-z0-9]{1,20})$", working)
+        if trailing_group:
+            candidate = trailing_group.group(1)
+            # Ensure it's not a known noise token
+            if not re.match(
+                r"^(?:dl|rip|ray|hd|dts|aac|ac3|sub|dub|raw|raws)$",
+                candidate, re.I
+            ):
+                release_group = candidate
+                working = working[:trailing_group.start()] + " "
+
+    # 4. Strip pre-normalization noise tokens with dots/hyphens preserved
+    pre_noise = [
+        r"\b(2160p|4k|uhd|1080p|1080i|720p|576p|480p|sd|hd)\b",
+        r"\b(web-?dl|webrip|bluray|blu-ray|bdrip|brrip|hdrip|hdtv|dvdrip|dvd|remux)\b",
+        r"\b[hx]\.?26[45]\b",
+        r"\b(hevc|av1|10bit|8bit|hi10p)\b",
+        r"\b(truehd|atmos|ddp\d*(\.\d+)?|dd\+?\d*(\.\d+)?|ac3|aac\d*(\.\d+)?|6ch|dts-hd|dts|flac|opus|mp3)\b",
+        r"\b(dual[\s\-_]?audio|multi[\s\-_]?audio|dual|multi|eng[\s\-_]?sub|english[\s\-_]?sub|esub|subbed|dubbed|sub)\b",
+    ]
+    for np in pre_noise:
+        working = re.sub(np, " ", working, flags=re.I)
+
+    # 5. NORMALIZE SEPARATORS (dots and underscores -> spaces)
+    # This prevents @channel_with_underscores from swallowing adjacent title words
+    working = working.replace(".", " ").replace("_", " ")
+
+    # 6. Strip Telegram @channel tags and uploader symbols
+    working = re.sub(r"@[a-zA-Z0-9™©®]+", " ", working)
 
     season: Optional[int] = None
     episode: Optional[int] = None
     media_type = "movie"
 
-    # Extract bracketed episode markers before the leading bracket can be mistaken for a release group.
-    bracketed_season_episode = re.search(
-        r"\[\s*(?:S|Season)\s*(\d{1,2})\s*\]\s*"
-        r"\[\s*(?:EP|Episode|Ep|E)\s*(\d{1,4})\s*\]",
-        working,
-        re.I,
-    )
-    if bracketed_season_episode:
-        season = int(bracketed_season_episode.group(1))
-        episode = int(bracketed_season_episode.group(2))
+    # 7. Extract Season & Episode
+    # Pattern 1: 1x01 or 01x02 or [1x01]
+    match_x = re.search(r"(?:\[|\b)(\d{1,2})x(\d{1,4})(?:\]|\b)", working, re.I)
+    if match_x:
+        season = int(match_x.group(1))
+        episode = int(match_x.group(2))
         media_type = "tv"
-        working = working[:bracketed_season_episode.start()] + " " + working[bracketed_season_episode.end():]
-    else:
-        bracketed_episode = re.search(
-            r"\[\s*(?:(?:S|Season)\s*(\d{1,2})\s*[-_. ]*\s*)?"
-            r"(?:EP|Episode|Ep|E)\s*(\d{1,4})\s*\]",
-            working,
-            re.I,
-        )
-        if bracketed_episode:
-            season = int(bracketed_episode.group(1)) if bracketed_episode.group(1) else 1
-            episode = int(bracketed_episode.group(2))
-            media_type = "tv"
-            working = working[:bracketed_episode.start()] + " " + working[bracketed_episode.end():]
-        else:
-            bracketed_season = re.search(r"\[\s*(?:S|Season)\s*(\d{1,2})\s*\]", working, re.I)
-            if bracketed_season:
-                season = int(bracketed_season.group(1))
-                media_type = "tv"
-                working = working[:bracketed_season.start()] + " " + working[bracketed_season.end():]
+        working = working[:match_x.start()] + " " + working[match_x.end():]
 
-    # 5. Handle leading bracketed release group e.g. "[Group] Title" or "[Fansub]"
-    bracket_group_match = re.match(r"^\[([^\]]+)\]\s*", working)
-    if bracket_group_match:
-        if not release_group:
-            release_group = bracket_group_match.group(1).strip()
-        working = working[bracket_group_match.end():]
-
-    # 6. Check for LEADING Episode / Season pattern (e.g. "EP09 - The Fragrant Flower" or "Episode 09 - ...")
-    leading_ep_match = re.match(
-        r"^(?:S(\d{1,2})\s*[-_.]?\s*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})\s*[-_.:\s]+",
-        working,
-        re.I,
-    )
-    if episode is None and leading_ep_match:
-        s_val = leading_ep_match.group(1)
-        ep_val = leading_ep_match.group(2)
-        season = int(s_val) if s_val else 1
-        episode = int(ep_val)
-        media_type = "tv"
-        working = working[leading_ep_match.end():]
-    elif episode is None:
-        # Also accept library-style prefixes such as "1x01 Series Title".
-        leading_se_x_match = re.match(r"^(\d{1,2})x(\d{1,4})\s*[-_.:\s]+", working, re.I)
-        if leading_se_x_match:
-            season = int(leading_se_x_match.group(1))
-            episode = int(leading_se_x_match.group(2))
-            media_type = "tv"
-            working = working[leading_se_x_match.end():]
-
-    # 7. Identify quality / codec boundary to isolate title area from uploader noise
-    q_boundary = re.search(
-        r"(\[?\b(2160p|4k|1080p|1080i|720p|480p|bluray|web-?dl|webrip|hdrip|hevc|x264|x265)\b\]?)",
-        working,
-        re.I,
-    )
-    if q_boundary:
-        working_title_area = working[:q_boundary.start()]
-    else:
-        working_title_area = working
-
-    # Remove remaining bracketed tags inside title area
-    working_clean = re.sub(r"\[.*?\]", " ", working_title_area)
-    working_clean = working_clean.replace(".", " ").replace("_", " ")
-
-    # 8. Detect TV Season & Episode within title area (if not already extracted from leading prefix)
-    title_part = working_clean
+    # Pattern 2: S01E01 or S1-E03 or S-01 EP-01 or Season 1 Episode 2
+    #             Also handles [S 01] [EP 01] with spaces inside brackets
     if episode is None:
-        # Pattern A: S01E01, S04E28, S01 - E03, S1 - 10, S1-10
         se_match = re.search(
-            r"\bS(\d{1,2})\s*(?:[-_.]?\s*(?:E|Ep|Episode)|[-_.])\s*(\d{1,4})\b",
-            working_clean,
-            re.I,
+            r"(?:\[?\s*|\\b)(?:S|Season)\s*[\-_.]?\s*(\d{1,2})\s*\]?\s*[\-_.:]*\s*\[?\s*(?:EP|Episode|Ep|E)\s*[\-_.]?\s*(\d{1,4})\s*\]?",
+            working,
+            re.I
         )
         if se_match:
             season = int(se_match.group(1))
             episode = int(se_match.group(2))
             media_type = "tv"
-            title_part = working_clean[:se_match.start()]
-        else:
-            # Pattern B: Standalone E08, EP09, Ep 08, Episode 8 (without leading S)
-            ep_match = re.search(r"\b(?:EP|Ep|Episode|E)\s*(\d{1,4})\b", working_clean, re.I)
-            if ep_match:
-                season = 1
-                episode = int(ep_match.group(1))
-                media_type = "tv"
-                title_part = working_clean[:ep_match.start()]
-            else:
-                # Pattern C: 1x01 or 04x28
-                se_x_match = re.search(r"\b(\d{1,2})x(\d{1,4})\b", working_clean, re.I)
-                if se_x_match:
-                    season = int(se_x_match.group(1))
-                    episode = int(se_x_match.group(2))
-                    media_type = "tv"
-                    title_part = working_clean[:se_x_match.start()]
-                else:
-                    # Pattern D: Season 1 Episode 2
-                    se_word_match = re.search(
-                        r"\b(?:Season|S)\s*(\d{1,2})[\s\-_.]+(?:Episode|Ep|E)\s*(\d{1,4})\b",
-                        working_clean,
-                        re.I,
-                    )
-                    if se_word_match:
-                        season = int(se_word_match.group(1))
-                        episode = int(se_word_match.group(2))
-                        media_type = "tv"
-                        title_part = working_clean[:se_word_match.start()]
-                    else:
-                        # Pattern E: Standalone Season
-                        s_only_match = re.search(
-                            r"\b(?:S|Season)\s*(\d{1,2})\s*(?:Episode|Ep)?\b", working_clean, re.I
-                        )
-                        if s_only_match:
-                            season = int(s_only_match.group(1))
-                            media_type = "tv"
-                            title_part = working_clean[:s_only_match.start()]
-                        else:
-                            # Pattern F: Anime hyphen episode numbering "Title - 01" or "Title - 10"
-                            anime_ep_match = re.search(r"\s+-\s+(\d{1,4})(?:\s+|$)", working_clean)
-                            if anime_ep_match:
-                                season = 1
-                                episode = int(anime_ep_match.group(1))
-                                media_type = "tv"
-                                title_part = working_clean[:anime_ep_match.start()]
+            working = working[:se_match.start()] + " " + working[se_match.end():]
 
-    # 9. Extract Year (1900-2099)
+    # Pattern 3: S01 - 03 or S1 - 10
+    if episode is None:
+        s_hyphen_match = re.search(r"(?:\[|\b)S[\s\-_.]*(\\d{1,2})\s*-\s*(\d{1,4})(?:\]|\b)", working, re.I)
+        if s_hyphen_match:
+            season = int(s_hyphen_match.group(1))
+            episode = int(s_hyphen_match.group(2))
+            media_type = "tv"
+            working = working[:s_hyphen_match.start()] + " " + working[s_hyphen_match.end():]
+
+    # Pattern 4: Separate S-01 / Season 01 and EP-01 / Episode 01 anywhere (even inside brackets)
+    if season is None:
+        s_match = re.search(r"(?:\[?\s*)(?:S|Season)\s*[\-_.]?\s*(\d{1,2})(?:\s*\]|\b)", working, re.I)
+        if s_match:
+            season = int(s_match.group(1))
+            media_type = "tv"
+            working = working[:s_match.start()] + " " + working[s_match.end():]
+
+    if episode is None:
+        ep_match = re.search(r"(?:\[?\s*)(?:EP|Episode|Ep)\s*[\-_.]?\s*(\d{1,4})(?:\s*\]|\b)", working, re.I)
+        if ep_match:
+            if season is None:
+                season = 1
+            episode = int(ep_match.group(1))
+            media_type = "tv"
+            working = working[:ep_match.start()] + " " + working[ep_match.end():]
+
+    # Pattern 4b: Standalone E01 (but not just any number)
+    if episode is None:
+        e_match = re.search(r"(?:\[|\b)E(\d{1,4})(?:\]|\b)", working)
+        if e_match:
+            if season is None:
+                season = 1
+            episode = int(e_match.group(1))
+            media_type = "tv"
+            working = working[:e_match.start()] + " " + working[e_match.end():]
+
+    # Pattern 5: Anime hyphen episode "Title - 01"
+    if episode is None:
+        anime_ep = re.search(r"\s+-\s+(\d{1,4})(?:\s+|$)", working)
+        if anime_ep:
+            season = 1
+            episode = int(anime_ep.group(1))
+            media_type = "tv"
+            working = working[:anime_ep.start()] + " " + working[anime_ep.end():]
+
+    # Pattern 6: Trailing bare number for anime episodes (e.g. "One Piece 1100")
+    # Only triggers when there's at least one word before the number, and the number
+    # is at the end of the meaningful content (after noise removal).
+    if episode is None:
+        trailing_num = re.search(r"(\b[A-Za-z][\w\s]*?)\s+(\d{2,4})\s*$", working.strip())
+        if trailing_num:
+            potential_title = trailing_num.group(1).strip()
+            num = int(trailing_num.group(2))
+            # Heuristic: episode numbers are > 0 and ≤ 9999; exclude years
+            if 1 <= num <= 9999 and not (1900 <= num <= 2099) and len(potential_title) >= 2:
+                season = 1
+                episode = num
+                media_type = "tv"
+                working = potential_title
+
+    # 8. Extract Year (1900-2099)
     year: Optional[int] = None
-    year_match = re.search(r"\b(19\d\d|20\d\d)\b", title_part)
+    year_match = re.search(r"\b(19\d\d|20\d\d)\b", working)
     if year_match:
         year = int(year_match.group(1))
-        title_part = title_part[:year_match.start()]
-    elif media_type == "movie":
-        year_match_rest = re.search(r"\b(19\d\d|20\d\d)\b", working_clean)
-        if year_match_rest:
-            year = int(year_match_rest.group(1))
-            title_part = working_clean[:year_match_rest.start()]
+        working = working[:year_match.start()] + " " + working[year_match.end():]
 
-    # Absolute episode numbers are common in anime releases (e.g. "One.Piece.1100"),
-    # but a generic numeric-title heuristic breaks legitimate movies such as "Apollo 13".
-    # Only treat them as episode numbers when there is strong anime evidence or the number
-    # is in the high-range normally used by long-running absolute-numbered series.
-    if media_type == "movie" and not year:
-        ep_num_match = re.search(r"\b(\d{2,4})\b", title_part)
-        anime_signal = re.search(
-            r"(?i)\b(anime|subsplease|horriblesubs|erai-raws|crunchyroll|animestation|aniwatch)\b",
-            raw,
-        )
-        if ep_num_match:
-            candidate_num = int(ep_num_match.group(1))
-            if candidate_num >= 100 or anime_signal:
-                media_type = "tv"
-                season = 1
-                episode = candidate_num
-                title_part = title_part[:ep_num_match.start()]
+    # 9. Strip brackets and parentheses content (e.g. [@Fansub], [Dual], [720p])
+    working = re.sub(r"\[.*?\]", " ", working)
+    working = re.sub(r"\(.*?\)", " ", working)
 
-    # 10. Clean Noise Tokens from Title
-    clean_title = NOISE_REGEX.sub(" ", title_part)
+    # 10. Second pass on post-normalization noise tokens
+    post_noise = [
+        r"\b(2160p|4k|uhd|1080p|1080i|720p|576p|480p|sd|hd)\b",
+        r"\b(web-?dl|webrip|bluray|blu-ray|bdrip|brrip|hdrip|hdtv|dvdrip|dvd|remux)\b",
+        r"\b[hx]\s*26[45]\b",
+        r"\b(hevc|av1|10bit|8bit|hi10p)\b",
+        r"\b(truehd|atmos|ddp\d*|dd|ac3|aac\d*|6ch|dts-hd|dts|flac|opus|mp3)\b",
+        r"\b(dual|multi|esub|subbed|dubbed|sub)\b",
+        r"\b(proper|repack|extended|uncut|unrated|imax|theatrical)\b",
+        r"\b(animedynasty|animestation\d*|aniwatch|anime_maniaac|index_station|aegir|horriblesubs|judas|subsplease|erai-raws|golumpa|asw|cr|nf)\b",
+    ]
+    for np in post_noise:
+        working = re.sub(np, " ", working, flags=re.I)
 
-    # 11. Normalize Separators and trailing noise
-    clean_title = clean_title.replace(".", " ").replace("_", " ")
-    clean_title = re.sub(r"\s+-\s+", " ", clean_title)
-    clean_title = re.sub(r"\s+-\s*$", "", clean_title)
-    clean_title = re.sub(r"^\s*-\s+", "", clean_title)
-    clean_title = re.sub(r"\(\s*\)", "", clean_title)
-    clean_title = re.sub(r"[\(\[\{\s\-_]+$", "", clean_title).strip()
-    clean_title = re.sub(r"^[\)\]\}\s\-_]+", "", clean_title).strip()
+    # 11. Final cleanup of punctuation and extra spaces
+    clean_title = re.sub(r"[\(\[\{\s\-_]+", " ", working)
+    clean_title = re.sub(r"[\)\]\}\s\-_]+", " ", clean_title)
     clean_title = re.sub(r"\s+", " ", clean_title).strip()
 
     # Fallback if title became empty

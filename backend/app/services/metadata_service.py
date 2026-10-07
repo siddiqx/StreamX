@@ -70,15 +70,18 @@ class MetadataService:
     async def get_or_create_metadata_entity(
         self, details: CanonicalMetadata, taxonomy: MediaTaxonomy, session: AsyncSession
     ) -> MetadataEntity:
-        """Deduplicate metadata entities: reuse existing entity if tmdb_id already cataloged."""
+        """Deduplicate metadata entities: reuse existing entity if tmdb_id already cataloged.
+
+        If the existing entity has stale or missing fields (poster, backdrop, title, overview,
+        genres, rating), update them from the fresh provider details so all media items
+        linked to this entity immediately benefit from the corrected data.
+        """
         stmt = select(MetadataEntity).where(
             MetadataEntity.provider == details.provider,
             MetadataEntity.provider_id == details.provider_id,
         )
         res = await session.execute(stmt)
         entity = res.scalar_one_or_none()
-        if entity:
-            return entity
 
         orig_lang = None
         countries = []
@@ -89,6 +92,48 @@ class MetadataService:
                 countries = c
             elif isinstance(c, str):
                 countries = [c]
+
+        if entity:
+            # Update any stale or missing fields so existing entity stays canonical.
+            updated = False
+            if details.poster_path and not entity.poster_path:
+                entity.poster_path = details.poster_path
+                updated = True
+            if details.backdrop_path and not entity.backdrop_path:
+                entity.backdrop_path = details.backdrop_path
+                updated = True
+            if details.title and (not entity.title or entity.title == "Unknown"):
+                entity.title = details.title
+                updated = True
+            if details.original_title and not entity.original_title:
+                entity.original_title = details.original_title
+                updated = True
+            if details.overview and not entity.overview:
+                entity.overview = details.overview
+                updated = True
+            if details.rating is not None and entity.rating is None:
+                entity.rating = details.rating
+                updated = True
+            if details.runtime is not None and entity.runtime is None:
+                entity.runtime = details.runtime
+                updated = True
+            if details.genres and not entity.genres_json:
+                entity.genres_json = json.dumps(details.genres)
+                updated = True
+            if orig_lang and not entity.original_language:
+                entity.original_language = orig_lang
+                updated = True
+            if countries and not entity.origin_country:
+                entity.origin_country = ",".join(countries)
+                updated = True
+            if updated:
+                log_event(
+                    "METADATA_ENTITY_UPDATED",
+                    provider_id=details.provider_id,
+                    entity_id=entity.id,
+                    title=entity.title,
+                )
+            return entity
 
         entity = MetadataEntity(
             provider=details.provider,
@@ -482,44 +527,103 @@ class MetadataService:
         return True
 
     async def backfill_library(self, force: bool = False) -> Dict[str, int]:
-        """Enqueue unenriched or failed library items for metadata processing."""
+        """Enqueue unenriched or failed library items for metadata processing.
+
+        Also re-enqueues MATCHED items whose linked entity lacks poster_path or
+        backdrop_path — these are incorrectly-matched records that would display
+        blank posters in the UI.
+
+        Avoids creating duplicate active (PENDING/PROCESSING) jobs by checking
+        for existing active jobs before creating new ones.
+        """
         async with AsyncSessionLocal() as session:
-            stmt = select(Media.id, Media.metadata_status, Media.metadata_locked, Media.filename, Media.mime_type)
+            # Fetch current active job media IDs to avoid duplicates
+            active_jobs_stmt = select(MetadataJob.media_id).where(
+                MetadataJob.status.in_([MetadataJobStatus.PENDING, MetadataJobStatus.PROCESSING])
+            )
+            active_res = await session.execute(active_jobs_stmt)
+            active_job_media_ids = {row[0] for row in active_res.all()}
+
+            stmt = select(
+                Media.id, Media.metadata_status, Media.metadata_locked,
+                Media.filename, Media.mime_type, Media.metadata_entity_id
+            )
             res = await session.execute(stmt)
             rows = res.all()
 
             enqueued = 0
             skipped_locked = 0
             skipped_non_media = 0
+            skipped_complete = 0
 
             for row in rows:
-                mid, status, locked, fn, mime = row[0], row[1], row[2], row[3], row[4]
+                mid, status, locked, fn, mime, entity_id = (
+                    row[0], row[1], row[2], row[3], row[4], row[5]
+                )
                 if not is_media_file(fn, mime):
                     skipped_non_media += 1
                     continue
                 if locked and not force:
                     skipped_locked += 1
                     continue
-                if not force and status in (MetadataStatus.MATCHED, MetadataStatus.MANUAL):
+
+                # Skip already-active jobs to prevent duplicates
+                if mid in active_job_media_ids:
+                    continue
+
+                # Determine if this item needs enrichment
+                needs_enrichment = False
+                if force:
+                    needs_enrichment = True
+                elif status not in (MetadataStatus.MATCHED, MetadataStatus.MANUAL):
+                    # Any non-matched, non-manual item is a candidate
+                    needs_enrichment = True
+                else:
+                    # MATCHED/MANUAL: still enqueue if entity has missing poster or backdrop
+                    if entity_id:
+                        entity = await session.get(MetadataEntity, entity_id)
+                        if entity and (not entity.poster_path or not entity.backdrop_path):
+                            needs_enrichment = True
+                    elif status == MetadataStatus.MATCHED:
+                        # Marked MATCHED but no entity — corrupted state, re-enqueue
+                        needs_enrichment = True
+
+                if not needs_enrichment:
+                    skipped_complete += 1
                     continue
 
                 # Reset to PENDING and enqueue
                 m = await session.get(Media, mid)
-                if m:
-                    m.metadata_status = MetadataStatus.PENDING
-                job = MetadataJob(
-                    media_id=mid,
-                    status=MetadataJobStatus.PENDING,
-                    attempt_count=0,
-                    scheduled_at=utc_now(),
-                )
-                session.add(job)
-                enqueued += 1
+                if m and not m.metadata_locked or force:
+                    if m:
+                        m.metadata_status = MetadataStatus.PENDING
+                        if force:
+                            m.metadata_locked = False
+                    job = MetadataJob(
+                        media_id=mid,
+                        status=MetadataJobStatus.PENDING,
+                        attempt_count=0,
+                        scheduled_at=utc_now(),
+                    )
+                    session.add(job)
+                    active_job_media_ids.add(mid)  # prevent double-add in this batch
+                    enqueued += 1
 
             await session.commit()
 
-        log_event("METADATA_BACKFILL_TRIGGERED", enqueued=enqueued, skipped_locked=skipped_locked, skipped_non_media=skipped_non_media)
-        return {"enqueued": enqueued, "skipped_locked": skipped_locked, "skipped_non_media": skipped_non_media}
+        log_event(
+            "METADATA_BACKFILL_TRIGGERED",
+            enqueued=enqueued,
+            skipped_locked=skipped_locked,
+            skipped_non_media=skipped_non_media,
+            skipped_complete=skipped_complete,
+        )
+        return {
+            "enqueued": enqueued,
+            "skipped_locked": skipped_locked,
+            "skipped_non_media": skipped_non_media,
+            "skipped_complete": skipped_complete,
+        }
 
     async def get_metadata_stats(self) -> Dict[str, Any]:
         """Aggregate metadata library health metrics."""
