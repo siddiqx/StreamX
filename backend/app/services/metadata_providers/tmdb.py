@@ -1,6 +1,7 @@
 """The Movie Database (TMDB) metadata provider implementation for StreamX."""
 
 import asyncio
+import re
 from typing import Any, Dict, List, Optional
 import httpx
 
@@ -8,8 +9,7 @@ from app.config.settings import settings
 from app.services.metadata_providers.base import CandidateMatch, CanonicalMetadata, MetadataProvider
 from app.utils.logging import log_event, logger
 
-TMDB_BASE_URL = "https://api.tmdb.org/3"
-TMDB_FALLBACK_URL = "https://api.themoviedb.org/3"
+TMDB_BASE_URL = "https://api.themoviedb.org/3"
 
 
 
