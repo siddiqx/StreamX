@@ -33,10 +33,16 @@ def detect_category(filename: str) -> str:
     return cat
 
 
+db_claim_lock = asyncio.Lock()
+
+
 class TransferWorker:
-    def __init__(self):
+    def __init__(self, max_concurrent_transfers: int = 5):
         self.running = False
         self.task: Optional[asyncio.Task] = None
+        self.max_concurrent_transfers = max_concurrent_transfers
+        self.semaphore = asyncio.Semaphore(max_concurrent_transfers)
+        self.active_tasks = set()
 
     async def reconcile_incomplete_transfers(self) -> None:
         """Section 37: Reconcile transfers left incomplete by dead or restarted processes."""
@@ -83,33 +89,38 @@ class TransferWorker:
             self.task.cancel()
 
     async def process_next_transfer(self) -> bool:
-        """Find and process the oldest QUEUED or RETRYING transfer."""
-        async with AsyncSessionLocal() as session:
-            stmt = (
-                select(TelegramTransfer)
-                .where(
-                    TelegramTransfer.status.in_(
-                        [TransferStatus.QUEUED, TransferStatus.RETRYING]
+        """Find and process the oldest QUEUED or RETRYING transfer atomically with bounded concurrency."""
+        # Ensure worker slot is available before claiming job from DB
+        if self.semaphore.locked():
+            return False
+
+        async with db_claim_lock:
+            async with AsyncSessionLocal() as session:
+                stmt = (
+                    select(TelegramTransfer)
+                    .where(
+                        TelegramTransfer.status.in_(
+                            [TransferStatus.QUEUED, TransferStatus.RETRYING]
+                        )
                     )
+                    .order_by(TelegramTransfer.id.asc())
+                    .limit(1)
                 )
-                .order_by(TelegramTransfer.id.asc())
-                .limit(1)
-            )
-            result = await session.execute(stmt)
-            transfer = result.scalar_one_or_none()
+                result = await session.execute(stmt)
+                transfer = result.scalar_one_or_none()
 
-            if not transfer:
-                return False
+                if not transfer:
+                    return False
 
-            transfer_id = transfer.id
-            chat_id = transfer.telegram_chat_id
-            message_id = transfer.telegram_message_id
-            filename = transfer.filename
-            expected_size = transfer.size
+                transfer_id = transfer.id
+                chat_id = transfer.telegram_chat_id
+                message_id = transfer.telegram_message_id
+                filename = transfer.filename
+                expected_size = transfer.size
 
-            # Mark status as FETCHING_TELEGRAM
-            transfer.status = TransferStatus.FETCHING_TELEGRAM
-            await session.commit()
+                # Mark status as FETCHING_TELEGRAM atomically
+                transfer.status = TransferStatus.FETCHING_TELEGRAM
+                await session.commit()
 
         log_event(
             "TRANSFER_PROCESSING_START",
@@ -118,40 +129,61 @@ class TransferWorker:
             size=expected_size,
         )
 
-        try:
-            await self._execute_transfer(
+        # Execute bounded transfer job inside semaphore
+        task = asyncio.create_task(
+            self._run_job_with_semaphore(
                 transfer_id=transfer_id,
                 chat_id=chat_id,
                 message_id=message_id,
                 filename=filename,
                 expected_size=expected_size,
             )
-            return True
-        except Exception as e:
-            logger.error(f"Transfer #{transfer_id} failed: {e}", exc_info=True)
-            async with AsyncSessionLocal() as session:
-                stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
-                res = await session.execute(stmt)
-                t = res.scalar_one_or_none()
-                if t:
-                    t.retry_count += 1
-                    t.error_message = str(e)
-                    if t.retry_count < settings.MAX_RETRIES:
-                        t.status = TransferStatus.RETRYING
-                    else:
-                        t.status = TransferStatus.FAILED
-                    await session.commit()
+        )
+        self.active_tasks.add(task)
+        task.add_done_callback(self.active_tasks.discard)
+        return True
 
-            await bot_service.send_message(
-                chat_id=chat_id,
-                text=(
-                    f"⚠️ <b>Transfer #{transfer_id} Error</b>\n\n"
-                    f"File: <code>{filename}</code>\n"
-                    f"Reason: <i>{str(e)[:200]}</i>\n"
-                    f"Status: <code>{TransferStatus.RETRYING if t and t.status == TransferStatus.RETRYING else TransferStatus.FAILED}</code>"
-                ),
-            )
-            return True
+    async def _run_job_with_semaphore(
+        self,
+        transfer_id: int,
+        chat_id: int,
+        message_id: int,
+        filename: str,
+        expected_size: int,
+    ) -> None:
+        async with self.semaphore:
+            try:
+                await self._execute_transfer(
+                    transfer_id=transfer_id,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    filename=filename,
+                    expected_size=expected_size,
+                )
+            except Exception as e:
+                logger.error(f"Transfer #{transfer_id} failed: {e}", exc_info=True)
+                async with AsyncSessionLocal() as session:
+                    stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                    res = await session.execute(stmt)
+                    t = res.scalar_one_or_none()
+                    if t:
+                        t.retry_count += 1
+                        t.error_message = str(e)
+                        if t.retry_count < settings.MAX_RETRIES:
+                            t.status = TransferStatus.RETRYING
+                        else:
+                            t.status = TransferStatus.FAILED
+                        await session.commit()
+
+                await bot_service.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"⚠️ <b>Transfer #{transfer_id} Error</b>\n\n"
+                        f"File: <code>{filename}</code>\n"
+                        f"Reason: <i>{str(e)[:200]}</i>\n"
+                        f"Status: <code>{TransferStatus.RETRYING if t and t.status == TransferStatus.RETRYING else TransferStatus.FAILED}</code>"
+                    ),
+                )
 
     async def _execute_transfer(
         self,

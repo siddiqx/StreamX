@@ -1,5 +1,6 @@
 """Tests for StreamX Transfer Worker."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import select
@@ -45,6 +46,9 @@ async def test_worker_process_transfer(clean_db):
     ) as mock_exec:
         processed = await worker.process_next_transfer()
         assert processed is True
+        # Wait for background task spawned by process_next_transfer to finish
+        if worker.active_tasks:
+            await asyncio.gather(*list(worker.active_tasks))
         mock_exec.assert_called_once()
         args, kwargs = mock_exec.call_args
         assert kwargs["transfer_id"] == t_id
