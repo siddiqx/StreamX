@@ -1,29 +1,55 @@
 """Transfer background worker for StreamX.
 
-Polls SQLite for QUEUED/RETRYING transfers, streams media chunks via MTProto,
-pipes chunks directly into Google Drive resumable upload sessions, and catalogs
-completed files in SQLite.
-Zero full-disk requirements: all chunk processing is handled in-flight in RAM.
+Polls SQLite for QUEUED/RETRYING transfers, streams media chunks via the owner's
+MTProto session, pipes chunks directly into Google Drive resumable upload
+sessions, and catalogs completed files in SQLite. Zero full-disk requirements:
+all chunk processing is handled in-flight in RAM.
+
+Media relay note:
+  The MTProto session is a SINGLE user account (the owner). It cannot read
+  messages sent to the bot by *other* users, so the bot forwards every accepted
+  file into a service channel (or the owner's DM) and stores the forwarded
+  location on the transfer row. The worker downloads that forwarded copy.
+
+Error model:
+  Every failure is classified (see app/utils/errors.py). Permanent config errors
+  are marked FAILED immediately without burning retries; transient errors are
+  retried with bounded exponential backoff and remain durable across restarts.
 """
 
 import asyncio
-import mimetypes
 import time
+from datetime import timedelta
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.config.settings import settings
 from app.db.database import AsyncSessionLocal
-from app.db.models import Media, TelegramTransfer, TransferStatus
+from app.db.models import (
+    Media,
+    TelegramTransfer,
+    TransferStatus,
+    utc_now,
+)
 from app.services.drive_service import drive_service
 from app.services.telegram_bot_service import bot_service
 from app.services.telegram_mtproto_service import mtproto_service
+from app.utils.errors import (
+    ErrorCategory,
+    classify_error,
+)
 from app.utils.filenames import format_bytes, resolve_mime_type
 from app.utils.logging import log_event, logger
 
 
 from app.utils.filename_parser import parse_filename
-from app.utils.media_classifier import classify_media, is_media_file, MediaTaxonomy
+from app.utils.media_classifier import classify_media, is_media_file
+
+
+# How far back the worker scans a channel when a direct message-id lookup fails.
+# Generous bound so batch uploads (which are queued in order) are reliably found
+# even if Bot-API and MTProto disagree on the message id for a forwarded copy.
+FORWARDED_SEARCH_LIMIT = 50
 
 
 def detect_category(filename: str) -> str:
@@ -62,13 +88,16 @@ class TransferWorker:
                     previous_status=t.status.value,
                 )
                 t.status = TransferStatus.QUEUED
+                # Clear transient progress markers so the job re-runs cleanly.
+                t.started_at = None
+                t.scheduled_retry_at = None
             if incomplete:
                 await session.commit()
 
     async def start(self) -> None:
         """Start worker loop with crash/restart state reconciliation."""
         self.running = True
-        log_event("TRANSFER_WORKER_STARTED")
+        log_event("TRANSFER_WORKER_STARTED", max_concurrent=self.max_concurrent_transfers)
         await self.reconcile_incomplete_transfers()
         while self.running:
             try:
@@ -89,11 +118,16 @@ class TransferWorker:
             self.task.cancel()
 
     async def process_next_transfer(self) -> bool:
-        """Find and process the oldest QUEUED or RETRYING transfer atomically with bounded concurrency."""
-        # Ensure worker slot is available before claiming job from DB
+        """Find and process the oldest ready QUEUED or RETRYING transfer.
+
+        A RETRYING transfer is only claimed once its backoff `scheduled_retry_at`
+        has elapsed, giving transient failures time to recover.
+        """
+        # Ensure a concurrency slot is free before claiming from the DB.
         if self.semaphore.locked():
             return False
 
+        now = utc_now()
         async with db_claim_lock:
             async with AsyncSessionLocal() as session:
                 stmt = (
@@ -101,7 +135,11 @@ class TransferWorker:
                     .where(
                         TelegramTransfer.status.in_(
                             [TransferStatus.QUEUED, TransferStatus.RETRYING]
-                        )
+                        ),
+                        or_(
+                            TelegramTransfer.scheduled_retry_at.is_(None),
+                            TelegramTransfer.scheduled_retry_at <= now,
+                        ),
                     )
                     .order_by(TelegramTransfer.id.asc())
                     .limit(1)
@@ -118,8 +156,8 @@ class TransferWorker:
                 filename = transfer.filename
                 expected_size = transfer.size
 
-                # Mark status as FETCHING_TELEGRAM atomically
                 transfer.status = TransferStatus.FETCHING_TELEGRAM
+                transfer.started_at = now
                 await session.commit()
 
         log_event(
@@ -129,7 +167,6 @@ class TransferWorker:
             size=expected_size,
         )
 
-        # Execute bounded transfer job inside semaphore
         task = asyncio.create_task(
             self._run_job_with_semaphore(
                 transfer_id=transfer_id,
@@ -160,30 +197,128 @@ class TransferWorker:
                     filename=filename,
                     expected_size=expected_size,
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
-                logger.error(f"Transfer #{transfer_id} failed: {e}", exc_info=True)
+                category = classify_error(e)
+                retryable = category not in {
+                    ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                    ErrorCategory.DRIVE_AUTH_FAILED,
+                    ErrorCategory.DRIVE_PERMISSION_DENIED,
+                    ErrorCategory.DRIVE_QUOTA_EXCEEDED,
+                }
+                logger.error(
+                    f"Transfer #{transfer_id} failed: {category.value}: {e}",
+                    exc_info=True,
+                )
+                t = None
                 async with AsyncSessionLocal() as session:
                     stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
-                    res = await session.execute(stmt)
-                    t = res.scalar_one_or_none()
+                    t = (await session.execute(stmt)).scalar_one_or_none()
                     if t:
                         t.retry_count += 1
                         t.error_message = str(e)
-                        if t.retry_count < settings.MAX_RETRIES:
+                        t.error_category = category
+                        if retryable and t.retry_count < settings.MAX_RETRIES:
                             t.status = TransferStatus.RETRYING
+                            delay = min(2 ** t.retry_count * 5, 60)
+                            t.scheduled_retry_at = utc_now() + timedelta(seconds=delay)
                         else:
                             t.status = TransferStatus.FAILED
+                            t.error_message = str(e)
+                            t.completed_at = utc_now()
                         await session.commit()
 
-                await bot_service.send_message(
-                    chat_id=chat_id,
-                    text=(
-                        f"⚠️ <b>Transfer #{transfer_id} Error</b>\n\n"
-                        f"File: <code>{filename}</code>\n"
-                        f"Reason: <i>{str(e)[:200]}</i>\n"
-                        f"Status: <code>{TransferStatus.RETRYING if t and t.status == TransferStatus.RETRYING else TransferStatus.FAILED}</code>"
-                    ),
+                # User-facing: actionable, secret-free.
+                status_label = (
+                    TransferStatus.RETRYING
+                    if t and t.status == TransferStatus.RETRYING
+                    else TransferStatus.FAILED
                 )
+                user_text = self._build_error_notification(
+                    transfer_id, filename, category, status_label
+                )
+                await bot_service.send_message(chat_id=chat_id, text=user_text)
+
+    def _build_error_notification(
+        self, transfer_id: int, filename: str, category: ErrorCategory, status: TransferStatus
+    ) -> str:
+        from app.utils.errors import CATEGORY_USER_MESSAGE
+
+        summary = CATEGORY_USER_MESSAGE.get(category, "The job has been queued for automatic retry.")
+        return (
+            f"⚠️ <b>StreamX — Transfer #{transfer_id} Error</b>\n\n"
+            f"📁 <b>File:</b> <code>{filename}</code>\n"
+            f"📋 <b>Reason:</b> <i>{category.value}</i>\n"
+            f"🔄 <b>Status:</b> <code>{status.value}</code>\n\n"
+            f"{summary}"
+        )
+
+    def _resolve_relay_chat(self):
+        """The chat entity the MTProto worker should read forwarded media from.
+
+        Prefers the operator-configured relay target (a public channel username
+        or the owner's user id) which Telethon resolves reliably. Bot-API channel
+        ids (negative numbers) do not always resolve through MTProto, so we avoid
+        depending on them for the primary lookup.
+        """
+        return bot_service.resolve_forward_target()
+
+    async def _locate_target_message(self, client, transfer: TelegramTransfer, expected_size: int):
+        """Resolve a media-bearing Telethon Message for download.
+
+        Prefers the forwarded copy (the only way a non-owner sender's file is
+        reachable by the owner's MTProto session). Falls back to a filename/size
+        scan of the relay chat, then to the legacy owner-bot lookup for transfers
+        created before forwarding was deployed.
+        """
+        filename = transfer.filename
+
+        # 1. Forwarded copy (modern path, required for non-owner senders).
+        if transfer.forwarded_chat_id is not None:
+            configured = self._resolve_relay_chat()
+            chat = configured if configured is not None else transfer.forwarded_chat_id
+            # Direct lookup by forwarded message id first.
+            try:
+                msg = await client.get_messages(chat, ids=transfer.forwarded_message_id)
+                if msg and getattr(msg, "media", None):
+                    return msg
+            except Exception as e:
+                logger.debug(f"Forwarded direct lookup failed for #{transfer.id}: {e}")
+
+            # Robust fallback: scan the relay chat by filename/size.
+            try:
+                async for msg in client.iter_messages(chat, limit=FORWARDED_SEARCH_LIMIT):
+                    if not getattr(msg, "media", None):
+                        continue
+                    name = getattr(getattr(msg, "file", None), "name", None)
+                    size = getattr(getattr(msg, "file", None), "size", 0)
+                    if name == filename or (expected_size and size == expected_size):
+                        return msg
+            except Exception as e:
+                logger.warning(f"Forwarded chat scan failed for #{transfer.id}: {e}")
+
+        # 2. Legacy owner-only path: owner's own message in the owner<->bot chat.
+        bot_entity = "Stream1_X_bot"
+        try:
+            msg = await client.get_messages(bot_entity, ids=transfer.telegram_message_id)
+            if msg and getattr(msg, "media", None):
+                return msg
+        except Exception as e:
+            logger.debug(f"Legacy message lookup failed, will search recent: {e}")
+
+        try:
+            async for msg in client.iter_messages(bot_entity, limit=10):
+                if not getattr(msg, "media", None):
+                    continue
+                name = getattr(getattr(msg, "file", None), "name", None)
+                size = getattr(getattr(msg, "file", None), "size", 0)
+                if name == filename or (expected_size and size == expected_size):
+                    return msg
+        except Exception as e:
+            logger.warning(f"Legacy chat scan failed for #{transfer.id}: {e}")
+
+        return None
 
     async def _execute_transfer(
         self,
@@ -207,12 +342,13 @@ class TransferWorker:
 
             if existing_media:
                 log_event("DUPLICATE_MEDIA_SKIPPED", filename=filename, size=expected_size)
-                # Link and complete transfer immediately without redundant upload
                 stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
                 t = (await session.execute(stmt)).scalar_one_or_none()
                 if t:
                     t.status = TransferStatus.COMPLETED
                     t.bytes_transferred = expected_size
+                    t.completed_at = utc_now()
+                    t.error_message = None
                     await session.commit()
 
                 await bot_service.send_message(
@@ -227,36 +363,24 @@ class TransferWorker:
                 )
                 return
 
-        # 2. Locate Telegram Message via MTProto
+        # 2. Locate the media message via MTProto (forwarded copy for non-owners).
         client = await mtproto_service.get_client()
-        bot_entity = "Stream1_X_bot"
-        target_message = None
+        async with AsyncSessionLocal() as session:
+            transfer = await session.get(TelegramTransfer, transfer_id)
+            if not transfer:
+                raise ValueError(f"Transfer #{transfer_id} not found")
 
-        try:
-            msg = await client.get_messages(bot_entity, ids=message_id)
-            if msg and msg.media:
-                target_message = msg
-        except Exception as e:
-            logger.debug(f"Direct message lookup failed, will search recent messages: {e}")
-
-        if not target_message:
-            async for msg in client.iter_messages(bot_entity, limit=10):
-                if msg.media:
-                    name = getattr(msg.file, "name", None)
-                    size = getattr(msg.file, "size", 0)
-                    if name == filename or (expected_size and size == expected_size):
-                        target_message = msg
-                        break
-
+        target_message = await self._locate_target_message(client, transfer, expected_size)
         if not target_message:
             raise ValueError(
-                f"Could not locate media message for '{filename}' in dialog with @Stream1_X_bot"
+                f"Could not locate media message for '{filename}' in the relay channel. "
+                "Ensure TELEGRAM_SERVICE_CHANNEL / TELEGRAM_OWNER_USER_ID is configured and "
+                "the bot has forwarded the file into it."
             )
 
         actual_size = getattr(target_message.file, "size", expected_size)
         mime_type = resolve_mime_type(filename)
         category = detect_category(filename)
-        chunk_size = settings.CHUNK_BUFFER_SIZE_BYTES  # 8MB chunk buffer
 
         # 3. Check / Initialize Google Drive Resumable Session
         upload_url = None
@@ -267,7 +391,6 @@ class TransferWorker:
             t = (await session.execute(stmt)).scalar_one_or_none()
             if t and t.resumable_upload_url:
                 upload_url = t.resumable_upload_url
-                # Server restart recovery: Check how many bytes Drive already acknowledged
                 start_offset = await drive_service.get_resumable_offset(upload_url, actual_size)
                 log_event("RECOVERY_OFFSET_RESUMED", transfer_id=transfer_id, start_offset=start_offset)
 
@@ -293,6 +416,7 @@ class TransferWorker:
             filename=filename,
             total_size=actual_size,
             start_offset=start_offset,
+            forwarded=transfer.forwarded_chat_id is not None,
         )
 
         start_time = time.time()
@@ -310,7 +434,6 @@ class TransferWorker:
         ):
             buffer.extend(raw_slice)
 
-            # When buffer reaches target chunk size or file end, upload chunk to Google Drive
             if len(buffer) >= target_chunk_size or (current_offset + len(buffer)) >= actual_size:
                 chunk_bytes = bytes(buffer)
                 buffer.clear()
@@ -332,7 +455,6 @@ class TransferWorker:
                     progress_pct=pct,
                 )
 
-                # Update transfer progress in SQLite
                 async with AsyncSessionLocal() as session:
                     stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
                     t = (await session.execute(stmt)).scalar_one_or_none()
@@ -359,10 +481,21 @@ class TransferWorker:
                 drive_file_id = file_id
 
         if not drive_file_id:
-            raise RuntimeError("Streaming ended without Google Drive confirming file completion.")
+            raise RuntimeError(
+                "Streaming ended without Google Drive confirming file completion."
+            )
 
         elapsed = max(time.time() - start_time, 0.001)
         speed_mbps = (current_offset / (1024 * 1024)) / elapsed
+
+        # 5. Verify the Drive artifact (never trust the HTTP response alone).
+        await drive_service.verify_file(drive_file_id, actual_size, filename)
+        log_event(
+            "DRIVE_VERIFICATION_PASSED",
+            transfer_id=transfer_id,
+            drive_file_id=drive_file_id,
+            size=actual_size,
+        )
 
         log_event(
             "PIPELINE_STREAMING_COMPLETE",
@@ -372,14 +505,13 @@ class TransferWorker:
             speed_mbps=round(speed_mbps, 2),
         )
 
-        # 5. Catalog in Media Table & Update State to COMPLETED
+        # 6. Catalog in Media Table & Update State to COMPLETED
         media_id = None
         parsed_tech = parse_filename(filename)
         taxonomy_type, shelf_cat = classify_media(parsed_tech, raw_filename=filename, mime_type=mime_type)
         is_media = is_media_file(filename, mime_type)
 
         async with AsyncSessionLocal() as session:
-            # Add to permanent Media catalog
             media = Media(
                 drive_file_id=drive_file_id,
                 filename=filename,
@@ -394,14 +526,14 @@ class TransferWorker:
             )
             session.add(media)
 
-            # Update transfer state
             stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
             t = (await session.execute(stmt)).scalar_one_or_none()
             if t:
                 t.status = TransferStatus.COMPLETED
                 t.bytes_transferred = actual_size
                 t.error_message = None
-
+                t.error_category = None
+                t.completed_at = utc_now()
             await session.commit()
             await session.refresh(media)
             media_id = media.id
@@ -410,12 +542,12 @@ class TransferWorker:
         if media_id and is_media:
             try:
                 from app.services.metadata_service import metadata_service
+
                 await metadata_service.enqueue_media_for_enrichment(media_id)
             except Exception as e:
                 logger.warning(f"Failed to enqueue metadata job for media #{media_id}: {e}")
 
-
-        # 6. Send Notification Card to Telegram
+        # 7. Send Notification Card to Telegram
         await bot_service.send_message(
             chat_id=chat_id,
             text=(

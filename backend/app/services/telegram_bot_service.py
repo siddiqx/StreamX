@@ -2,6 +2,12 @@
 
 Provides asynchronous HTTP-based Telegram Bot polling, access control, command
 handling (/start, /help, /status), and media ingestion directly into SQLite.
+
+Important: the Bot API receives files from ANY allowed user, but the MTProto
+transfer worker runs under a SINGLE user account (the owner). That account
+cannot read messages sent to the bot by *other* users, so every accepted media
+message is **forwarded** into a shared service channel (or the owner's DM) that
+the MTProto account can read. The worker then downloads the forwarded copy.
 """
 
 import asyncio
@@ -12,18 +18,31 @@ from sqlalchemy import select
 
 from app.config.settings import settings
 from app.db.database import AsyncSessionLocal
-from app.db.models import TelegramTransfer, TransferStatus
+from app.db.models import ErrorCategory, TelegramTransfer, TransferStatus
+from app.utils.errors import StreamXError
 from app.utils.filenames import format_bytes, sanitize_filename
 from app.utils.logging import log_event, logger
 
 
 class TelegramBotService:
-    def __init__(self, bot_token: Optional[str] = None):
+    def __init__(
+        self,
+        bot_token: Optional[str] = None,
+        service_channel: Optional[str] = "DEFAULT",
+        owner_user_id: Optional[int] = "DEFAULT",
+    ):
         self.bot_token = bot_token or settings.TELEGRAM_BOT_TOKEN
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
         self.running = False
         self.last_update_id = 0
         self.task: Optional[asyncio.Task] = None
+        # Relay overrides (for testability / per-instance config).
+        if service_channel == "DEFAULT":
+            service_channel = settings.TELEGRAM_SERVICE_CHANNEL
+        if owner_user_id == "DEFAULT":
+            owner_user_id = settings.TELEGRAM_OWNER_USER_ID
+        self.service_channel = service_channel
+        self.owner_user_id = owner_user_id
 
     def is_configured(self) -> bool:
         return bool(self.bot_token and self.bot_token.strip())
@@ -48,6 +67,71 @@ class TelegramBotService:
         except Exception as e:
             logger.error(f"Failed to send Telegram message to {chat_id}: {e}")
             return False
+
+    def resolve_forward_target(self) -> Optional[Any]:
+        """Return the chat the bot should forward media into for MTProto pickup.
+
+        Order: TELEGRAM_SERVICE_CHANNEL (preferred shared channel/group), then
+        TELEGRAM_OWNER_USER_ID (owner DM fallback). Returns None if unset.
+        """
+        if self.service_channel:
+            return self.service_channel
+        if self.owner_user_id:
+            return self.owner_user_id
+        return None
+
+    def is_forward_target_configured(self) -> bool:
+        return self.resolve_forward_target() is not None
+
+    async def forward_media_to_service(
+        self, from_chat_id: int, message_id: int
+    ) -> Optional[Tuple[int, int]]:
+        """Forward an incoming media message into the service channel.
+
+        Returns (destination_chat_id, destination_message_id) on success.
+        Returns None if no relay target is configured (owner-only legacy path).
+        Raises StreamXError(TELEGRAM_FORWARD_FAILED) if a target IS configured
+        but the Bot API forward call itself fails — this is a permanent
+        configuration problem (bot not a member / not admin of the channel).
+        """
+        target = self.resolve_forward_target()
+        if target is None:
+            return None
+
+        payload: Dict[str, Any] = {
+            "chat_id": target,
+            "from_chat_id": from_chat_id,
+            "message_id": message_id,
+            "disable_notification": True,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                res = await client.post(f"{self.base_url}/forwardMessage", json=payload)
+        except Exception as e:
+            logger.error(f"Telegram forwardMessage transport error: {e}")
+            raise StreamXError(
+                ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                f"forwardMessage transport error: {e}",
+            ) from e
+
+        if res.status_code != 200:
+            logger.error(
+                f"forwardMessage failed HTTP {res.status_code}: {res.text}"
+            )
+            raise StreamXError(
+                ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                f"forwardMessage failed: HTTP {res.status_code}",
+            )
+
+        data = res.json()
+        dest_chat = data.get("chat", {}).get("id")
+        dest_msg = data.get("message_id")
+        if not dest_chat or not dest_msg:
+            raise StreamXError(
+                ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                "forwardMessage returned no chat/message id",
+            )
+        return int(dest_chat), int(dest_msg)
 
     def is_user_allowed(self, user_id: int) -> bool:
         """Check if user is authorized to use this bot."""
@@ -213,6 +297,46 @@ class TelegramBotService:
 
         log_event("TRANSFER_RECORD_CREATED", transfer_id=transfer_id, filename=filename)
 
+        # Relay media into a location the MTProto worker can actually read.
+        # The MTProto session is a single user account and cannot read messages
+        # sent to the bot by OTHER users, so forwarding is required for friend
+        # uploads. When no relay target is configured we fall back to the legacy
+        # owner-only path (only the MTProto owner's own files will resolve).
+        try:
+            forwarded = await self.forward_media_to_service(chat_id, message_id)
+        except StreamXError as e:
+            await self._mark_transfer_failed(
+                transfer_id, category=e.category, message=str(e)
+            )
+            log_event(
+                "FORWARD_FAILED_PERMANENT",
+                transfer_id=transfer_id,
+                error_category=e.category.value,
+                filename=filename,
+            )
+            await self.send_message(
+                chat_id=chat_id,
+                text=self._failure_message(
+                    filename, transfer_id, e.category, "Upload could not be started."
+                ),
+                reply_to_message_id=message_id,
+            )
+            return
+
+        if forwarded is not None:
+            fwd_chat_id, fwd_msg_id = forwarded
+            async with AsyncSessionLocal() as session:
+                t = await session.get(TelegramTransfer, transfer_id)
+                if t:
+                    t.forwarded_chat_id = fwd_chat_id
+                    t.forwarded_message_id = fwd_msg_id
+                    await session.commit()
+            log_event(
+                "MEDIA_FORWARDED_TO_SERVICE_CHANNEL",
+                transfer_id=transfer_id,
+                forwarded_chat_id=fwd_chat_id,
+            )
+
         # Immediate acknowledgement to user
         msg = (
             "🎬 <b>StreamX — Media Received</b>\n\n"
@@ -224,6 +348,34 @@ class TelegramBotService:
         )
         await self.send_message(chat_id, msg, reply_to_message_id=message_id)
 
+    @staticmethod
+    async def _mark_transfer_failed(transfer_id: int, category: ErrorCategory, message: str) -> None:
+        """Persist a permanent failure on a transfer row."""
+        async with AsyncSessionLocal() as session:
+            t = await session.get(TelegramTransfer, transfer_id)
+            if t:
+                t.status = TransferStatus.FAILED
+                t.error_category = category
+                t.error_message = message
+                t.completed_at = datetime.now(timezone.utc)
+                await session.commit()
+
+    @staticmethod
+    def _failure_message(
+        filename: str, transfer_id: int, category: ErrorCategory, detail: Optional[str] = None
+    ) -> str:
+        """Build an actionable, secret-free failure message for the end user."""
+        from app.utils.errors import CATEGORY_USER_MESSAGE
+
+        summary = CATEGORY_USER_MESSAGE.get(category, detail or "Upload failed.")
+        return (
+            "⚠️ <b>StreamX — Upload Failed</b>\n\n"
+            f"📁 <b>File:</b> <code>{filename}</code>\n"
+            f"🏷️ <b>Transfer ID:</b> <code>#{transfer_id}</code>\n"
+            f"📋 <b>Reason:</b> <i>{category.value}</i>\n\n"
+            f"{summary}"
+        )
+
     async def start_polling(self) -> None:
         """Start polling loop for incoming Telegram updates."""
         if not self.is_configured():
@@ -231,7 +383,7 @@ class TelegramBotService:
             return
 
         self.running = True
-        log_event("TELEGRAM_POLLING_STARTED")
+        log_event("TELEGRAM_POLLING_STARTED", forward_target_configured=self.is_forward_target_configured())
 
         async with httpx.AsyncClient(timeout=45.0) as client:
             while self.running:

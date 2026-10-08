@@ -24,7 +24,13 @@ class TransferResponse(TransferBase):
     status: TransferStatus
     bytes_transferred: int = 0
     error_message: Optional[str] = None
+    error_category: Optional[str] = None
     retry_count: int = 0
+    forwarded_chat_id: Optional[int] = None
+    forwarded_message_id: Optional[int] = None
+    scheduled_retry_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

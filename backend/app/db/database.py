@@ -64,6 +64,25 @@ def _migrate_schema_sync(connection):
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_metadata_status ON media (metadata_status)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_media_type ON media (media_type)")
 
+    res = connection.exec_driver_sql("PRAGMA table_info(telegram_transfers)").fetchall()
+    transfer_cols = {row[1] for row in res}
+    if transfer_cols:
+        if "error_category" not in transfer_cols:
+            connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN error_category VARCHAR(64)")
+        if "forwarded_chat_id" not in transfer_cols:
+            connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN forwarded_chat_id BIGINT")
+        if "forwarded_message_id" not in transfer_cols:
+            connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN forwarded_message_id BIGINT")
+        if "scheduled_retry_at" not in transfer_cols:
+            connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN scheduled_retry_at DATETIME")
+        if "started_at" not in transfer_cols:
+            connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN started_at DATETIME")
+        if "completed_at" not in transfer_cols:
+            connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN completed_at DATETIME")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_telegram_transfers_error_category ON telegram_transfers (error_category)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_telegram_transfers_forwarded_chat_id ON telegram_transfers (forwarded_chat_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_telegram_transfers_scheduled_retry_at ON telegram_transfers (scheduled_retry_at)")
+
     res_ent = connection.exec_driver_sql("PRAGMA table_info(metadata_entities)").fetchall()
     existing_ent_cols = {row[1] for row in res_ent}
     if existing_ent_cols:

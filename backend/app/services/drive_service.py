@@ -13,6 +13,14 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from app.config.settings import settings
+from app.utils.errors import (
+    DriveAuthError,
+    DrivePermissionError,
+    DriveQuotaError,
+    DriveRateLimitError,
+    DriveUploadError,
+    DriveVerificationError,
+)
 from app.utils.logging import log_event, logger
 
 
@@ -162,6 +170,26 @@ class GoogleDriveService:
             log_event("DRIVE_UPLOAD_SESSION_CREATED", filename=filename, size=size)
             return upload_url
 
+    def _classify_upload_status(self, status_code: int, body: str) -> Exception:
+        """Map a Drive upload HTTP status to a typed, classified error.
+
+        Permanent errors (401/403/404-config, quota) propagate immediately so the
+        job layer fails fast; transient errors (429, 5xx, 408) are flagged
+        retryable so the chunk-level retry loop backs off and retries.
+        """
+        text = body.lower()
+        if status_code in (401, 403):
+            if "insufficient" in text or "quota" in text and "user" in text:
+                return DriveQuotaError(f"Drive quota exceeded: HTTP {status_code}")
+            if "permission" in text or "forbidden" in text:
+                return DrivePermissionError(f"Drive permission denied: HTTP {status_code}")
+            return DriveAuthError(f"Drive authentication failed: HTTP {status_code}")
+        if status_code == 429 or "rate" in text or "limit" in text or "user-rate-limit" in text:
+            return DriveRateLimitError(f"Drive rate limited: HTTP {status_code}")
+        if status_code >= 500 or status_code in (408, 416, 409, 500, 502, 503, 504):
+            return DriveUploadError(f"Drive transient error: HTTP {status_code}")
+        return DriveUploadError(f"Drive chunk upload failed: HTTP {status_code}: {body}")
+
     async def upload_chunk(
         self,
         upload_url: str,
@@ -169,11 +197,14 @@ class GoogleDriveService:
         start_byte: int,
         total_size: int,
     ) -> Tuple[bool, Optional[str]]:
-        """Upload a chunk to a resumable session.
+        """Upload a chunk to a resumable session with bounded per-chunk retry.
+
+        Retryable HTTP/transport errors (429, 5xx, network) are retried with
+        exponential backoff; permanent errors (401/403/404-config) propagate
+        immediately so the job layer can fail fast without burning retries.
 
         Returns (is_completed, drive_file_id).
         """
-        # Ensure chunk is strict bytes (Telethon yields memoryview)
         chunk_bytes = bytes(chunk) if not isinstance(chunk, bytes) else chunk
         chunk_len = len(chunk_bytes)
         end_byte = start_byte + chunk_len - 1
@@ -182,8 +213,16 @@ class GoogleDriveService:
             "Content-Length": str(chunk_len),
         }
 
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
-            res = await client.put(upload_url, headers=headers, content=chunk_bytes)
+        max_chunk_retries = 3
+        for attempt in range(1, max_chunk_retries + 1):
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
+                try:
+                    res = await client.put(upload_url, headers=headers, content=chunk_bytes)
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    if attempt < max_chunk_retries:
+                        await asyncio.sleep(min(2 ** (attempt - 1), 8))
+                        continue
+                    raise DriveUploadError(f"Drive chunk transport error after retries: {e}")
 
             # HTTP 308 Resume Incomplete -> chunk received, upload still in progress
             if res.status_code == 308:
@@ -191,15 +230,35 @@ class GoogleDriveService:
 
             # HTTP 200 / 201 -> upload completed!
             if res.status_code in (200, 201):
-                data = res.json()
+                try:
+                    data = res.json()
+                except Exception:
+                    data = {}
                 drive_file_id = data.get("id")
                 log_event("DRIVE_UPLOAD_COMPLETED", drive_file_id=drive_file_id)
                 return True, drive_file_id
 
-            raise RuntimeError(f"Drive chunk upload failed with HTTP {res.status_code}: {res.text}")
+            error_exc = self._classify_upload_status(res.status_code, res.text)
+            # Permanent errors propagate immediately.
+            if error_exc is not None and not getattr(error_exc, "retryable", True):
+                raise error_exc
+            # Transient errors: back off and retry the chunk.
+            if attempt < max_chunk_retries:
+                wait = min(2 ** (attempt - 1), 8)
+                log_event(
+                    "DRIVE_CHUNK_RETRY",
+                    attempt=attempt,
+                    status_code=res.status_code,
+                    retry_after=wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+            raise error_exc if error_exc else DriveUploadError(
+                f"Drive chunk upload failed after retries: HTTP {res.status_code}: {res.text}"
+            )
 
     async def get_resumable_offset(self, upload_url: str, total_size: int) -> int:
-        """Query how many bytes Google Drive has acknowledged for this session (for server restart recovery)."""
+        """Query how many bytes Google Drive has acknowledged for this session (restart recovery)."""
         headers = {
             "Content-Range": f"bytes */{total_size}",
         }
@@ -212,6 +271,37 @@ class GoogleDriveService:
                     last_byte = int(range_header.split("-")[1])
                     return last_byte + 1
             return 0
+
+    async def verify_file(self, drive_file_id: str, expected_size: int, filename: str) -> bool:
+        """Verify an uploaded Drive file: exists, correct size.
+
+        Called after the resumable session reports completion to guarantee the
+        artifact is durable and matches the expected size — successful upload
+        HTTP response alone is never trusted.
+        """
+        creds = await self.get_credentials()
+        loop = asyncio.get_running_loop()
+
+        def _fetch():
+            service = self._get_drive_client(creds)
+            return service.files().get(
+                fileId=drive_file_id, fields="id,name,size,md5Checksum"
+            ).execute()
+
+        try:
+            meta = await loop.run_in_executor(None, _fetch)
+        except Exception as e:
+            raise DriveVerificationError(f"Drive get() failed for {drive_file_id}: {e}")
+
+        if not meta or meta.get("id") != drive_file_id:
+            raise DriveVerificationError(f"Drive file {drive_file_id} not found after upload")
+        drive_size = int(meta.get("size") or 0)
+        if expected_size and drive_size and drive_size != expected_size:
+            raise DriveVerificationError(
+                f"Drive size mismatch for {drive_file_id}: "
+                f"expected {expected_size}, got {drive_size}"
+            )
+        return True
 
     async def list_library_files(self) -> List[Dict[str, Any]]:
         """List all media files inside Google Drive."""

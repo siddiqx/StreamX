@@ -63,6 +63,26 @@ class MediaTaxonomy(str, enum.Enum):
     OTHER = "OTHER"
 
 
+class ErrorCategory(str, enum.Enum):
+    """Structured classification of transfer failures (see app/utils/errors.py).
+
+    Persisted on TelegramTransfer so incidents can be diagnosed later and so the
+    queue layer can avoid retrying permanent configuration errors.
+    """
+
+    TELEGRAM_FORWARD_FAILED = "TELEGRAM_FORWARD_FAILED"
+    TELEGRAM_DOWNLOAD_FAILED = "TELEGRAM_DOWNLOAD_FAILED"
+    TELEGRAM_MESSAGE_NOT_FOUND = "TELEGRAM_MESSAGE_NOT_FOUND"
+    DRIVE_AUTH_FAILED = "DRIVE_AUTH_FAILED"
+    DRIVE_PERMISSION_DENIED = "DRIVE_PERMISSION_DENIED"
+    DRIVE_QUOTA_EXCEEDED = "DRIVE_QUOTA_EXCEEDED"
+    DRIVE_RATE_LIMITED = "DRIVE_RATE_LIMITED"
+    DRIVE_UPLOAD_FAILED = "DRIVE_UPLOAD_FAILED"
+    DRIVE_VERIFICATION_FAILED = "DRIVE_VERIFICATION_FAILED"
+    JOB_TIMEOUT = "JOB_TIMEOUT"
+    UNKNOWN = "UNKNOWN"
+
+
 class MetadataEntity(Base):
     __tablename__ = "metadata_entities"
 
@@ -161,7 +181,18 @@ class TelegramTransfer(Base):
     bytes_transferred = Column(BigInteger, default=0)
     resumable_upload_url = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
+    error_category = Column(Enum(ErrorCategory), nullable=True, index=True)
     retry_count = Column(Integer, default=0)
+    # Media relay: the chat/message the MTProto worker should actually read.
+    # When set, the worker downloads the forwarded copy from this location
+    # (the owner's single MTProto account cannot read messages sent to the bot
+    # by OTHER users, so the bot forwards them here first).
+    forwarded_chat_id = Column(BigInteger, nullable=True, index=True)
+    forwarded_message_id = Column(BigInteger, nullable=True)
+    # Scheduling / lifecycle diagnostics
+    scheduled_retry_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
