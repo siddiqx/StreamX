@@ -123,6 +123,12 @@ export function extractEpisodeInfo(filename: string): {
     working = working.slice(leadingGroup[0].length);
   }
 
+  // Cut technical suffixes before parsing episode numbers, so "One Piece 1100
+  // 1080p WEB-DL" retains the absolute episode number for grouping.
+  const initialNoiseBoundary = working.search(noise);
+  if (initialNoiseBoundary >= 0) working = working.slice(0, initialNoiseBoundary);
+  working = working.replace(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g, ' ');
+
   // Telegram names often place the episode marker before the series name.
   const leadingEpisode = working.match(/^\s*(?:S\s*(\d{1,2})\s*[._ -]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*/i);
   if (leadingEpisode) {
