@@ -140,8 +140,8 @@ export function extractEpisodeInfo(filename: string): {
   } else {
     // Standard season/episode markers.
     const patterns = [
-      /\bS\s*(\d{1,2})\s*[._ -]*E\s*(\d{1,4})(?:v\d+)?\b/i,
-      /\bSeason\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep)\s*(\d{1,4})\b/i,
+      /\bS\s*[._ -]?\s*(\d{1,2})\s*[._ -]*E\s*(\d{1,4})(?:v\d+)?\b/i,
+      /\bSeason\s*[._ -]?\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep)\s*(\d{1,4})\b/i,
       /\b(\d{1,2})\s*x\s*(\d{1,4})\b/i,
     ];
     let marker: RegExpMatchArray | null = null;
