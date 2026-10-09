@@ -145,7 +145,13 @@ def parse_filename(filename: str) -> ParsedMedia:
                 season = int(match.group(1))
                 episode = int(match.group(2))
                 media_type = "tv"
-                working = working[:match.start()] + " " + working[match.end():]
+                # For the common "Title S01E02 Episode Name" format, only the
+                # title before the episode marker is identity-bearing. Prefix
+                # markers such as "1x02 Title" keep the trailing title instead.
+                if working[:match.start()].strip():
+                    working = working[:match.start()]
+                else:
+                    working = working[match.end():]
                 break
 
     if episode is None:
