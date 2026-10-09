@@ -105,95 +105,93 @@ export function extractEpisodeInfo(filename: string): {
   episode: number;
   seriesTitleCandidate: string;
 } {
-  let working = filename.trim();
-  // Strip extension
-  working = working.replace(/\.(mkv|mp4|avi|mov|m4v|webm|ts|flv)$/i, '');
+  let working = filename.trim().split(/[\\/]/).pop() || filename.trim();
+  working = working.replace(/\.(mkv|mp4|avi|mov|m4v|webm|ts|flv|wmv|m4v)$/i, '');
+  // Remove Telegram handles before converting underscores; handles often contain
+  // multiple underscore-delimited words that must never leak into the title.
+  working = working.replace(/(?<!\w)@[A-Za-z0-9_]{2,}/g, ' ');
+  working = working.replace(/(?i:)/g, '');
 
-  // Strip telegram tags
-  working = working.replace(/@\w+[\.\s\-_]*/g, '').replace(/[\.\s\-_]*@\w+/g, '');
-
+  const noise = /\b(2160p|1080p|1080i|720p|576p|480p|4k|uhd|web[ ._-]?dl|web[ ._-]?rip|webrip|bluray|blu[ ._-]?ray|bdrip|brrip|hdrip|hdtv|dvdrip|x264|x265|h[ ._-]?264|h[ ._-]?265|hevc|av1|10[ ._-]?bit|8[ ._-]?bit|aac|ac3|dts|flac|opus|truehd|atmos|dual[ ._-]?audio|multi[ ._-]?audio|subbed|dubbed|subsplease|erai[ ._-]?raws|horriblesubs|judas|crunchyroll|animedynasty|animestation\d*|aniwatch|anime[ ._-]?maniaac|index[ ._-]?station|proper|repack|remux|hdr10\+?|dovi)\b/i;
   let season = 1;
   let episode = 1;
   let isSeries = false;
+  let seriesTitle = working;
 
-  // 1. Check for LEADING Episode / Season pattern (e.g. "EP09 - The Fragrant Flower" or "Episode 09 - ...")
-  const leadingEp = working.match(/^(?:S(\d{1,2})\s*[-_.]?\s*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})\s*[-_.:\s]+/i);
-  if (leadingEp) {
-    season = leadingEp[1] ? parseInt(leadingEp[1], 10) : 1;
-    episode = parseInt(leadingEp[2], 10);
+  // Remove a leading fansub/release group (e.g. [SubsPlease]) but not title text.
+  const leadingGroup = working.match(/^\s*\[([^\]]{1,35})\]\s*/);
+  if (leadingGroup && !noise.test(leadingGroup[1]) && !/^(?:S\d|EP\d|Episode\s*\d|\d{3,})/i.test(leadingGroup[1])) {
+    working = working.slice(leadingGroup[0].length);
+  }
+
+  // Telegram names often place the episode marker before the series name.
+  const leadingEpisode = working.match(/^\s*(?:S\s*(\d{1,2})\s*[._ -]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*/i);
+  if (leadingEpisode) {
+    season = Number(leadingEpisode[1] || 1);
+    episode = Number(leadingEpisode[2]);
     isSeries = true;
-    working = working.substring(leadingEp[0].length);
-  }
-
-  // 2. Identify quality / codec boundary to stop title before uploader tags (e.g. [1080p] AnimeDynasty)
-  const qBoundary = working.match(/(\[?\b(2160p|4k|1080p|1080i|720p|480p|bluray|web-?dl|webrip|hdrip|hevc|x264|x265)\b\]?)/i);
-  if (qBoundary && qBoundary.index !== undefined) {
-    working = working.substring(0, qBoundary.index);
-  }
-
-  // Strip bracketed release noise e.g. [Dual], [1080p], [Sub]
-  const cleanedBrackets = working.replace(/\[.*?\]/g, ' ');
-
-  // Normalize dots and underscores
-  const normalized = cleanedBrackets.replace(/[\._]/g, ' ').replace(/\s+/g, ' ').trim();
-  let seriesTitle = normalized;
-
-  // 3. If episode not yet found, check in normalized title area
-  if (!isSeries) {
-    // Pattern 1: S01E03 or S1 - 10 or S01 - E03 or S1E10
-    const seMatch = normalized.match(/\bS(\d{1,2})\s*(?:[-_.]?\s*(?:E|Ep|Episode)|[-_.])\s*(\d{1,4})\b/i);
-    if (seMatch && seMatch.index !== undefined) {
-      season = parseInt(seMatch[1], 10);
-      episode = parseInt(seMatch[2], 10);
+    working = working.slice(leadingEpisode[0].length);
+    seriesTitle = working;
+  } else {
+    // Standard season/episode markers.
+    const patterns = [
+      /\bS\s*(\d{1,2})\s*[._ -]*E\s*(\d{1,4})(?:v\d+)?\b/i,
+      /\bSeason\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep)\s*(\d{1,4})\b/i,
+      /\b(\d{1,2})\s*x\s*(\d{1,4})\b/i,
+    ];
+    let marker: RegExpMatchArray | null = null;
+    for (const pattern of patterns) {
+      marker = working.match(pattern);
+      if (marker) break;
+    }
+    if (marker && marker.index !== undefined) {
+      season = Number(marker[1]);
+      episode = Number(marker[2]);
       isSeries = true;
-      seriesTitle = normalized.substring(0, seMatch.index).trim();
+      // If the marker follows a title, discard episode names and release text
+      // after it. If it leads the filename, retain the title that follows.
+      seriesTitle = working.slice(0, marker.index).trim() || working.slice(marker.index + marker[0].length).trim();
     } else {
-      // Pattern 2: Standalone E08, EP09, Ep 08, Episode 8
-      const epMatch = normalized.match(/\b(?:Episode|Ep|EP|E)\s*(\d{1,4})\b/i);
-      if (epMatch && epMatch.index !== undefined) {
-        season = 1;
-        episode = parseInt(epMatch[1], 10);
-        isSeries = true;
-        seriesTitle = normalized.substring(0, epMatch.index).trim();
-      } else {
-        // Pattern 3: 1x04 or 02x12
-        const xMatch = normalized.match(/\b(\d{1,2})x(\d{1,4})\b/i);
-        if (xMatch && xMatch.index !== undefined) {
-          season = parseInt(xMatch[1], 10);
-          episode = parseInt(xMatch[2], 10);
+      // Fansub absolute numbering: "Title - 01", including v2 release suffixes.
+      const dash = working.match(/\s+-\s+(\d{1,4})(?:v\d+)?(?=\s|$)/i);
+      if (dash && dash.index !== undefined) {
+        const number = Number(dash[1]);
+        if (number > 0 && number < 10000 && !(number >= 1900 && number <= 2099)) {
+          episode = number;
           isSeries = true;
-          seriesTitle = normalized.substring(0, xMatch.index).trim();
-        } else {
-          // Pattern 4: Anime absolute episode numbering "Title - 03" or "Title - 10" or "Title 1100"
-          const dashMatch = normalized.match(/\s+-\s+(\d{1,4})(?:\s+|$)/);
-          if (dashMatch && dashMatch.index !== undefined) {
-            episode = parseInt(dashMatch[1], 10);
+          seriesTitle = working.slice(0, dash.index).trim() || working.slice(dash.index + dash[0].length).trim();
+        }
+      } else {
+        // Absolute anime numbering is commonly the final number ("One Piece 1100").
+        const trailing = working.match(/\s+(\d{2,4})(?:v\d+)?\s*$/i);
+        if (trailing && trailing.index !== undefined) {
+          const number = Number(trailing[1]);
+          if (number > 0 && !(number >= 1900 && number <= 2099)) {
+            episode = number;
             isSeries = true;
-            seriesTitle = normalized.substring(0, dashMatch.index).trim();
-          } else {
-            const numMatch = normalized.match(/\b(\d{2,4})\b/);
-            if (numMatch && numMatch.index !== undefined) {
-              const num = parseInt(numMatch[1], 10);
-              if (num < 1900 || num > 2099) {
-                episode = num;
-                isSeries = true;
-                seriesTitle = normalized.substring(0, numMatch.index).trim();
-              }
-            }
+            seriesTitle = working.slice(0, trailing.index).trim();
           }
         }
       }
     }
   }
 
-  // Clean trailing hyphens or noise from seriesTitleCandidate
-  seriesTitle = seriesTitle.replace(/\s+-\s*$/, '').replace(/^\s*-\s+/, '').trim();
+  // Strip technical/release tags and common bracketed checksums from the title
+  // candidate. Preserve ordinary title punctuation and meaningful words.
+  seriesTitle = seriesTitle.replace(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g, ' ');
+  const noiseBoundary = seriesTitle.search(noise);
+  if (noiseBoundary >= 0) seriesTitle = seriesTitle.slice(0, noiseBoundary);
+  seriesTitle = seriesTitle
+    .replace(/[._]+/g, ' ')
+    .replace(/^[\s\-–—:|]+|[\s\-–—:|]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   return {
     isSeries,
     season,
     episode,
-    seriesTitleCandidate: seriesTitle || normalized,
+    seriesTitleCandidate: seriesTitle || working.replace(/[._]+/g, ' ').trim() || filename,
   };
 }
 
