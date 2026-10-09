@@ -46,6 +46,7 @@ _YEAR_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 _EP_PATTERNS = (
     re.compile(r"(?<![A-Za-z0-9])S\s*(\d{1,2})\s*[._ -]*E\s*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
     re.compile(r"(?<![A-Za-z0-9])(?:Season)\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep)\s*(\d{1,4})(?!\d)", re.I),
+    re.compile(r"(?<![A-Za-z0-9])S\s*(\d{1,2})\s*[._ -]*(?:EP|E)\s*(\d{1,4})(?!\d)", re.I),
     re.compile(r"(?<!\d)(\d{1,2})\s*x\s*(\d{1,4})(?!\d)", re.I),
 )
 
@@ -74,6 +75,8 @@ def _strip_bracket_noise(value: str) -> str:
         compact = re.sub(r"[\s._-]+", "", inner).lower()
         # Keep meaningful bracketed text; remove technical tags, checksums,
         # and short release-group labels. Episode/year tokens are parsed first.
+        if re.fullmatch(r"(?:S|Season)\s*\d{1,2}|(?:EP|Episode|E)\s*\d{1,4}", inner, re.I):
+            return " " + inner + " "
         if (
             _NOISE_RE.search(inner)
             or re.fullmatch(r"[0-9a-f]{8}", compact, re.I)
