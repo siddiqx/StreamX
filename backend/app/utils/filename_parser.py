@@ -44,9 +44,9 @@ _NOISE_TERMS = (
 _NOISE_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + _NOISE_TERMS + r")(?![A-Za-z0-9])", re.I)
 _YEAR_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 _EP_PATTERNS = (
-    re.compile(r"(?<![A-Za-z0-9])S\s*(\d{1,2})\s*[._ -]*E\s*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
+    re.compile(r"(?<![A-Za-z0-9])S\s*[._ -]?\s*(\d{1,2})\s*[._ -]*E\s*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
     re.compile(r"(?<![A-Za-z0-9])(?:Season)\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep)\s*(\d{1,4})(?!\d)", re.I),
-    re.compile(r"(?<![A-Za-z0-9])S\s*(\d{1,2})\s*[._ -]*(?:EP|E)\s*(\d{1,4})(?!\d)", re.I),
+    re.compile(r"(?<![A-Za-z0-9])S\s*[._ -]?\s*(\d{1,2})\s*[._ -]*(?:EP|E)\s*(\d{1,4})(?!\d)", re.I),
     re.compile(r"(?<!\d)(\d{1,2})\s*x\s*(\d{1,4})(?!\d)", re.I),
 )
 
