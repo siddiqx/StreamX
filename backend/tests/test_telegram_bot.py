@@ -53,8 +53,37 @@ async def test_bot_unauthorized_user(clean_db):
 
 @pytest.mark.asyncio
 async def test_bot_media_ingestion_and_sqlite(clean_db):
-    bot = TelegramBotService(bot_token="test_token")
-    with patch.object(bot, "send_message", new_callable=AsyncMock) as mock_send:
+    bot = TelegramBotService(bot_token="test_token", owner_user_id=8142877259)
+
+    # Mock the forwardMessage API call to succeed
+    class _FakeResp:
+        def __init__(self, status_code=200, payload=None, text=""):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.text = text
+
+        def json(self):
+            return self._payload
+
+    class _FakeAsyncClient:
+        def __init__(self):
+            self.forward_calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None, content=None, timeout=None):
+            if url.endswith("/forwardMessage"):
+                self.forward_calls.append(json)
+                return _FakeResp(200, {"ok": True, "result": {"message_id": 999, "chat": {"id": 8142877259}}})
+            return _FakeResp(404)
+
+    fake = _FakeAsyncClient()
+    with patch.object(bot, "send_message", new_callable=AsyncMock) as mock_send, \
+         patch("app.services.telegram_bot_service.httpx.AsyncClient", lambda *a, **k: fake):
         update = {
             "update_id": 2,
             "message": {

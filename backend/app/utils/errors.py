@@ -143,9 +143,15 @@ def classify_error(exc: BaseException) -> ErrorCategory:
     # Telegram side
     if "could not locate media" in msg or "no media found" in msg:
         return ErrorCategory.TELEGRAM_MESSAGE_NOT_FOUND
-    if "floodwait" in msg or "forward" in msg:
+
+    # Check for forward failures first (permanent errors)
+    # Match "forward" with failure indicators like "failed", "error", "telegram error"
+    if "forward" in msg and ("failed" in msg or "error" in msg or "telegram error" in msg):
+        return ErrorCategory.TELEGRAM_FORWARD_FAILED
+
+    if "floodwait" in msg:
         return ErrorCategory.TELEGRAM_DOWNLOAD_FAILED
-    if "not configured" in msg or "invalid" in msg and "session" in msg:
+    if "not configured" in msg or ("invalid" in msg and "session" in msg):
         return ErrorCategory.TELEGRAM_DOWNLOAD_FAILED
 
     # Google Drive / OAuth side. Order matters: check 401/403 BEFORE 4xx.

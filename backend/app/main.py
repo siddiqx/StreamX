@@ -37,12 +37,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     bot_task = None
     if bot_service.is_configured():
         log_event("TELEGRAM_BOT_CONFIGURED", allowed_users=len(settings.allowed_telegram_users))
-        if not bot_service.is_forward_target_configured():
+
+        # Validate service channel configuration at startup
+        if bot_service.is_forward_target_configured():
+            health = await bot_service.validate_service_channel()
+            log_event("TELEGRAM_SERVICE_CHANNEL_HEALTH", **health)
+            if not health.get("reachable"):
+                logger.error(
+                    f"TELEGRAM SERVICE CHANNEL UNREACHABLE: {health.get('error')}. "
+                    "Non-owner uploads will fail. Fix TELEGRAM_SERVICE_CHANNEL or TELEGRAM_OWNER_USER_ID."
+                )
+        else:
             logger.warning(
                 "TELEGRAM_SERVICE_CHANNEL / TELEGRAM_OWNER_USER_ID not set: "
                 "only files sent by the MTProto account owner will download. "
                 "Non-owner uploads will queue but fail at download time."
             )
+
         bot_task = asyncio.create_task(bot_service.start_polling())
     else:
         logger.warning("TELEGRAM_BOT_TOKEN not provided. Bot polling skipped.")

@@ -24,6 +24,11 @@ from app.utils.filenames import format_bytes, sanitize_filename
 from app.utils.logging import log_event, logger
 
 
+# Maximum retry attempts for transient forward failures
+MAX_FORWARD_RETRIES = 3
+INITIAL_FORWARD_RETRY_DELAY = 2  # seconds
+
+
 class TelegramBotService:
     def __init__(
         self,
@@ -83,6 +88,53 @@ class TelegramBotService:
     def is_forward_target_configured(self) -> bool:
         return self.resolve_forward_target() is not None
 
+    async def validate_service_channel(self) -> Dict[str, Any]:
+        """Validate that the service channel is reachable and bot has permissions.
+
+        Returns a dict with health check results for startup/readiness probes.
+        Does not expose secrets.
+        """
+        target = self.resolve_forward_target()
+        if target is None:
+            return {
+                "configured": False,
+                "error": "TELEGRAM_SERVICE_CHANNEL and TELEGRAM_OWNER_USER_ID are not set",
+            }
+
+        # Try to get chat info via Bot API to verify access
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.get(f"{self.base_url}/getChat", params={"chat_id": target})
+        except Exception as e:
+            logger.error(f"Service channel health check transport error: {e}")
+            return {
+                "configured": True,
+                "target": str(target),
+                "reachable": False,
+                "error": f"Transport error: {type(e).__name__}",
+            }
+
+        if res.status_code == 200:
+            chat_info = res.json().get("result", {})
+            return {
+                "configured": True,
+                "target": str(target),
+                "reachable": True,
+                "chat_type": chat_info.get("type"),
+                "chat_title": chat_info.get("title") or chat_info.get("username"),
+                "bot_is_member": True,
+            }
+        else:
+            error_text = res.text
+            logger.warning(f"Service channel health check failed: HTTP {res.status_code}: {error_text}")
+            return {
+                "configured": True,
+                "target": str(target),
+                "reachable": False,
+                "http_status": res.status_code,
+                "error": error_text,
+            }
+
     async def forward_media_to_service(
         self, from_chat_id: int, message_id: int
     ) -> Optional[Tuple[int, int]]:
@@ -93,6 +145,8 @@ class TelegramBotService:
         Raises StreamXError(TELEGRAM_FORWARD_FAILED) if a target IS configured
         but the Bot API forward call itself fails — this is a permanent
         configuration problem (bot not a member / not admin of the channel).
+
+        Retries transient failures (network, FLOOD_WAIT) with exponential backoff.
         """
         target = self.resolve_forward_target()
         if target is None:
@@ -104,34 +158,127 @@ class TelegramBotService:
             "message_id": message_id,
             "disable_notification": True,
         }
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                res = await client.post(f"{self.base_url}/forwardMessage", json=payload)
-        except Exception as e:
-            logger.error(f"Telegram forwardMessage transport error: {e}")
-            raise StreamXError(
-                ErrorCategory.TELEGRAM_FORWARD_FAILED,
-                f"forwardMessage transport error: {e}",
-            ) from e
 
-        if res.status_code != 200:
-            logger.error(
-                f"forwardMessage failed HTTP {res.status_code}: {res.text}"
-            )
-            raise StreamXError(
-                ErrorCategory.TELEGRAM_FORWARD_FAILED,
-                f"forwardMessage failed: HTTP {res.status_code}",
+        last_exception = None
+        for attempt in range(MAX_FORWARD_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    res = await client.post(f"{self.base_url}/forwardMessage", json=payload)
+            except Exception as e:
+                last_exception = e
+                logger.warning(
+                    f"Telegram forwardMessage transport error (attempt {attempt + 1}/{MAX_FORWARD_RETRIES + 1}): {e}"
+                )
+                if attempt < MAX_FORWARD_RETRIES:
+                    delay = INITIAL_FORWARD_RETRY_DELAY * (2 ** attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                log_event(
+                    "FORWARD_TRANSPORT_ERROR_EXHAUSTED",
+                    from_chat_id=from_chat_id,
+                    message_id=message_id,
+                    target=str(target),
+                    attempts=attempt + 1,
+                    error=str(e),
+                )
+                raise StreamXError(
+                    ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                    f"forwardMessage transport error after {MAX_FORWARD_RETRIES + 1} attempts: {e}",
+                ) from e
+
+            # Always parse JSON first to handle both HTTP errors and Telegram API errors (ok:false)
+            data = {}
+            try:
+                data = res.json()
+            except Exception:
+                pass
+
+            # Telegram Bot API returns HTTP 200 even for API errors.
+            # The actual success/failure is indicated by the "ok" field in the JSON body.
+            # Success: {"ok": true, "result": {...}}
+            # Failure: {"ok": false, "error_code": 403, "description": "Forbidden: ..."}
+            api_ok = data.get("ok")
+            error_code = data.get("error_code")
+            error_description = data.get("description", "")
+
+            if res.status_code == 200 and api_ok is True:
+                # Successful forward - extract destination chat/message IDs from result
+                result = data.get("result", {})
+                dest_chat = result.get("chat", {}).get("id")
+                dest_msg = result.get("message_id")
+                if not dest_chat or not dest_msg:
+                    log_event(
+                        "FORWARD_MISSING_IDS",
+                        from_chat_id=from_chat_id,
+                        message_id=message_id,
+                        target=str(target),
+                        response=data,
+                    )
+                    raise StreamXError(
+                        ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                        "forwardMessage returned no chat/message id in result",
+                    )
+                return int(dest_chat), int(dest_msg)
+
+            # Handle API error (ok: false) or HTTP error status
+            # Use Telegram's error_code for classification when available, else fall back to HTTP status
+            classification_code = error_code if error_code is not None else res.status_code
+            error_text = error_description or res.text
+
+            # Telegram Bot API error codes that are transient
+            transient_codes = {429, 500, 502, 503, 504}
+            # Permanent configuration errors
+            permanent_codes = {400, 401, 403}
+
+            is_transient = classification_code in transient_codes
+            is_permanent = classification_code in permanent_codes
+
+            # Also check for FLOOD_WAIT in error description
+            if "FLOOD_WAIT" in error_text or "flood" in error_text.lower():
+                is_transient = True
+
+            log_event(
+                "FORWARD_FAILED_ATTEMPT",
+                attempt=attempt + 1,
+                max_attempts=MAX_FORWARD_RETRIES + 1,
+                from_chat_id=from_chat_id,
+                message_id=message_id,
+                target=str(target),
+                http_status=res.status_code,
+                telegram_error_code=error_code,
+                error=error_text,
+                is_transient=is_transient,
             )
 
-        data = res.json()
-        dest_chat = data.get("chat", {}).get("id")
-        dest_msg = data.get("message_id")
-        if not dest_chat or not dest_msg:
-            raise StreamXError(
-                ErrorCategory.TELEGRAM_FORWARD_FAILED,
-                "forwardMessage returned no chat/message id",
+            if is_permanent or attempt >= MAX_FORWARD_RETRIES:
+                # Permanent error or retries exhausted
+                raise StreamXError(
+                    ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                    f"forwardMessage failed: Telegram error {classification_code} - {error_text}",
+                )
+
+            # Transient error - retry with backoff
+            delay = INITIAL_FORWARD_RETRY_DELAY * (2 ** attempt)
+            # If Telegram tells us to wait (FLOOD_WAIT), try to extract the wait time
+            if classification_code == 429:
+                try:
+                    params = data.get("parameters", {})
+                    retry_after = params.get("retry_after", delay)
+                    delay = min(retry_after, 60)  # Cap at 60 seconds
+                except Exception:
+                    pass
+
+            logger.warning(
+                f"Forward transient error (attempt {attempt + 1}), retrying in {delay}s: {error_text}"
             )
-        return int(dest_chat), int(dest_msg)
+            await asyncio.sleep(delay)
+
+
+        # Should not reach here, but safety net
+        raise StreamXError(
+            ErrorCategory.TELEGRAM_FORWARD_FAILED,
+            f"forwardMessage failed after {MAX_FORWARD_RETRIES + 1} attempts: {last_exception}",
+        )
 
     def is_user_allowed(self, user_id: int) -> bool:
         """Check if user is authorized to use this bot."""
@@ -278,6 +425,30 @@ class TelegramBotService:
         self, chat_id: int, message_id: int, file_id: str, filename: str, file_size: int
     ) -> None:
         log_event("TELEGRAM_MEDIA_RECEIVED", filename=filename, size=file_size, chat_id=chat_id)
+
+        # Check if service channel is configured for non-owner uploads
+        is_owner = self.owner_user_id and chat_id == self.owner_user_id
+        if not is_owner and not self.is_forward_target_configured():
+            # Non-owner upload but no relay target configured - reject early with clear message
+            await self.send_message(
+                chat_id=chat_id,
+                text=(
+                    "⚠️ <b>StreamX — Upload Not Supported</b>\n\n"
+                    "This bot requires a Telegram service channel to be configured "
+                    "for uploads from non-owner accounts.\n\n"
+                    "Please contact the administrator to set up "
+                    "<code>TELEGRAM_SERVICE_CHANNEL</code> or "
+                    "<code>TELEGRAM_OWNER_USER_ID</code>."
+                ),
+                reply_to_message_id=message_id,
+            )
+            log_event(
+                "UPLOAD_REJECTED_NO_RELAY_TARGET",
+                chat_id=chat_id,
+                user_id=chat_id,
+                filename=filename,
+            )
+            return
 
         # Record in SQLite
         async with AsyncSessionLocal() as session:

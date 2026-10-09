@@ -37,12 +37,19 @@ async def get_system_status(db: AsyncSession = Depends(get_db)) -> Dict[str, Any
 
     vlc_path = find_vlc_executable()
 
+    # Telegram service channel health
+    relay_health = {}
+    if bot_service.is_configured() and bot_service.is_forward_target_configured():
+        relay_health = await bot_service.validate_service_channel()
+
     return {
         "status": "ok",
         "drive": drive_info,
         "bot": {
             "configured": bot_service.is_configured(),
             "username": "Stream1_X_bot",
+            "forward_target_configured": bot_service.is_forward_target_configured(),
+            "service_channel": relay_health,
         },
         "mtproto": {
             "configured": mtproto_service.is_configured(),
