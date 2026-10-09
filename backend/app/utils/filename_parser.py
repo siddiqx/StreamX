@@ -167,7 +167,7 @@ def parse_filename(filename: str) -> ParsedMedia:
             number = int(match.group(1))
             if 1 <= number <= 9999 and not 1900 <= number <= 2099:
                 season, episode, media_type = 1, number, "tv"
-                working = working[:match.start()] + " " + working[match.end():]
+                working = working[:match.start()] if working[:match.start()].strip() else working[match.end():]
 
         # Long-running anime also uses a bare trailing absolute episode number.
         if episode is None:
