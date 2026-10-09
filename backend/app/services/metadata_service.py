@@ -218,8 +218,8 @@ class MetadataService:
             query_variants = []
             for query in (
                 parsed.clean_title,
-                re.sub(r"[^\\w\\s]", " ", parsed.clean_title),
-                re.sub(r"\\s+", " ", parsed.clean_title).strip(),
+                re.sub(r"[^\w\s]", " ", parsed.clean_title),
+                re.sub(r"\s+", " ", parsed.clean_title).strip(),
             ):
                 query = query.strip()
                 if query and query.casefold() not in {q.casefold() for q in query_variants}:
