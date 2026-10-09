@@ -123,6 +123,12 @@ def parse_filename(filename: str) -> ParsedMedia:
     working = working.replace("_", " ").replace(".", " ")
     working = re.sub(r"(?i)\b(?:www\.[A-Za-z0-9.-]+|telegram)\b", " ", working)
 
+    # Strip technical suffixes before episode parsing so absolute numbering
+    # remains visible in names such as "One Piece 1100 1080p WEB-DL".
+    noise_boundary = _NOISE_RE.search(working)
+    if noise_boundary:
+        working = working[:noise_boundary.start()]
+
     season = None
     episode = None
     media_type = "movie"
@@ -162,6 +168,15 @@ def parse_filename(filename: str) -> ParsedMedia:
             if 1 <= number <= 9999 and not 1900 <= number <= 2099:
                 season, episode, media_type = 1, number, "tv"
                 working = working[:match.start()] + " " + working[match.end():]
+
+        # Long-running anime also uses a bare trailing absolute episode number.
+        if episode is None:
+            trailing = re.search(r"\s+(\d{2,4})(?:v\d+)?\s*$", working, re.I)
+            if trailing:
+                number = int(trailing.group(1))
+                if 1 <= number <= 9999 and not 1900 <= number <= 2099:
+                    season, episode, media_type = 1, number, "tv"
+                    working = working[:trailing.start()]
 
     # Remove episode title/release annotations after the first technical marker.
     # This prevents uploader tags or codec names from contaminating the TMDB query.
