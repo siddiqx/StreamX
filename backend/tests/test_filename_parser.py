@@ -338,6 +338,7 @@ def test_channel_trademark_symbol_what_if_regression():
         ("[AH] Fragrant_Flower_S1-E07_[720p_Sub]_@Animes_Horizon.mkv",
          "Fragrant Flower", 1, 7),
         ("One.Piece.1100.1080p.WEB-DL.AAC2.0.mkv", "One Piece", 1, 1100),
+        ("[Group] Trapped in a Dating Sim S-01 EP-03 720p.mkv", "Trapped in a Dating Sim", 1, 3),
         ("1x01 Locke and Key.mkv", "Locke and Key", 1, 1),
     ],
 )
