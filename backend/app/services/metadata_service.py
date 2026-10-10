@@ -7,6 +7,7 @@ series-wide linking, and backfill.
 
 import asyncio
 import json
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -210,13 +211,51 @@ class MetadataService:
             return False
 
         try:
-            candidates = await self.provider.search(
-                query=parsed.clean_title,
-                year=parsed.year,
-                media_type=parsed.media_type,
-            )
+            # Search the parser's canonical title first. If that is not a clear
+            # match, try a small set of deterministic variants and rank the combined
+            # candidate pool once. Never let a noisy Telegram filename force a
+            # single weak TMDB result into the library.
+            query_variants = []
+            for query in (
+                parsed.clean_title,
+                re.sub(r"[^\w\s]", " ", parsed.clean_title),
+                re.sub(r"\s+", " ", parsed.clean_title).strip(),
+            ):
+                query = query.strip()
+                if query and query.casefold() not in {q.casefold() for q in query_variants}:
+                    query_variants.append(query)
 
-            best_cand, confidence, status_str = rank_candidates(parsed, candidates)
+            candidates_by_id = {}
+            best_cand, confidence, status_str = None, 0.0, "NOT_FOUND"
+            for index, query in enumerate(query_variants[:3]):
+                found = await self.provider.search(
+                    query=query,
+                    year=parsed.year,
+                    media_type=parsed.media_type,
+                )
+                for candidate in found:
+                    key = (candidate.media_type, str(candidate.provider_id))
+                    existing = candidates_by_id.get(key)
+                    if existing is None or calculate_match_confidence(parsed, candidate) > calculate_match_confidence(parsed, existing):
+                        candidates_by_id[key] = candidate
+
+                best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
+                # Only stop early for an unambiguous, high-confidence match.
+                if status_str == "MATCHED" and confidence >= 0.88:
+                    break
+                # Avoid unnecessary API calls when the first search is clearly good.
+                if index == 0 and status_str == "MATCHED":
+                    break
+
+            log_event(
+                "METADATA_CANDIDATES_RANKED",
+                media_id=media_id,
+                query_count=min(len(query_variants), 3),
+                candidate_count=len(candidates_by_id),
+                best_title=best_cand.title if best_cand else None,
+                confidence=confidence,
+                match_status=status_str,
+            )
 
             async with AsyncSessionLocal() as session:
                 m = await session.get(Media, media_id)
@@ -233,15 +272,27 @@ class MetadataService:
                 if not m.release_group and parsed.release_group:
                     m.release_group = parsed.release_group
 
-                if not best_cand or status_str == "NOT_FOUND":
-                    # Fallback classification based on parsed filename
+                if not best_cand or status_str != "MATCHED":
+                    # Do not attach a speculative TMDB entity: a wrong poster/title
+                    # is worse than temporarily showing a clean filename fallback.
                     taxonomy, cat = classify_media(parsed, None, raw_filename=m.filename, mime_type=m.mime_type)
                     m.category = cat
                     m.media_type = taxonomy.value
-                    m.metadata_status = MetadataStatus.NOT_FOUND
+                    m.metadata_status = (
+                        MetadataStatus.LOW_CONFIDENCE
+                        if best_cand is not None
+                        else MetadataStatus.NOT_FOUND
+                    )
                     m.metadata_confidence = confidence
                     await session.commit()
-                    log_event("METADATA_NOT_FOUND", media_id=media_id, title=parsed.clean_title)
+                    log_event(
+                        "METADATA_MATCH_REJECTED",
+                        media_id=media_id,
+                        title=parsed.clean_title,
+                        candidate_title=best_cand.title if best_cand else None,
+                        confidence=confidence,
+                        match_status=status_str,
+                    )
                     return True
 
                 # Fetch full canonical details for best candidate

@@ -322,3 +322,55 @@ def test_channel_trademark_symbol_what_if_regression():
     assert p.media_type == "tv"
     assert p.quality == "1080p"
 
+
+
+# ---------------------------------------------------------------------------
+# Noisy Telegram / anime filename regressions
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("filename", "title", "season", "episode"),
+    [
+        ("[SubsPlease] The Fragrant Flower Blooms With Dignity - 07 (1080p) [A1B2C3D4].mkv",
+         "The Fragrant Flower Blooms With Dignity", 1, 7),
+        ("@Aniwatch_India_In - Trapped.in.a.Dating.Sim.S01E03.1080p.WEB-DL.x265.mkv",
+         "Trapped in a Dating Sim", 1, 3),
+        ("[AH] Fragrant_Flower_S1-E07_[720p_Sub]_@Animes_Horizon.mkv",
+         "Fragrant Flower", 1, 7),
+        ("One.Piece.1100.1080p.WEB-DL.AAC2.0.mkv", "One Piece", 1, 1100),
+        ("[Group] Trapped in a Dating Sim S-01 EP-03 720p.mkv", "Trapped in a Dating Sim", 1, 3),
+        ("1x01 Locke and Key.mkv", "Locke and Key", 1, 1),
+    ],
+)
+def test_noisy_telegram_anime_titles_are_clean_and_episode_aware(filename, title, season, episode):
+    parsed = parse_filename(filename)
+    assert parsed.clean_title == title
+    assert parsed.media_type == "tv"
+    assert parsed.season == season
+    assert parsed.episode == episode
+
+
+def test_anime_series_title_does_not_include_episode_title_or_release_tags():
+    parsed = parse_filename(
+        "[SubsPlease] Frieren Beyond Journey's End S01E07 A Certain Someone 1080p WEB-DL.mkv"
+    )
+    assert parsed.clean_title == "Frieren Beyond Journey's End"
+    assert parsed.episode == 7
+    assert parsed.media_type == "tv"
+
+
+def test_partial_series_title_is_not_treated_as_exact_tmdb_match():
+    from app.services.confidence_scorer import calculate_match_confidence
+    from app.services.metadata_providers.base import CandidateMatch
+
+    parsed = parse_filename("Naruto.110.1080p.mkv")
+    candidate = CandidateMatch(
+        provider="tmdb", provider_id="999", title="Naruto Shippuden",
+        media_type="tv", release_year=2007, poster_path="/wrong-poster.jpg",
+        overview="Different series",
+    )
+    # The parser should identify the absolute episode and matching should not
+    # mistake a franchise-prefix title for an exact match.
+    assert parsed.clean_title == "Naruto"
+    assert parsed.media_type == "tv"
+    assert calculate_match_confidence(parsed, candidate) < 0.86

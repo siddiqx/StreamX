@@ -12,6 +12,8 @@ def normalize_title_for_comparison(title: str) -> str:
     s = title.lower()
     s = re.sub(r"[^\w\s]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
+    # Leading articles are not identity-bearing in provider titles.
+    s = re.sub(r"^(?:the|a|an)\s+", "", s)
     return s
 
 
@@ -33,7 +35,11 @@ def compute_string_similarity(a: str, b: str) -> float:
         jaccard = len(words_a & words_b) / len(words_a | words_b)
         overlap = len(words_a & words_b) / min(len(words_a), len(words_b))
         if norm_a in norm_b or norm_b in norm_a or overlap >= 0.99:
-            ratio = max(ratio, 0.90)
+            # A contained title is not automatically the same work: "Naruto"
+            # and "Naruto Shippuden" are distinct TMDB entities. Article-only
+            # differences were already normalized above; keep other partial
+            # matches below the automatic-match threshold.
+            ratio = max(ratio, 0.75)
         else:
             ratio = max(ratio, (ratio + jaccard) / 2)
 
@@ -102,7 +108,7 @@ def calculate_match_confidence(parsed: ParsedMedia, candidate: CandidateMatch) -
 
 
 def rank_candidates(
-    parsed: ParsedMedia, candidates: list[CandidateMatch], high_threshold: float = 0.80, low_threshold: float = 0.35
+    parsed: ParsedMedia, candidates: list[CandidateMatch], high_threshold: float = 0.86, low_threshold: float = 0.35
 ) -> Tuple[Optional[CandidateMatch], float, str]:
     """Score all candidates and return (best_candidate, best_score, status).
 

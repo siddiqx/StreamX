@@ -565,3 +565,35 @@ async def test_no_poster_returns_none():
 
         poster = get_media_poster_url(media, None)
     assert poster is None
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_franchise_prefix_does_not_attach_wrong_tmdb_poster():
+    """A related franchise title must not become the episode's canonical entity."""
+    service = MetadataService()
+    mid = await _make_media("Naruto.110.1080p.mkv")
+    wrong_candidate = CandidateMatch(
+        provider="tmdb",
+        provider_id="99999",
+        title="Naruto Shippuden",
+        media_type="tv",
+        release_year=2007,
+        poster_path="/wrong-poster.jpg",
+        overview="A different series in the same franchise.",
+        popularity=1000.0,
+    )
+
+    with patch.object(service.provider, "is_configured", return_value=True), \
+         patch.object(service.provider, "search", new_callable=AsyncMock, return_value=[wrong_candidate]), \
+         patch.object(service.provider, "get_details", new_callable=AsyncMock) as get_details:
+        result = await service.process_media_metadata(mid)
+
+    assert result is True
+    get_details.assert_not_awaited()
+    async with AsyncSessionLocal() as session:
+        media = await session.get(Media, mid)
+        assert media.metadata_entity_id is None
+        assert media.metadata_status == MetadataStatus.LOW_CONFIDENCE
+        assert media.poster_url is None
+        assert media.episode == 110
+        assert media.media_type == "ANIME_EPISODE" or media.media_type == "TV_EPISODE"
