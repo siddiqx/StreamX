@@ -25,10 +25,11 @@ from app.db.models import (
 from app.services.confidence_scorer import calculate_match_confidence, rank_candidates
 from app.services.metadata_providers.base import CandidateMatch, CanonicalMetadata
 from app.services.metadata_providers.tmdb import tmdb_provider
+from app.services.metadata_providers.anilist import anilist_provider
 from app.utils.filename_parser import ParsedMedia, parse_filename
 from app.utils.image_resolver import get_media_backdrop_url, get_media_poster_url
 from app.utils.logging import log_event, logger
-from app.utils.media_classifier import classify_media, is_media_file
+from app.utils.media_classifier import classify_media, has_anime_signals, is_media_file
 
 
 class MetadataService:
@@ -201,8 +202,14 @@ class MetadataService:
             episode=parsed.episode,
         )
 
-        if not self.provider.is_configured():
-            logger.info("Metadata provider not configured. Marking media as PENDING/RETRYING.")
+        anime_hint = has_anime_signals(parsed, raw_filename=media.filename)
+        # Episodic filenames also get an AniList pass: this catches anime whose
+        # Telegram filename has no fansub tag, while confidence scoring prevents
+        # a weak anime-title collision from being accepted.
+        providers = [anilist_provider, self.provider] if (anime_hint or parsed.episode is not None or parsed.season is not None) else [self.provider]
+        providers = [provider for provider in providers if provider.is_configured()]
+        if not providers:
+            logger.info("Metadata providers are not configured. Marking media as RETRYING.")
             async with AsyncSessionLocal() as session:
                 m = await session.get(Media, media_id)
                 if m and not m.metadata_locked:
@@ -227,24 +234,25 @@ class MetadataService:
 
             candidates_by_id = {}
             best_cand, confidence, status_str = None, 0.0, "NOT_FOUND"
-            for index, query in enumerate(query_variants[:3]):
-                found = await self.provider.search(
-                    query=query,
-                    year=parsed.year,
-                    media_type=parsed.media_type,
-                )
-                for candidate in found:
-                    key = (candidate.media_type, str(candidate.provider_id))
-                    existing = candidates_by_id.get(key)
-                    if existing is None or calculate_match_confidence(parsed, candidate) > calculate_match_confidence(parsed, existing):
-                        candidates_by_id[key] = candidate
+            for provider in providers:
+                for index, query in enumerate(query_variants[:3]):
+                    found = await provider.search(
+                        query=query,
+                        year=parsed.year,
+                        media_type=parsed.media_type,
+                    )
+                    for candidate in found:
+                        key = (candidate.provider, candidate.media_type, str(candidate.provider_id))
+                        existing = candidates_by_id.get(key)
+                        if existing is None or calculate_match_confidence(parsed, candidate) > calculate_match_confidence(parsed, existing):
+                            candidates_by_id[key] = candidate
 
-                best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
-                # Only stop early for an unambiguous, high-confidence match.
-                if status_str == "MATCHED" and confidence >= 0.88:
-                    break
-                # Avoid unnecessary API calls when the first search is clearly good.
-                if index == 0 and status_str == "MATCHED":
+                    best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
+                    # Keep searching the second catalogue unless the first result
+                    # is both strong and has usable poster artwork.
+                    if status_str == "MATCHED" and confidence >= 0.86 and best_cand and best_cand.poster_path:
+                        break
+                if status_str == "MATCHED" and confidence >= 0.86 and best_cand and best_cand.poster_path:
                     break
 
             log_event(
@@ -296,7 +304,8 @@ class MetadataService:
                     return True
 
                 # Fetch full canonical details for best candidate
-                details = await self.provider.get_details(
+                selected_provider = anilist_provider if best_cand.provider == "anilist" else self.provider
+                details = await selected_provider.get_details(
                     provider_id=best_cand.provider_id,
                     media_type=best_cand.media_type,
                 )
@@ -320,7 +329,8 @@ class MetadataService:
                 m.media_type = taxonomy.value
 
                 # Set backwards-compatible poster and backdrop urls
-                if details.poster_path and not m.poster_url:
+                if details.poster_path and not m.poster_override:
+                    # Refresh stale/empty cached URLs on reprocessing; never overwrite manual overrides.
                     m.poster_url = details.full_poster_url()
                 if details.backdrop_path:
                     meta = json.loads(m.metadata_json or "{}")
@@ -380,10 +390,12 @@ class MetadataService:
                 "release_date": c.release_date,
                 "overview": c.overview,
                 "poster_url": (
-                    f"https://image.tmdb.org/t/p/w342{c.poster_path}" if c.poster_path else None
+                    c.poster_path if c.poster_path and c.poster_path.startswith(("http://", "https://"))
+                    else f"https://image.tmdb.org/t/p/w342{c.poster_path}" if c.poster_path else None
                 ),
                 "backdrop_url": (
-                    f"https://image.tmdb.org/t/p/w780{c.backdrop_path}" if c.backdrop_path else None
+                    c.backdrop_path if c.backdrop_path and c.backdrop_path.startswith(("http://", "https://"))
+                    else f"https://image.tmdb.org/t/p/w780{c.backdrop_path}" if c.backdrop_path else None
                 ),
                 "rating": c.rating,
                 "confidence": conf,
