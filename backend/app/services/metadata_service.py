@@ -347,6 +347,14 @@ class MetadataService:
                 taxonomy, cat = classify_media(parsed, details, raw_filename=m.filename, mime_type=m.mime_type)
                 entity = await self.get_or_create_metadata_entity(details, taxonomy, session)
 
+                # Search results sometimes include artwork that the details endpoint omits.
+                # Keep that provider-returned artwork as a fallback instead of declaring the
+                # item matched while silently discarding its available poster.
+                if not entity.poster_path and best_cand.poster_path:
+                    entity.poster_path = best_cand.poster_path
+                if not entity.backdrop_path and best_cand.backdrop_path:
+                    entity.backdrop_path = best_cand.backdrop_path
+
                 m.metadata_entity_id = entity.id
                 m.metadata_confidence = confidence
                 m.metadata_status = (
@@ -358,9 +366,15 @@ class MetadataService:
                 m.media_type = taxonomy.value
 
                 # Set backwards-compatible poster and backdrop urls
-                if details.poster_path and not m.poster_override:
+                if not m.poster_override:
                     # Refresh stale/empty cached URLs on reprocessing; never overwrite manual overrides.
-                    m.poster_url = details.full_poster_url()
+                    if details.poster_path:
+                        m.poster_url = details.full_poster_url()
+                    elif best_cand.poster_path:
+                        if best_cand.poster_path.startswith(("http://", "https://")):
+                            m.poster_url = best_cand.poster_path
+                        else:
+                            m.poster_url = f"https://image.tmdb.org/t/p/w500/{best_cand.poster_path.lstrip('/')}"
                 if details.backdrop_path:
                     meta = json.loads(m.metadata_json or "{}")
                     meta["backdrop_url"] = details.full_backdrop_url()
