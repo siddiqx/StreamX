@@ -642,3 +642,64 @@ async def test_ambiguous_franchise_prefix_does_not_attach_wrong_tmdb_poster():
         assert media.poster_url is None
         assert media.episode == 110
         assert media.media_type == "ANIME_EPISODE" or media.media_type == "TV_EPISODE"
+
+
+
+# ---------------------------------------------------------------------------
+# Automatic matching recovery and artwork fallback
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_exact_title_is_not_left_in_review_due_to_fuzzy_runner_up():
+    """An exact, year/type-compatible canonical title should beat a fuzzy collision."""
+    from app.services.confidence_scorer import rank_candidates as real_rank_candidates
+
+    service = MetadataService()
+    mid = await _make_media("Interstellar.2014.1080p.mkv")
+    candidate = _movie_candidate()
+    details = _movie_details()
+
+    with patch.object(service.provider, "is_configured", return_value=True), \
+         patch.object(service.provider, "search", new_callable=AsyncMock, return_value=[candidate]), \
+         patch("app.services.metadata_service.rank_candidates",
+               return_value=(candidate, 0.82, "LOW_CONFIDENCE")), \
+         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=details), \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
+        result = await service.process_media_metadata(mid)
+
+    assert result is True
+    async with AsyncSessionLocal() as session:
+        media = await session.get(Media, mid)
+        assert media.metadata_status == MetadataStatus.MATCHED
+        assert media.metadata_entity_id is not None
+        assert media.poster_url and "poster.jpg" in media.poster_url
+
+
+@pytest.mark.asyncio
+async def test_search_result_poster_is_saved_when_details_omit_artwork():
+    """Search artwork must not be discarded when the canonical details response omits it."""
+    service = MetadataService()
+    mid = await _make_media("Interstellar.2014.1080p.mkv")
+    candidate = _movie_candidate()
+    details_without_artwork = CanonicalMetadata(
+        provider="tmdb", provider_id="157336", media_type="movie",
+        title="Interstellar", original_title="Interstellar",
+        release_date="2014-11-05", release_year=2014,
+        overview="A film about wormholes.", poster_path=None, backdrop_path=None,
+        rating=8.4, runtime=169, genres=["Adventure", "Drama"],
+        raw_metadata={"id": 157336, "original_language": "en", "origin_country": ["US"]},
+    )
+
+    with patch.object(service.provider, "is_configured", return_value=True), \
+         patch.object(service.provider, "search", new_callable=AsyncMock, return_value=[candidate]), \
+         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=details_without_artwork), \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
+        result = await service.process_media_metadata(mid)
+
+    assert result is True
+    async with AsyncSessionLocal() as session:
+        media = await session.get(Media, mid)
+        entity = await session.get(MetadataEntity, media.metadata_entity_id)
+        assert media.metadata_status == MetadataStatus.MATCHED
+        assert entity.poster_path == "/poster.jpg"
+        assert media.poster_url and "poster.jpg" in media.poster_url
