@@ -22,7 +22,7 @@ from app.db.models import (
     MetadataStatus,
     utc_now,
 )
-from app.services.confidence_scorer import calculate_match_confidence, rank_candidates
+from app.services.confidence_scorer import calculate_match_confidence, normalize_title_for_comparison, rank_candidates
 from app.services.metadata_providers.base import CandidateMatch, CanonicalMetadata
 from app.services.metadata_providers.tmdb import tmdb_provider
 from app.services.metadata_providers.anilist import anilist_provider
@@ -249,6 +249,34 @@ class MetadataService:
                             candidates_by_id[key] = candidate
 
                     best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
+
+                    # Prefer an exact canonical title over a near-title search collision.
+                    # An exact title (or exact original title) with compatible type/year
+                    # is stronger identity evidence than a fuzzy runner-up. Artwork is not
+                    # part of this decision; get_details below is allowed to fill it in.
+                    if best_cand and status_str == "LOW_CONFIDENCE":
+                        parsed_title = normalize_title_for_comparison(parsed.clean_title)
+                        candidate_titles = {
+                            normalize_title_for_comparison(best_cand.title),
+                            normalize_title_for_comparison(best_cand.original_title or ""),
+                        } - {""}
+                        exact_title = bool(parsed_title and parsed_title in candidate_titles)
+                        year_compatible = (
+                            not parsed.year
+                            or not best_cand.release_year
+                            or abs(parsed.year - best_cand.release_year) <= 1
+                        )
+                        type_compatible = parsed.media_type == best_cand.media_type
+                        if exact_title and year_compatible and type_compatible and confidence >= 0.80:
+                            status_str = "MATCHED"
+                            confidence = max(confidence, 0.90)
+                            log_event(
+                                "METADATA_EXACT_TITLE_OVERRIDE",
+                                media_id=media_id,
+                                candidate_title=best_cand.title,
+                                confidence=confidence,
+                            )
+
                     # Keep searching the second catalogue unless the first result
                     # is both strong and has usable poster artwork.
                     if status_str == "MATCHED" and confidence >= 0.86 and best_cand and best_cand.poster_path:
