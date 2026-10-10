@@ -129,6 +129,17 @@ export function extractEpisodeInfo(filename: string): {
   if (initialNoiseBoundary >= 0) working = working.slice(0, initialNoiseBoundary);
   working = working.replace(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g, ' ');
 
+  // Parse common Telegram ordering such as "The Fragrant Flower E08 [S01]".
+  const separateSeason = working.match(/\\bS\\s*0*(\\d{1,2})\\b/i);
+  const separateEpisode = working.match(/\\b(?:EP|Episode|Ep|E)\\s*0*(\\d{1,4})(?:v\\d+)?\\b/i);
+  if (separateEpisode && separateEpisode.index !== undefined) {
+    season = Number(separateSeason?.[1] || 1);
+    episode = Number(separateEpisode[1]);
+    isSeries = true;
+    seriesTitle = working.slice(0, separateEpisode.index).trim() || working.slice(separateEpisode.index + separateEpisode[0].length).trim();
+    working = seriesTitle;
+  }
+
   // Telegram names often place the episode marker before the series name.
   const leadingEpisode = working.match(/^\s*(?:S\s*(\d{1,2})\s*[._ -]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*/i);
   if (leadingEpisode) {
@@ -231,6 +242,15 @@ export function determineTaxonomy(
   const originCountry = (meta?.origin_country || '').toLowerCase();
   const origLang = (meta?.original_language || '').toLowerCase();
 
+  // Canonical provider evidence should correct stale generic-TV classifications.
+  // Japanese animation episodes belong on the Anime shelf even if an earlier
+  // enrichment pass stored TV_EPISODE.
+  const providerSaysAnime = genres.some(g => g.includes('animation') || g.includes('anime')) &&
+    (origLang === 'ja' || originCountry.includes('jp') || originCountry.includes('japan'));
+  if (providerSaysAnime && (epInfo.isSeries || meta?.media_type === 'tv')) {
+    return { category: 'Anime', isAnime: true, isSeries: true, isMovie: false, displayCategory: 'Anime' };
+  }
+
   // 1. Direct server taxonomy if available
   if (item.media_type) {
     const t = item.media_type.toUpperCase();
@@ -327,8 +347,9 @@ export function organizeMediaLibrary(
     if (isSeries) {
       if (item.canonical_metadata?.title) {
         groupTitle = item.canonical_metadata.title;
-        const provId = item.canonical_metadata.provider_id;
-        groupKey = provId ? `series_${taxonomy.category.toLowerCase()}_${provId}` : `series_${taxonomy.category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;
+        // Provider IDs differ between TMDB and AniList; canonical title is the
+        // stable series key so all episodes share one card regardless of provider.
+        groupKey = `series_${taxonomy.category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;
       } else {
         groupTitle = epInfo.seriesTitleCandidate || getMediaDisplayName(item);
         groupKey = `series_${taxonomy.category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;

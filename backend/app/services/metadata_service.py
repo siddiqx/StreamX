@@ -437,35 +437,66 @@ class MetadataService:
                 meta["backdrop_url"] = details.full_backdrop_url()
                 media.metadata_json = json.dumps(meta)
 
-            # Apply to sibling episodes if series
+            # Apply one canonical match/artwork to every sibling episode.
+            # Compare normalized series names after removing episode/season/release
+            # markers; parser clean_title can differ between E08, S01 EP08 and
+            # absolute-numbered Telegram releases.
             if apply_to_series and taxonomy in (
                 MediaTaxonomy.TV_SERIES,
                 MediaTaxonomy.TV_EPISODE,
                 MediaTaxonomy.ANIME_SERIES,
                 MediaTaxonomy.ANIME_EPISODE,
             ):
-                # Find sibling files matching clean title or same series
-                series_query = parsed.clean_title
-                stmt = select(Media).where(
-                    Media.id != media_id,
-                    Media.metadata_locked == False,
-                )
-                res = await session.execute(stmt)
-                all_unlocked = res.scalars().all()
-                for sibling in all_unlocked:
-                    sib_parsed = parse_filename(sibling.filename)
-                    if sib_parsed.clean_title.lower() == series_query.lower() or (
-                        sib_parsed.episode is not None and sib_parsed.clean_title.lower().startswith(series_query.lower()[:8])
-                    ):
-                        sibling_tax, sibling_cat = classify_media(sib_parsed, details, raw_filename=sibling.filename)
-                        sibling.metadata_entity_id = entity.id
-                        sibling.metadata_status = MetadataStatus.MANUAL
-                        sibling.metadata_confidence = 1.0
-                        sibling.metadata_locked = True
-                        sibling.category = sibling_cat
-                        sibling.media_type = sibling_tax.value
-                        if details.poster_path and not sibling.poster_override:
-                            sibling.poster_url = details.full_poster_url()
+                def series_key(filename: str) -> str:
+                    stem = filename.rsplit("/", 1)[-1].rsplit("\\\\", 1)[-1]
+                    stem = re.sub(r"\\.[^.]+$", "", stem)
+                    stem = re.sub(r"(?<!\\w)@[A-Za-z0-9_]{2,}", " ", stem)
+                    stem = re.sub(r"\\[[^\\]]*\\]|\\([^)]*\\)|\\{[^}]*\\}", " ", stem)
+                    stem = re.sub(
+                        r"\\bS\\s*\\d{1,2}\\s*[._ -]*E\\s*\\d{1,4}\\b|"
+                        r"\\bSeason\\s*\\d{1,2}\\s*(?:Episode|Ep)\\s*\\d{1,4}\\b|"
+                        r"\\b\\d{1,2}\\s*x\\s*\\d{1,4}\\b|"
+                        r"\\b(?:EP|Episode|Ep|E)\\s*\\d{1,4}\\b",
+                        " ",
+                        stem,
+                        flags=re.IGNORECASE,
+                    )
+                    stem = re.sub(
+                        r"\\b(2160p|1080p|720p|480p|WEB[ ._-]?DL|WEBRip|BluRay|x264|x265|HEVC|AAC|DTS|"
+                        r"Dual[ ._-]?Audio|SubsPlease|Erai[ ._-]?Raws|HorribleSubs|Crunchyroll)\\b.*$",
+                        " ",
+                        stem,
+                        flags=re.IGNORECASE,
+                    )
+                    stem = re.sub(r"[._-]+", " ", stem)
+                    return re.sub(r"\\s+", " ", stem).strip().casefold()
+
+                selected_key = series_key(media.filename)
+                sibling_stmt = select(Media).where(Media.id != media_id)
+                sibling_result = await session.execute(sibling_stmt)
+                for sibling in sibling_result.scalars().all():
+                    sibling_key = series_key(sibling.filename)
+                    if not selected_key or sibling_key != selected_key:
+                        continue
+                    # Preserve an explicitly chosen custom poster/backdrop, but
+                    # make the selected canonical series entity/artwork shared.
+                    sibling_parsed = parse_filename(sibling.filename)
+                    sibling_tax, sibling_cat = classify_media(
+                        sibling_parsed, details, raw_filename=sibling.filename
+                    )
+                    sibling.metadata_entity_id = entity.id
+                    sibling.metadata_status = MetadataStatus.MANUAL
+                    sibling.metadata_confidence = 1.0
+                    sibling.metadata_locked = True
+                    sibling.category = sibling_cat
+                    sibling.media_type = sibling_tax.value
+                    if details.poster_path and not sibling.poster_override:
+                        sibling.poster_url = details.full_poster_url()
+                    if details.backdrop_path and not sibling.backdrop_override:
+                        sibling_meta = json.loads(sibling.metadata_json or "{}")
+                        sibling_meta["backdrop_url"] = details.full_backdrop_url()
+                        sibling.metadata_json = json.dumps(sibling_meta)
+
 
             await session.commit()
             log_event(
