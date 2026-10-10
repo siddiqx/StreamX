@@ -329,7 +329,8 @@ class MetadataService:
                 m.media_type = taxonomy.value
 
                 # Set backwards-compatible poster and backdrop urls
-                if details.poster_path and not m.poster_url:
+                if details.poster_path and not m.poster_override:
+                    # Refresh stale/empty cached URLs on reprocessing; never overwrite manual overrides.
                     m.poster_url = details.full_poster_url()
                 if details.backdrop_path:
                     meta = json.loads(m.metadata_json or "{}")
