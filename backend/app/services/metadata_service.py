@@ -22,7 +22,7 @@ from app.db.models import (
     MetadataStatus,
     utc_now,
 )
-from app.services.confidence_scorer import calculate_match_confidence, rank_candidates
+from app.services.confidence_scorer import calculate_match_confidence, normalize_title_for_comparison, rank_candidates
 from app.services.metadata_providers.base import CandidateMatch, CanonicalMetadata
 from app.services.metadata_providers.tmdb import tmdb_provider
 from app.services.metadata_providers.anilist import anilist_provider
@@ -249,6 +249,34 @@ class MetadataService:
                             candidates_by_id[key] = candidate
 
                     best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
+
+                    # Prefer an exact canonical title over a near-title search collision.
+                    # An exact title (or exact original title) with compatible type/year
+                    # is stronger identity evidence than a fuzzy runner-up. Artwork is not
+                    # part of this decision; get_details below is allowed to fill it in.
+                    if best_cand and status_str == "LOW_CONFIDENCE":
+                        parsed_title = normalize_title_for_comparison(parsed.clean_title)
+                        candidate_titles = {
+                            normalize_title_for_comparison(best_cand.title),
+                            normalize_title_for_comparison(best_cand.original_title or ""),
+                        } - {""}
+                        exact_title = bool(parsed_title and parsed_title in candidate_titles)
+                        year_compatible = (
+                            not parsed.year
+                            or not best_cand.release_year
+                            or abs(parsed.year - best_cand.release_year) <= 1
+                        )
+                        type_compatible = parsed.media_type == best_cand.media_type
+                        if exact_title and year_compatible and type_compatible and confidence >= 0.80:
+                            status_str = "MATCHED"
+                            confidence = max(confidence, 0.90)
+                            log_event(
+                                "METADATA_EXACT_TITLE_OVERRIDE",
+                                media_id=media_id,
+                                candidate_title=best_cand.title,
+                                confidence=confidence,
+                            )
+
                     # Keep searching the second catalogue unless the first result
                     # is both strong and has usable poster artwork.
                     if status_str == "MATCHED" and confidence >= 0.86 and best_cand and best_cand.poster_path:
@@ -319,6 +347,14 @@ class MetadataService:
                 taxonomy, cat = classify_media(parsed, details, raw_filename=m.filename, mime_type=m.mime_type)
                 entity = await self.get_or_create_metadata_entity(details, taxonomy, session)
 
+                # Search results sometimes include artwork that the details endpoint omits.
+                # Keep that provider-returned artwork as a fallback instead of declaring the
+                # item matched while silently discarding its available poster.
+                if not entity.poster_path and best_cand.poster_path:
+                    entity.poster_path = best_cand.poster_path
+                if not entity.backdrop_path and best_cand.backdrop_path:
+                    entity.backdrop_path = best_cand.backdrop_path
+
                 m.metadata_entity_id = entity.id
                 m.metadata_confidence = confidence
                 m.metadata_status = (
@@ -330,9 +366,15 @@ class MetadataService:
                 m.media_type = taxonomy.value
 
                 # Set backwards-compatible poster and backdrop urls
-                if details.poster_path and not m.poster_override:
+                if not m.poster_override:
                     # Refresh stale/empty cached URLs on reprocessing; never overwrite manual overrides.
-                    m.poster_url = details.full_poster_url()
+                    if details.poster_path:
+                        m.poster_url = details.full_poster_url()
+                    elif best_cand.poster_path:
+                        if best_cand.poster_path.startswith(("http://", "https://")):
+                            m.poster_url = best_cand.poster_path
+                        else:
+                            m.poster_url = f"https://image.tmdb.org/t/p/w500/{best_cand.poster_path.lstrip('/')}"
                 if details.backdrop_path:
                     meta = json.loads(m.metadata_json or "{}")
                     meta["backdrop_url"] = details.full_backdrop_url()
