@@ -130,8 +130,8 @@ export function extractEpisodeInfo(filename: string): {
   working = working.replace(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g, ' ');
 
   // Parse common Telegram ordering such as "The Fragrant Flower E08 [S01]".
-  const separateSeason = working.match(/\\bS\\s*0*(\\d{1,2})\\b/i);
-  const separateEpisode = working.match(/\\b(?:EP|Episode|Ep|E)\\s*0*(\\d{1,4})(?:v\\d+)?\\b/i);
+  const separateSeason = working.match(/\bS\s*0*(\d{1,2})\b/i);
+  const separateEpisode = working.match(/\b(?:EP|Episode|Ep|E)\s*0*(\d{1,4})(?:v\d+)?\b/i);
   if (separateEpisode && separateEpisode.index !== undefined) {
     season = Number(separateSeason?.[1] || 1);
     episode = Number(separateEpisode[1]);

@@ -9,6 +9,8 @@ from app.utils.filename_parser import ParsedMedia
 
 def normalize_title_for_comparison(title: str) -> str:
     """Normalize string for fuzzy comparison: lowercased, punctuation stripped, single spaces."""
+    if not title:
+        return ""
     s = title.lower()
     s = re.sub(r"[^\w\s]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
@@ -49,24 +51,27 @@ def compute_string_similarity(a: str, b: str) -> float:
 def calculate_match_confidence(parsed: ParsedMedia, candidate: CandidateMatch) -> float:
     """Deterministic multi-factor confidence scoring between 0.0 and 1.0.
 
+    Identity Confidence is based solely on identity-bearing attributes (title,
+    original/alternate title, release year, media type). It must NOT depend on
+    whether artwork or overview already exists on the search candidate.
+
     Weights:
-    - Primary title similarity: 50%
-    - Year match: 25%
+    - Primary title similarity: 60%
+    - Alternative / Original title match: 15%
+    - Year match: 15%
     - Media type match: 10%
-    - Alternative / Original title match: 10%
-    - Artwork / Popularity signal: 5%
     """
-    # 1. Title Similarity (0.0 to 1.0) -> Weight 0.50
+    # 1. Title Similarity (0.0 to 1.0) -> Weight 0.60
     title_sim = compute_string_similarity(parsed.clean_title, candidate.title)
 
-    # 2. Alternative / Original Title match -> Weight 0.10
+    # 2. Alternative / Original Title match -> Weight 0.15
     orig_sim = 0.0
     if candidate.original_title:
         orig_sim = compute_string_similarity(parsed.clean_title, candidate.original_title)
     best_title_factor = max(title_sim, orig_sim)
 
-    # 3. Year Match -> Weight 0.25 (with penalty for major year discrepancy)
-    year_score = 0.5  # Neutral default if year unknown in either
+    # 3. Year Match -> Weight 0.15 (with penalty for major year discrepancy)
+    year_score = 0.8  # Neutral default if year unknown in file
     year_penalty = 0.0
     if parsed.year and candidate.release_year:
         diff = abs(parsed.year - candidate.release_year)
@@ -79,32 +84,50 @@ def calculate_match_confidence(parsed: ParsedMedia, candidate: CandidateMatch) -
         else:
             year_score = 0.0
             if diff > 3:
-                year_penalty = 0.15
+                year_penalty = 0.20
     elif not parsed.year and candidate.release_year:
-        # File has no year, candidate has year
-        year_score = 0.6
+        # File has no year, candidate has year - exact title match is strong identity
+        year_score = 0.85
 
     # 4. Media Type Match -> Weight 0.10
     type_score = 1.0 if parsed.media_type == candidate.media_type else 0.2
 
-    # 5. Artwork and Data Completeness -> Weight 0.05
-    bonus = 0.0
-    if candidate.poster_path:
-        bonus += 0.03
-    if candidate.overview:
-        bonus += 0.02
-
-    # Total score calculation
+    # Total identity score calculation
     score = (
-        (best_title_factor * 0.50)
-        + (year_score * 0.25)
+        (title_sim * 0.60)
+        + (orig_sim * 0.15)
+        + (year_score * 0.15)
         + (type_score * 0.10)
-        + (max(orig_sim, title_sim) * 0.10)
-        + bonus
         - year_penalty
     )
 
+    # If title match is exact (or orig_title match is exact) and media types align,
+    # ensure score reflects strong identity match even if file has no year.
+    if best_title_factor == 1.0 and type_score == 1.0 and year_penalty == 0.0:
+        score = max(score, 0.92)
+
     return round(min(1.0, max(0.0, score)), 4)
+
+
+def is_same_work(c1: CandidateMatch, c2: CandidateMatch) -> bool:
+    """Check if two search candidates represent the same underlying creative work across providers or entries."""
+    if c1.provider == c2.provider and str(c1.provider_id) == str(c2.provider_id):
+        return True
+
+    t1 = normalize_title_for_comparison(c1.title)
+    t2 = normalize_title_for_comparison(c2.title)
+    if t1 and t1 == t2:
+        return True
+
+    ot1 = normalize_title_for_comparison(c1.original_title) if c1.original_title else ""
+    ot2 = normalize_title_for_comparison(c2.original_title) if c2.original_title else ""
+    if ot1 and ot2 and ot1 == ot2:
+        return True
+
+    if (t1 and ot2 and t1 == ot2) or (ot1 and t2 and ot1 == t2):
+        return True
+
+    return False
 
 
 def rank_candidates(
@@ -112,9 +135,12 @@ def rank_candidates(
 ) -> Tuple[Optional[CandidateMatch], float, str]:
     """Score all candidates and return (best_candidate, best_score, status).
 
+    Deduplicates candidates that represent the same work before evaluating ambiguity,
+    preventing identical anime entries from TMDB and AniList from flagging each other as ambiguous.
+
     Status outcomes:
-    - MATCHED: best_score >= high_threshold
-    - LOW_CONFIDENCE: best_score < high_threshold but >= low_threshold (or multiple close candidates)
+    - MATCHED: best_score >= high_threshold and no distinct competing work within 0.02
+    - LOW_CONFIDENCE: best_score < high_threshold but >= low_threshold (or multiple close distinct works)
     - NOT_FOUND: no candidates or best_score < low_threshold
     """
     if not candidates:
@@ -130,8 +156,14 @@ def rank_candidates(
     best_cand, best_score = scored[0]
 
     if best_score >= high_threshold:
-        # Check if 2nd candidate is virtually identical score but completely different ID
-        if len(scored) > 1 and (best_score - scored[1][1]) < 0.02:
+        # Find the highest-scoring runner-up candidate that represents a DISTINCT work
+        competing_work = None
+        for cand, score in scored[1:]:
+            if not is_same_work(best_cand, cand):
+                competing_work = (cand, score)
+                break
+
+        if competing_work and (best_score - competing_work[1]) < 0.02:
             return best_cand, best_score, "LOW_CONFIDENCE"
         return best_cand, best_score, "MATCHED"
 

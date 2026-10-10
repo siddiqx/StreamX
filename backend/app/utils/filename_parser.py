@@ -62,9 +62,9 @@ def _remove_extension(value: str) -> str:
 
 
 def _strip_channel_tags(value: str) -> str:
-    # Telegram handles are metadata, wherever they occur. Remove the entire
-    # handle before underscores are converted to spaces.
-    value = re.sub(r"(?<!\w)@[A-Za-z0-9_]{2,}", " ", value)
+    # Telegram handles are metadata, wherever they occur.
+    value = re.sub(r"(?<!\w)@[A-Za-z0-9_\u2122\u00AE\u00A9]+", " ", value)
+    value = re.sub(r"[\u2122\u00AE\u00A9]", " ", value)
     value = re.sub(r"(?i)\b(?:https?://)?(?:t\.me|telegram\.me)/[A-Za-z0-9_]+", " ", value)
     return value
 
@@ -110,7 +110,7 @@ def parse_filename(filename: str) -> ParsedMedia:
     leading_group = re.match(r"^\s*\[([^\]]{1,35})\]\s*", working)
     if leading_group:
         label = leading_group.group(1).strip()
-        if not _NOISE_RE.search(label) and not re.search(r"(?i)^(?:s\d|ep\d|episode\s*\d|\d{3,})", label):
+        if label and not _NOISE_RE.search(label) and not re.search(r"(?i)^(?:s\d|ep\d|episode\s*\d|\d{3,})", label):
             release_group = label
             working = working[leading_group.end():]
 
@@ -136,16 +136,27 @@ def parse_filename(filename: str) -> ParsedMedia:
     episode = None
     media_type = "movie"
 
-    # Some Telegram channels put the episode marker before the series title.
-    leading_episode = re.match(
-        r"^\s*(?:S\s*(\d{1,2})\s*[ ._-]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*",
-        working, re.I
-    )
-    if leading_episode:
-        season = int(leading_episode.group(1) or 1)
-        episode = int(leading_episode.group(2))
+    # Separate season / episode parsing for noisy formats like "S1-E07", "S-01 EP-03", "E08 [S01]", etc.
+    sep_s = re.search(r"(?<![A-Za-z0-9])S\s*[-_.]?\s*(\d{1,2})(?!\d)", working, re.I)
+    sep_ep = re.search(r"(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
+    if sep_ep:
+        season = int(sep_s.group(1)) if sep_s else 1
+        episode = int(sep_ep.group(1))
         media_type = "tv"
-        working = working[leading_episode.end():]
+        working = re.sub(r"(?i)(?<![A-Za-z0-9])S\s*[-_.]?\s*\d{1,2}(?!\d)", " ", working)
+        working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*\d{1,4}(?:v\d+)?(?!\d)", " ", working)
+
+    if episode is None:
+        # Some Telegram channels put the episode marker before the series title.
+        leading_episode = re.match(
+            r"^\s*(?:S\s*(\d{1,2})\s*[ ._-]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*",
+            working, re.I
+        )
+        if leading_episode:
+            season = int(leading_episode.group(1) or 1)
+            episode = int(leading_episode.group(2))
+            media_type = "tv"
+            working = working[leading_episode.end():]
 
     if episode is None:
         for pattern in _EP_PATTERNS:
@@ -154,9 +165,6 @@ def parse_filename(filename: str) -> ParsedMedia:
                 season = int(match.group(1))
                 episode = int(match.group(2))
                 media_type = "tv"
-                # For the common "Title S01E02 Episode Name" format, only the
-                # title before the episode marker is identity-bearing. Prefix
-                # markers such as "1x02 Title" keep the trailing title instead.
                 if working[:match.start()].strip():
                     working = working[:match.start()]
                 else:
