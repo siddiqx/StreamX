@@ -242,6 +242,15 @@ export function determineTaxonomy(
   const originCountry = (meta?.origin_country || '').toLowerCase();
   const origLang = (meta?.original_language || '').toLowerCase();
 
+  // Canonical provider evidence should correct stale generic-TV classifications.
+  // Japanese animation episodes belong on the Anime shelf even if an earlier
+  // enrichment pass stored TV_EPISODE.
+  const providerSaysAnime = genres.some(g => g.includes('animation') || g.includes('anime')) &&
+    (origLang === 'ja' || originCountry.includes('jp') || originCountry.includes('japan'));
+  if (providerSaysAnime && (epInfo.isSeries || meta?.media_type === 'tv')) {
+    return { category: 'Anime', isAnime: true, isSeries: true, isMovie: false, displayCategory: 'Anime' };
+  }
+
   // 1. Direct server taxonomy if available
   if (item.media_type) {
     const t = item.media_type.toUpperCase();
