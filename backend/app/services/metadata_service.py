@@ -453,18 +453,20 @@ class MetadataService:
                     stem = re.sub(r"(?<!\\w)@[A-Za-z0-9_]{2,}", " ", stem)
                     stem = re.sub(r"\\[[^\\]]*\\]|\\([^)]*\\)|\\{[^}]*\\}", " ", stem)
                     stem = re.sub(
-                        r"(?i)\\bS\\s*\\d{1,2}\\s*[._ -]*E\\s*\\d{1,4}\\b|"
-                        r"(?i)\\bSeason\\s*\\d{1,2}\\s*(?:Episode|Ep)\\s*\\d{1,4}\\b|"
-                        r"(?i)\\b\\d{1,2}\\s*x\\s*\\d{1,4}\\b|"
-                        r"(?i)\\b(?:EP|Episode|Ep|E)\\s*\\d{1,4}\\b",
+                        r"\\bS\\s*\\d{1,2}\\s*[._ -]*E\\s*\\d{1,4}\\b|"
+                        r"\\bSeason\\s*\\d{1,2}\\s*(?:Episode|Ep)\\s*\\d{1,4}\\b|"
+                        r"\\b\\d{1,2}\\s*x\\s*\\d{1,4}\\b|"
+                        r"\\b(?:EP|Episode|Ep|E)\\s*\\d{1,4}\\b",
                         " ",
                         stem,
+                        flags=re.IGNORECASE,
                     )
                     stem = re.sub(
-                        r"(?i)\\b(2160p|1080p|720p|480p|WEB[ ._-]?DL|WEBRip|BluRay|x264|x265|HEVC|AAC|DTS|"
+                        r"\\b(2160p|1080p|720p|480p|WEB[ ._-]?DL|WEBRip|BluRay|x264|x265|HEVC|AAC|DTS|"
                         r"Dual[ ._-]?Audio|SubsPlease|Erai[ ._-]?Raws|HorribleSubs|Crunchyroll)\\b.*$",
                         " ",
                         stem,
+                        flags=re.IGNORECASE,
                     )
                     stem = re.sub(r"[._-]+", " ", stem)
                     return re.sub(r"\\s+", " ", stem).strip().casefold()
