@@ -652,8 +652,6 @@ async def test_ambiguous_franchise_prefix_does_not_attach_wrong_tmdb_poster():
 @pytest.mark.asyncio
 async def test_exact_title_is_not_left_in_review_due_to_fuzzy_runner_up():
     """An exact, year/type-compatible canonical title should beat a fuzzy collision."""
-    from app.services.confidence_scorer import rank_candidates as real_rank_candidates
-
     service = MetadataService()
     mid = await _make_media("Interstellar.2014.1080p.mkv")
     candidate = _movie_candidate()
