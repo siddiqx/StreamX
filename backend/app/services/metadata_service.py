@@ -250,9 +250,9 @@ class MetadataService:
                     best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
                     # Keep searching the second catalogue unless the first result
                     # is both strong and has usable poster artwork.
-                    if status_str == "MATCHED" and confidence >= 0.92 and best_cand and best_cand.poster_path:
+                    if status_str == "MATCHED" and confidence >= 0.86 and best_cand and best_cand.poster_path:
                         break
-                if status_str == "MATCHED" and confidence >= 0.92 and best_cand and best_cand.poster_path:
+                if status_str == "MATCHED" and confidence >= 0.86 and best_cand and best_cand.poster_path:
                     break
 
             log_event(
