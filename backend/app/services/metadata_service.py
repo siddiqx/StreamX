@@ -35,6 +35,7 @@ from app.utils.media_classifier import classify_media, has_anime_signals, is_med
 class MetadataService:
     def __init__(self):
         self.provider = tmdb_provider
+        self.anilist_provider = anilist_provider
 
     async def enqueue_media_for_enrichment(self, media_id: int, session: Optional[AsyncSession] = None) -> MetadataJob:
         """Create or schedule a metadata job for a given media row."""
@@ -72,7 +73,7 @@ class MetadataService:
     async def get_or_create_metadata_entity(
         self, details: CanonicalMetadata, taxonomy: MediaTaxonomy, session: AsyncSession
     ) -> MetadataEntity:
-        """Deduplicate metadata entities: reuse existing entity if tmdb_id already cataloged.
+        """Deduplicate metadata entities: reuse existing entity if provider_id already cataloged.
 
         If the existing entity has stale or missing fields (poster, backdrop, title, overview,
         genres, rating), update them from the fresh provider details so all media items
@@ -206,7 +207,7 @@ class MetadataService:
         # Episodic filenames also get an AniList pass: this catches anime whose
         # Telegram filename has no fansub tag, while confidence scoring prevents
         # a weak anime-title collision from being accepted.
-        providers = [anilist_provider, self.provider] if (anime_hint or parsed.episode is not None or parsed.season is not None) else [self.provider]
+        providers = [self.anilist_provider, self.provider] if (anime_hint or parsed.episode is not None or parsed.season is not None) else [self.provider]
         providers = [provider for provider in providers if provider.is_configured()]
         if not providers:
             logger.info("Metadata providers are not configured. Marking media as RETRYING.")
@@ -221,7 +222,7 @@ class MetadataService:
             # Search the parser's canonical title first. If that is not a clear
             # match, try a small set of deterministic variants and rank the combined
             # candidate pool once. Never let a noisy Telegram filename force a
-            # single weak TMDB result into the library.
+            # single weak result into the library.
             query_variants = []
             for query in (
                 parsed.clean_title,
@@ -281,7 +282,7 @@ class MetadataService:
                     m.release_group = parsed.release_group
 
                 if not best_cand or status_str != "MATCHED":
-                    # Do not attach a speculative TMDB entity: a wrong poster/title
+                    # Do not attach a speculative entity: a wrong poster/title
                     # is worse than temporarily showing a clean filename fallback.
                     taxonomy, cat = classify_media(parsed, None, raw_filename=m.filename, mime_type=m.mime_type)
                     m.category = cat
@@ -304,7 +305,7 @@ class MetadataService:
                     return True
 
                 # Fetch full canonical details for best candidate
-                selected_provider = anilist_provider if best_cand.provider == "anilist" else self.provider
+                selected_provider = self.anilist_provider if best_cand.provider == "anilist" else self.provider
                 details = await selected_provider.get_details(
                     provider_id=best_cand.provider_id,
                     media_type=best_cand.media_type,
@@ -403,6 +404,13 @@ class MetadataService:
         results.sort(key=lambda x: x["confidence"], reverse=True)
         return results
 
+    def get_series_key(self, filename: str) -> str:
+        """Deterministic normalized series key from filename clean title."""
+        parsed = parse_filename(filename)
+        clean = parsed.clean_title.casefold()
+        clean = re.sub(r"^(?:the|a|an)\s+", "", clean)
+        return re.sub(r"[^\w]", "", clean)
+
     async def manually_select_metadata(
         self, media_id: int, provider_id: str, media_type: str = "movie", apply_to_series: bool = True
     ) -> bool:
@@ -438,44 +446,17 @@ class MetadataService:
                 media.metadata_json = json.dumps(meta)
 
             # Apply one canonical match/artwork to every sibling episode.
-            # Compare normalized series names after removing episode/season/release
-            # markers; parser clean_title can differ between E08, S01 EP08 and
-            # absolute-numbered Telegram releases.
             if apply_to_series and taxonomy in (
                 MediaTaxonomy.TV_SERIES,
                 MediaTaxonomy.TV_EPISODE,
                 MediaTaxonomy.ANIME_SERIES,
                 MediaTaxonomy.ANIME_EPISODE,
             ):
-                def series_key(filename: str) -> str:
-                    stem = filename.rsplit("/", 1)[-1].rsplit("\\\\", 1)[-1]
-                    stem = re.sub(r"\\.[^.]+$", "", stem)
-                    stem = re.sub(r"(?<!\\w)@[A-Za-z0-9_]{2,}", " ", stem)
-                    stem = re.sub(r"\\[[^\\]]*\\]|\\([^)]*\\)|\\{[^}]*\\}", " ", stem)
-                    stem = re.sub(
-                        r"\\bS\\s*\\d{1,2}\\s*[._ -]*E\\s*\\d{1,4}\\b|"
-                        r"\\bSeason\\s*\\d{1,2}\\s*(?:Episode|Ep)\\s*\\d{1,4}\\b|"
-                        r"\\b\\d{1,2}\\s*x\\s*\\d{1,4}\\b|"
-                        r"\\b(?:EP|Episode|Ep|E)\\s*\\d{1,4}\\b",
-                        " ",
-                        stem,
-                        flags=re.IGNORECASE,
-                    )
-                    stem = re.sub(
-                        r"\\b(2160p|1080p|720p|480p|WEB[ ._-]?DL|WEBRip|BluRay|x264|x265|HEVC|AAC|DTS|"
-                        r"Dual[ ._-]?Audio|SubsPlease|Erai[ ._-]?Raws|HorribleSubs|Crunchyroll)\\b.*$",
-                        " ",
-                        stem,
-                        flags=re.IGNORECASE,
-                    )
-                    stem = re.sub(r"[._-]+", " ", stem)
-                    return re.sub(r"\\s+", " ", stem).strip().casefold()
-
-                selected_key = series_key(media.filename)
+                selected_key = self.get_series_key(media.filename)
                 sibling_stmt = select(Media).where(Media.id != media_id)
                 sibling_result = await session.execute(sibling_stmt)
                 for sibling in sibling_result.scalars().all():
-                    sibling_key = series_key(sibling.filename)
+                    sibling_key = self.get_series_key(sibling.filename)
                     if not selected_key or sibling_key != selected_key:
                         continue
                     # Preserve an explicitly chosen custom poster/backdrop, but
@@ -496,7 +477,6 @@ class MetadataService:
                         sibling_meta = json.loads(sibling.metadata_json or "{}")
                         sibling_meta["backdrop_url"] = details.full_backdrop_url()
                         sibling.metadata_json = json.dumps(sibling_meta)
-
 
             await session.commit()
             log_event(
@@ -564,15 +544,34 @@ class MetadataService:
             log_event("METADATA_MANUALLY_PATCHED", media_id=media_id)
             return True
 
-    async def set_poster_override(self, media_id: int, poster_url: Optional[str]) -> bool:
-        """Set or clear manual poster override."""
+    async def set_poster_override(self, media_id: int, poster_url: Optional[str], apply_to_series: bool = True) -> bool:
+        """Set or clear manual poster override (propagates to series siblings if episodic)."""
         async with AsyncSessionLocal() as session:
             media = await session.get(Media, media_id)
             if not media:
                 return False
-            media.poster_override = poster_url.strip() if (poster_url and poster_url.strip()) else None
+
+            val = poster_url.strip() if (poster_url and poster_url.strip()) else None
+            media.poster_override = val
             media.metadata_locked = True
             media.metadata_status = MetadataStatus.MANUAL
+
+            if apply_to_series and media.media_type in (
+                MediaTaxonomy.TV_SERIES.value,
+                MediaTaxonomy.TV_EPISODE.value,
+                MediaTaxonomy.ANIME_SERIES.value,
+                MediaTaxonomy.ANIME_EPISODE.value,
+            ):
+                selected_key = self.get_series_key(media.filename)
+                if selected_key:
+                    sibling_stmt = select(Media).where(Media.id != media_id)
+                    sibling_result = await session.execute(sibling_stmt)
+                    for sibling in sibling_result.scalars().all():
+                        if self.get_series_key(sibling.filename) == selected_key:
+                            sibling.poster_override = val
+                            sibling.metadata_locked = True
+                            sibling.metadata_status = MetadataStatus.MANUAL
+
             await session.commit()
             log_event("POSTER_OVERRIDE_UPDATED", media_id=media_id, poster_url=media.poster_override)
             return True

@@ -8,6 +8,7 @@
 - Backfill of records missing metadata or images
 - Incorrectly matched records and locked records during backfill
 - API serialization of canonical title/year/overview and poster/backdrop URLs
+- Manual series-wide selection propagation to all sibling episodes
 """
 
 from unittest.mock import AsyncMock, patch
@@ -134,7 +135,8 @@ async def test_enrich_movie_success():
 
     with patch.object(service.provider, "is_configured", return_value=True), \
          patch.object(service.provider, "search", new_callable=AsyncMock, return_value=[_movie_candidate()]), \
-         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=_movie_details()):
+         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=_movie_details()), \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
 
         result = await service.process_media_metadata(mid)
 
@@ -172,7 +174,8 @@ async def test_tv_search_routing_for_episodic_file():
 
     with patch.object(service.provider, "is_configured", return_value=True), \
          patch.object(service.provider, "search", side_effect=capture_search), \
-         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=_tv_details()):
+         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=_tv_details()), \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
 
         await service.process_media_metadata(mid)
 
@@ -186,7 +189,7 @@ async def test_tv_search_routing_for_episodic_file():
 
 @pytest.mark.asyncio
 async def test_anime_classification_from_provider_genres():
-    """'[] [S 01] [EP 01] [] Elfen Lied.mkv' must be classified ANIME_EPISODE, not MOVIE."""
+    """'[] [S 01] [EP 01] [] Elfen Lied.mkv' must be classified ANIME_EPISODE."""
     service = MetadataService()
     mid = await _make_media("[] [S 01] [EP 01] [] Elfen Lied.mkv")
 
@@ -199,7 +202,8 @@ async def test_anime_classification_from_provider_genres():
                           backdrop_path="/eb.jpg", rating=7.9, popularity=50.0,
                       )]), \
          patch.object(service.provider, "get_details", new_callable=AsyncMock,
-                      return_value=_anime_details()):
+                      return_value=_anime_details()), \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
 
         result = await service.process_media_metadata(mid)
 
@@ -208,6 +212,44 @@ async def test_anime_classification_from_provider_genres():
         m = await session.get(Media, mid)
         assert m.category == "Anime", f"Expected 'Anime', got {m.category!r}"
         assert "ANIME" in (m.media_type or ""), f"Expected ANIME taxonomy, got {m.media_type!r}"
+
+
+# ---------------------------------------------------------------------------
+# Manual selection series propagation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_manually_select_metadata_propagates_to_intended_siblings():
+    """Manually selecting metadata for one episode must update all sibling episodes in the series."""
+    service = MetadataService()
+    ep1_id = await _make_media("The Fragrant Flower Blooms With Dignity E01 [S01].mkv", category="Anime")
+    ep2_id = await _make_media("[SubsPlease] The Fragrant Flower Blooms With Dignity - 07 (1080p) [A1B2C3D4].mkv", category="Anime")
+
+    details = CanonicalMetadata(
+        provider="tmdb", provider_id="250000", media_type="tv",
+        title="The Fragrant Flower Blooms With Dignity",
+        original_title="薫る花は凛と咲く",
+        release_date="2025-01-01", release_year=2025,
+        overview="Anime series overview.",
+        poster_path="/fragrant.jpg", backdrop_path="/fragrant_bg.jpg",
+        rating=8.9, runtime=24,
+        genres=["Animation", "Romance"],
+        raw_metadata={"id": 250000, "original_language": "ja", "origin_country": ["JP"]},
+    )
+
+    with patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=details):
+        success = await service.manually_select_metadata(ep1_id, "250000", "tv", apply_to_series=True)
+
+    assert success is True
+    async with AsyncSessionLocal() as session:
+        m1 = await session.get(Media, ep1_id)
+        m2 = await session.get(Media, ep2_id)
+        assert m1.metadata_entity_id is not None
+        assert m2.metadata_entity_id == m1.metadata_entity_id
+        assert m1.metadata_status == MetadataStatus.MANUAL
+        assert m2.metadata_status == MetadataStatus.MANUAL
+        assert "fragrant.jpg" in m1.poster_url
+        assert "fragrant.jpg" in m2.poster_url
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +280,8 @@ async def test_stale_entity_gets_updated():
 
     with patch.object(service.provider, "is_configured", return_value=True), \
          patch.object(service.provider, "search", new_callable=AsyncMock, return_value=[_movie_candidate()]), \
-         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=full_details):
+         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=full_details), \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
 
         await service.process_media_metadata(mid)
 
@@ -262,7 +305,8 @@ async def test_entity_deduplication_and_caching():
 
     with patch.object(service.provider, "is_configured", return_value=True), \
          patch.object(service.provider, "search", new_callable=AsyncMock, return_value=[_movie_candidate()]), \
-         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=_movie_details()):
+         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=_movie_details()), \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
 
         await service.process_media_metadata(id1)
         await service.process_media_metadata(id2)
@@ -585,7 +629,8 @@ async def test_ambiguous_franchise_prefix_does_not_attach_wrong_tmdb_poster():
 
     with patch.object(service.provider, "is_configured", return_value=True), \
          patch.object(service.provider, "search", new_callable=AsyncMock, return_value=[wrong_candidate]), \
-         patch.object(service.provider, "get_details", new_callable=AsyncMock) as get_details:
+         patch.object(service.provider, "get_details", new_callable=AsyncMock) as get_details, \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
         result = await service.process_media_metadata(mid)
 
     assert result is True
