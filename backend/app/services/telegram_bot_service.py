@@ -16,14 +16,18 @@ import html
 import re
 from typing import Any, Dict, Optional, Tuple
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from app.config.settings import settings
 from app.db.database import AsyncSessionLocal
-from app.db.models import ErrorCategory, TelegramTransfer, TransferStatus
+from app.db.models import ErrorCategory, TelegramTransfer, TransferStatus, Media
 from app.utils.errors import StreamXError
 from app.utils.filenames import format_bytes, sanitize_filename
 from app.utils.logging import log_event, logger
+
+
+# Ingestion lock to prevent race conditions during rapid/concurrent update delivery
+_ingestion_lock = asyncio.Lock()
 
 
 # Maximum retry attempts for transient forward failures
@@ -483,52 +487,162 @@ class TelegramBotService:
             )
             return
 
-        # Record in SQLite
-        async with AsyncSessionLocal() as session:
-            transfer = TelegramTransfer(
-                telegram_chat_id=chat_id,
-                telegram_message_id=message_id,
-                telegram_file_id=file_id,
-                filename=filename,
-                size=file_size,
-                status=TransferStatus.QUEUED,
-                bytes_transferred=0,
-            )
-            session.add(transfer)
-            await session.commit()
-            await session.refresh(transfer)
-            transfer_id = transfer.id
+        safe_filename = html.escape(filename)
 
-        log_event("TRANSFER_RECORD_CREATED", transfer_id=transfer_id, filename=filename)
-
-        # Relay media into a location the MTProto worker can actually read.
-        # If the sender is the owner, MTProto can read the bot chat directly.
-        forwarded = None
-        if self.resolve_forward_target() is not None:
-            try:
-                forwarded = await self.forward_media_to_service(chat_id, message_id)
-            except StreamXError as e:
-                if is_owner:
-                    logger.warning(f"Forward failed ({e}), falling back to direct MTProto pickup for owner {chat_id}.")
-                    forwarded = None
-                else:
-                    await self._mark_transfer_failed(
-                        transfer_id, category=e.category, message=str(e)
+        async with _ingestion_lock:
+            async with AsyncSessionLocal() as session:
+                # 1. Deduplication: Check if media already exists in Google Drive (Media table)
+                existing_media = (
+                    await session.execute(
+                        select(Media).where(
+                            Media.filename == filename,
+                            or_(Media.size == file_size, file_size == 0),
+                        )
                     )
+                ).scalars().first()
+
+                if existing_media:
                     log_event(
-                        "FORWARD_FAILED_PERMANENT",
-                        transfer_id=transfer_id,
-                        error_category=e.category.value,
+                        "MEDIA_INGESTION_DUPLICATE_DRIVE",
                         filename=filename,
+                        size=file_size,
+                        drive_id=existing_media.drive_file_id,
                     )
                     await self.send_message(
                         chat_id=chat_id,
-                        text=self._failure_message(
-                            filename, transfer_id, e.category, "Upload could not be started."
+                        text=(
+                            "ℹ️ <b>StreamX — Duplicate Media Detected</b>\n\n"
+                            f"📁 <b>File:</b> <code>{safe_filename}</code>\n"
+                            f"📦 <b>Size:</b> {format_bytes(file_size)}\n"
+                            f"☁️ <b>Location:</b> Already exists in Google Drive (<code>{existing_media.drive_file_id}</code>)\n\n"
+                            "<i>Skipped upload to preserve Google Drive quota.</i>"
                         ),
                         reply_to_message_id=message_id,
                     )
                     return
+
+                # 2. Deduplication: Check if the exact message was already processed
+                existing_msg = (
+                    await session.execute(
+                        select(TelegramTransfer).where(
+                            TelegramTransfer.telegram_chat_id == chat_id,
+                            TelegramTransfer.telegram_message_id == message_id,
+                        )
+                    )
+                ).scalars().first()
+
+                if existing_msg:
+                    log_event("MEDIA_INGESTION_DUPLICATE_MSG", chat_id=chat_id, message_id=message_id)
+                    return
+
+                # 3. Deduplication: Check if an active transfer is currently in progress for this file
+                active_transfer = (
+                    await session.execute(
+                        select(TelegramTransfer).where(
+                            TelegramTransfer.filename == filename,
+                            or_(TelegramTransfer.size == file_size, file_size == 0),
+                            TelegramTransfer.status.in_([
+                                TransferStatus.QUEUED,
+                                TransferStatus.FETCHING_TELEGRAM,
+                                TransferStatus.UPLOADING_DRIVE,
+                                TransferStatus.VERIFYING,
+                                TransferStatus.RETRYING,
+                            ]),
+                        )
+                    )
+                ).scalars().first()
+
+                if active_transfer:
+                    log_event(
+                        "MEDIA_INGESTION_DUPLICATE_ACTIVE",
+                        filename=filename,
+                        size=file_size,
+                        transfer_id=active_transfer.id,
+                    )
+                    await self.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "⏳ <b>StreamX — Transfer Already in Progress</b>\n\n"
+                            f"📁 <b>File:</b> <code>{safe_filename}</code>\n"
+                            f"🏷️ <b>Transfer ID:</b> <code>#{active_transfer.id}</code>\n"
+                            f"📊 <b>Status:</b> <code>{active_transfer.status.value}</code>\n\n"
+                            "<i>Duplicate request ignored — this file is currently being processed.</i>"
+                        ),
+                        reply_to_message_id=message_id,
+                    )
+                    return
+
+                # 4. Deduplication: Check if a completed transfer already exists for this file
+                completed_transfer = (
+                    await session.execute(
+                        select(TelegramTransfer).where(
+                            TelegramTransfer.filename == filename,
+                            or_(TelegramTransfer.size == file_size, file_size == 0),
+                            TelegramTransfer.status == TransferStatus.COMPLETED,
+                        )
+                    )
+                ).scalars().first()
+
+                if completed_transfer:
+                    log_event(
+                        "MEDIA_INGESTION_DUPLICATE_COMPLETED",
+                        filename=filename,
+                        size=file_size,
+                        transfer_id=completed_transfer.id,
+                    )
+                    await self.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "✅ <b>StreamX — File Already Uploaded</b>\n\n"
+                            f"📁 <b>File:</b> <code>{safe_filename}</code>\n"
+                            f"🏷️ <b>Transfer ID:</b> <code>#{completed_transfer.id}</code>\n\n"
+                            "<i>This file was already successfully transferred to Google Drive. Duplicate upload ignored.</i>"
+                        ),
+                        reply_to_message_id=message_id,
+                    )
+                    return
+
+                # Record in SQLite
+                transfer = TelegramTransfer(
+                    telegram_chat_id=chat_id,
+                    telegram_message_id=message_id,
+                    telegram_file_id=file_id,
+                    filename=filename,
+                    size=file_size,
+                    status=TransferStatus.QUEUED,
+                    bytes_transferred=0,
+                )
+                session.add(transfer)
+                await session.commit()
+                await session.refresh(transfer)
+                transfer_id = transfer.id
+
+        log_event("TRANSFER_RECORD_CREATED", transfer_id=transfer_id, filename=filename)
+
+        # Relay media into a location the MTProto worker can actually read.
+        # If the sender is the owner, MTProto can read the bot chat directly (NO forwarding needed!).
+        forwarded = None
+        if not is_owner and self.resolve_forward_target() is not None:
+            try:
+                forwarded = await self.forward_media_to_service(chat_id, message_id)
+            except StreamXError as e:
+                await self._mark_transfer_failed(
+                    transfer_id, category=e.category, message=str(e)
+                )
+                log_event(
+                    "FORWARD_FAILED_PERMANENT",
+                    transfer_id=transfer_id,
+                    error_category=e.category.value,
+                    filename=filename,
+                )
+                await self.send_message(
+                    chat_id=chat_id,
+                    text=self._failure_message(
+                        filename, transfer_id, e.category, "Upload could not be started."
+                    ),
+                    reply_to_message_id=message_id,
+                )
+                return
 
         if forwarded is not None:
             fwd_chat_id, fwd_msg_id = forwarded
@@ -545,7 +659,6 @@ class TelegramBotService:
             )
 
         # Immediate acknowledgement to user
-        safe_filename = html.escape(filename)
         msg = (
             "🎬 <b>StreamX — Media Received</b>\n\n"
             f"📁 <b>File:</b> <code>{safe_filename}</code>\n"

@@ -225,6 +225,26 @@ class GoogleDriveService:
         self._show_folder_cache[cache_key] = folder_id
         return folder_id
 
+    async def find_existing_file(self, filename: str, folder_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Search Google Drive for an existing active file with the same name to prevent duplicates."""
+        service = await self.get_service()
+        loop = asyncio.get_running_loop()
+
+        def _search():
+            escaped_name = filename.replace("'", "\\'")
+            q = f"name = '{escaped_name}' and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+            if folder_id:
+                q += f" and '{folder_id}' in parents"
+            res = service.files().list(q=q, fields="files(id, name, size)", pageSize=1).execute()
+            files = res.get("files", [])
+            return files[0] if files else None
+
+        try:
+            return await loop.run_in_executor(None, _search)
+        except Exception as e:
+            logger.debug(f"Drive search for existing file '{filename}' encountered error: {e}")
+            return None
+
     async def create_resumable_upload_session(
         self,
         filename: str,

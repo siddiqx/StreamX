@@ -153,3 +153,62 @@ async def test_transfers_api(clean_db):
         data = res_single.json()
         assert data["filename"] == "Test_Episode_01.mkv"
         assert data["status"] == "QUEUED"
+
+
+@pytest.mark.asyncio
+async def test_bot_duplicate_media_ingestion_skipped(clean_db):
+    """Sending the same file twice (or via automatic forward) must not create duplicate transfers."""
+    from app.db.models import Media
+
+    bot = TelegramBotService(bot_token="test_token", owner_user_id=8142877259)
+
+    update1 = {
+        "update_id": 10,
+        "message": {
+            "message_id": 501,
+            "chat": {"id": 8142877259},
+            "from": {"id": 8142877259, "first_name": "Siddiq"},
+            "document": {
+                "file_id": "file_alpha_1",
+                "file_name": "What.If.S01E01.1080p.mkv",
+                "file_size": 500000000,
+            },
+        },
+    }
+
+    update_forwarded_duplicate = {
+        "update_id": 11,
+        "message": {
+            "message_id": 502,
+            "chat": {"id": 8142877259},
+            "from": {"id": 8142877259, "first_name": "Siddiq"},
+            "document": {
+                "file_id": "file_alpha_2",
+                "file_name": "What.If.S01E01.1080p.mkv",
+                "file_size": 500000000,
+            },
+        },
+    }
+
+    sent_messages = []
+    async def mock_send(chat_id, text, reply_to_message_id=None):
+        sent_messages.append((chat_id, text))
+        return True
+
+    with patch.object(bot, "send_message", side_effect=mock_send):
+        # 1. Process first update
+        await bot.process_update(update1)
+
+        # 2. Process duplicate update (automatic forward)
+        await bot.process_update(update_forwarded_duplicate)
+
+    # Verify only ONE transfer was created in SQLite
+    async with AsyncSessionLocal() as session:
+        transfers = (await session.execute(select(TelegramTransfer))).scalars().all()
+        assert len(transfers) == 1
+        assert transfers[0].filename == "What.If.S01E01.1080p.mkv"
+
+    # Verify the second response informed the user of duplicate / already active
+    assert len(sent_messages) == 2
+    assert "Media Received" in sent_messages[0][1]
+    assert "Transfer Already in Progress" in sent_messages[1][1] or "Duplicate" in sent_messages[1][1]

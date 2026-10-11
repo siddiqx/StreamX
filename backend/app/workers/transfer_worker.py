@@ -340,10 +340,10 @@ class TransferWorker:
                 await session.execute(
                     select(Media).where(
                         Media.filename == filename,
-                        Media.size == expected_size,
+                        or_(Media.size == expected_size, expected_size == 0),
                     )
                 )
-            ).scalar_one_or_none()
+            ).scalars().first()
 
             if existing_media:
                 log_event("DUPLICATE_MEDIA_SKIPPED", filename=filename, size=expected_size)
@@ -366,6 +366,36 @@ class TransferWorker:
                         "<i>Skipped re-upload to preserve Google Drive quota.</i>"
                     ),
                 )
+                return
+
+            # Check if another transfer for the same file was already completed or is currently running
+            sibling = (
+                await session.execute(
+                    select(TelegramTransfer).where(
+                        TelegramTransfer.filename == filename,
+                        or_(TelegramTransfer.size == expected_size, expected_size == 0),
+                        TelegramTransfer.id < transfer_id,
+                        TelegramTransfer.status.in_([
+                            TransferStatus.FETCHING_TELEGRAM,
+                            TransferStatus.UPLOADING_DRIVE,
+                            TransferStatus.VERIFYING,
+                            TransferStatus.COMPLETED,
+                        ]),
+                    )
+                )
+            ).scalars().first()
+
+            if sibling:
+                log_event("DUPLICATE_SIBLING_TRANSFER_SKIPPED", transfer_id=transfer_id, sibling_id=sibling.id)
+                stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                t = (await session.execute(stmt)).scalar_one_or_none()
+                if t:
+                    is_completed = sibling.status == TransferStatus.COMPLETED
+                    t.status = TransferStatus.COMPLETED if is_completed else TransferStatus.CANCELLED
+                    t.bytes_transferred = expected_size if is_completed else 0
+                    t.completed_at = utc_now()
+                    t.error_message = f"Deduplicated against transfer #{sibling.id}"
+                    await session.commit()
                 return
 
         # 2. Locate the media message via MTProto (forwarded copy for non-owners).
