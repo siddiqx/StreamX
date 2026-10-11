@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { MediaItem, TelegramTransfer, DeviceDownload } from './types';
 import type { MediaGroup } from './utils/mediaOrganizer';
-import { fetchMedia, fetchTransfers, getCachedMedia, getCachedTransfers, getDownloadUrl } from './api';
+import {
+  fetchMedia,
+  fetchTransfers,
+  getCachedMedia,
+  getCachedTransfers,
+  getDownloadUrl,
+  getLastApiHealth,
+  type ApiHealthStatus,
+} from './api';
 import { launchVlcWithTracking } from './utils/playerSettings';
 import { syncActiveWatchSession } from './utils/watchHistory';
 import { Navbar } from './components/Navbar';
@@ -20,6 +28,8 @@ export const App: React.FC = () => {
   // Stale-While-Revalidate: Instant 0ms load from localStorage cache
   const [media, setMedia] = useState<MediaItem[]>(getCachedMedia);
   const [transfers, setTransfers] = useState<TelegramTransfer[]>(getCachedTransfers);
+  const [apiHealth, setApiHealth] = useState<ApiHealthStatus>(getLastApiHealth);
+
   const [selectedGroup, setSelectedGroup] = useState<MediaGroup | null>(null);
   const [downloads, setDownloads] = useState<DeviceDownload[]>(() => {
     try {
@@ -49,6 +59,19 @@ export const App: React.FC = () => {
     window.addEventListener('streamx_toast', handleToast);
     return () => window.removeEventListener('streamx_toast', handleToast);
   }, []);
+
+  // API connectivity status listener
+  useEffect(() => {
+    const handleStatus = (e: Event) => {
+      const customEvent = e as CustomEvent<ApiHealthStatus>;
+      if (customEvent.detail) {
+        setApiHealth(customEvent.detail);
+      }
+    };
+    window.addEventListener('streamx_api_status', handleStatus);
+    return () => window.removeEventListener('streamx_api_status', handleStatus);
+  }, []);
+
 
   // Synchronize watch progress whenever user returns from VLC
   useEffect(() => {
@@ -253,7 +276,11 @@ export const App: React.FC = () => {
               setCurrentTab('library');
             }}
             onOpenTransfers={() => setIsTransfersOpen(true)}
+            apiHealth={apiHealth}
+            onNavigateSettings={() => setCurrentTab('settings')}
+            onRetry={refreshData}
           />
+
         )}
 
         {currentTab === 'search' && (

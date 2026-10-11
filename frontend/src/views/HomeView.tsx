@@ -2,8 +2,9 @@ import React, { useState, useMemo } from 'react';
 import {
   Play, Info, Radio, ArrowRight, Sparkles, Tv, Film,
   Star, Clock, Flame, Heart, Compass, Laugh,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, AlertCircle, Settings
 } from 'lucide-react';
+
 import type { MediaItem, TelegramTransfer } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
 import { organizeMediaLibrary } from '../utils/mediaOrganizer';
@@ -13,6 +14,7 @@ import {
   getMediaBackdropUrl,
   getMediaDisplayName,
   getMediaDisplayYear,
+  type ApiHealthStatus,
 } from '../api';
 
 import { getWatchHistory } from '../utils/watchHistory';
@@ -28,6 +30,9 @@ interface HomeViewProps {
   onPlayMedia: (item: MediaItem) => void;
   onViewAllLibrary: (category?: string) => void;
   onOpenTransfers: () => void;
+  apiHealth?: ApiHealthStatus;
+  onNavigateSettings?: () => void;
+  onRetry?: () => void;
 }
 
 const CARD_W = 'clamp(126px, 34vw, 150px)';
@@ -41,7 +46,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onPlayMedia,
   onViewAllLibrary,
   onOpenTransfers,
+  apiHealth,
+  onNavigateSettings,
+  onRetry,
 }) => {
+
   const [historyItems, setHistoryItems] = useState<WatchHistoryItem[]>(getWatchHistory);
 
   React.useEffect(() => {
@@ -573,17 +582,171 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </div>
           </div>
         </section>
+      ) : apiHealth && !apiHealth.ok ? (
+        <section
+          style={{
+            margin: '0 16px',
+            padding: '32px 20px',
+            textAlign: 'center',
+            background: 'linear-gradient(180deg, rgba(35, 14, 24, 0.75) 0%, rgba(15, 21, 32, 0.85) 100%)',
+            border: '1px solid rgba(244, 63, 94, 0.35)',
+            borderRadius: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '12px',
+            boxShadow: '0 8px 32px rgba(244, 63, 94, 0.12)',
+          }}
+          className="animate-fade-in"
+        >
+          <div
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '18px',
+              background: 'linear-gradient(135deg, #f43f5e, #e11d48)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 16px rgba(244, 63, 94, 0.35)',
+            }}
+          >
+            <AlertCircle size={28} color="#fff" />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+              {apiHealth.statusCode === 503
+                ? 'Backend Service Suspended on Render (HTTP 503)'
+                : 'Unable to Reach StreamX Backend Server'}
+            </h3>
+            <p
+              style={{
+                fontSize: '0.78rem',
+                color: '#fda4af',
+                marginTop: '4px',
+                fontFamily: 'monospace',
+                wordBreak: 'break-all',
+              }}
+            >
+              {apiHealth.url}
+            </p>
+          </div>
+          <p
+            style={{
+              fontSize: '0.8rem',
+              color: 'var(--text-muted)',
+              maxWidth: '420px',
+              lineHeight: 1.5,
+              margin: '0',
+            }}
+          >
+            {apiHealth.statusCode === 503
+              ? 'The cloud backend is currently suspended by its owner on Render. To stream videos and view metadata, resume the service on your Render dashboard or configure your active server in Settings.'
+              : 'The frontend could not connect to the backend server. Please check your internet connection or enter your active backend URL in Settings.'}
+          </p>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: '10px',
+              marginTop: '6px',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}
+          >
+            {onNavigateSettings && (
+              <button
+                onClick={onNavigateSettings}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                  color: '#fff',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 10px rgba(99, 102, 241, 0.35)',
+                }}
+              >
+                <Settings size={14} />
+                Configure Server in Settings
+              </button>
+            )}
+            {apiHealth.statusCode === 503 && (
+              <a
+                href="https://dashboard.render.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  color: '#fff',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                Render Dashboard
+              </a>
+            )}
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'transparent',
+                  color: 'var(--text-muted)',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        </section>
       ) : (
-        <section style={{
-          margin: '0 16px', padding: '40px 20px', textAlign: 'center',
-          background: 'rgba(15,21,32,0.6)', border: '1px solid var(--border-subtle)',
-          borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
-        }} className="animate-fade-in">
-          <div style={{
-            width: '56px', height: '56px', borderRadius: '18px',
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
+        <section
+          style={{
+            margin: '0 16px',
+            padding: '40px 20px',
+            textAlign: 'center',
+            background: 'rgba(15,21,32,0.6)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '12px',
+          }}
+          className="animate-fade-in"
+        >
+          <div
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '18px',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
             <Play size={26} color="#fff" fill="#fff" />
           </div>
           <p style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff' }}>No media found</p>
@@ -592,6 +755,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </p>
         </section>
       )}
+
 
       {/* Continue Watching Row (Active Watch Progress - Collapsed by Series) */}
       {continueWatchingList.length > 0 && (

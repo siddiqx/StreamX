@@ -87,10 +87,34 @@ export function setCachedTransfers(transfers: TelegramTransfer[]): void {
   } catch {}
 }
 
+export interface ApiHealthStatus {
+  ok: boolean;
+  statusCode?: number;
+  error?: string;
+  url: string;
+}
+
+let lastApiHealth: ApiHealthStatus = {
+  ok: true,
+  url: getApiBase(),
+};
+
+export function getLastApiHealth(): ApiHealthStatus {
+  return lastApiHealth;
+}
+
+export function reportApiStatus(status: ApiHealthStatus): void {
+  lastApiHealth = status;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('streamx_api_status', { detail: status }));
+  }
+}
+
 export async function fetchMedia(category?: string): Promise<MediaItem[]> {
+  const currentBase = getApiBase();
   const url = category
-    ? `${API_BASE}/media?category=${encodeURIComponent(category)}`
-    : `${API_BASE}/media`;
+    ? `${currentBase}/media?category=${encodeURIComponent(category)}`
+    : `${currentBase}/media`;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -101,16 +125,39 @@ export async function fetchMedia(category?: string): Promise<MediaItem[]> {
     });
     clearTimeout(timeoutId);
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      reportApiStatus({
+        ok: false,
+        statusCode: res.status,
+        error: res.status === 503 ? 'Service Suspended on Render (503)' : `HTTP Error ${res.status}`,
+        url: currentBase,
+      });
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    reportApiStatus({
+      ok: true,
+      statusCode: res.status,
+      url: currentBase,
+    });
+
     const data: MediaItem[] = await res.json();
     if (!category && Array.isArray(data) && data.length > 0) {
       setCachedMedia(data);
     }
     return data;
-  } catch (err) {
+  } catch (err: any) {
     console.warn('API error fetching media, serving cached library:', err);
-    // If API_BASE failed and wasn't the cloud backend, try fallback to cloud
-    if (API_BASE !== CLOUD_BACKEND_URL) {
+    if (!lastApiHealth.statusCode) {
+      reportApiStatus({
+        ok: false,
+        error: err?.message || 'Network connection failed',
+        url: currentBase,
+      });
+    }
+
+    // If custom API_BASE failed and wasn't the cloud backend, try fallback to cloud
+    if (currentBase !== CLOUD_BACKEND_URL) {
       try {
         const fallbackRes = await fetch(`${CLOUD_BACKEND_URL}/media`);
         if (fallbackRes.ok) {
@@ -125,6 +172,7 @@ export async function fetchMedia(category?: string): Promise<MediaItem[]> {
     return getCachedMedia();
   }
 }
+
 
 export async function fetchMediaById(mediaId: number): Promise<MediaItem | null> {
   try {
