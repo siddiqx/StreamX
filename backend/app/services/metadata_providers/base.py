@@ -20,6 +20,7 @@ class CandidateMatch:
     rating: Optional[float] = None
     genres: List[str] = field(default_factory=list)
     popularity: Optional[float] = None
+    synonyms: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -37,6 +38,7 @@ class CanonicalMetadata:
     rating: Optional[float] = None
     runtime: Optional[int] = None
     genres: List[str] = field(default_factory=list)
+    synonyms: List[str] = field(default_factory=list)
     raw_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def full_poster_url(self, size: str = "w500") -> Optional[str]:

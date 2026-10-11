@@ -78,11 +78,16 @@ def calculate_match_confidence(parsed: ParsedMedia, candidate: CandidateMatch) -
     - Media type match: 10%
     """
     # 1. Title Similarity (0.0 to 1.0) -> Weight 0.75
-    title_sim = compute_string_similarity(parsed.clean_title, candidate.title)
-    orig_sim = 0.0
+    title_candidates = [candidate.title]
     if candidate.original_title:
-        orig_sim = compute_string_similarity(parsed.clean_title, candidate.original_title)
-    best_title_factor = max(title_sim, orig_sim)
+        title_candidates.append(candidate.original_title)
+    if getattr(candidate, "synonyms", None):
+        title_candidates.extend(candidate.synonyms)
+
+    best_title_factor = max(
+        (compute_string_similarity(parsed.clean_title, t) for t in title_candidates if t),
+        default=0.0,
+    )
 
     # 2. Year Match -> Weight 0.15 (with penalty for major year discrepancy)
     year_score = 0.85  # Neutral default if year unknown in file
@@ -151,6 +156,21 @@ def is_same_work(c1: CandidateMatch, c2: CandidateMatch) -> bool:
         return True
 
     if (t1 and ot2 and t1 == ot2) or (ot1 and t2 and ot1 == t2):
+        return True
+
+    # Check shared synonyms
+    syn1 = {normalize_title_for_comparison(s) for s in getattr(c1, "synonyms", []) if s}
+    syn2 = {normalize_title_for_comparison(s) for s in getattr(c2, "synonyms", []) if s}
+    if syn1 and syn2 and (syn1 & syn2):
+        return True
+
+    # Strip season/part markers for cross-season franchise comparison
+    def strip_season_suffix(s: str) -> str:
+        return re.sub(r"\b(?:season|\d+(?:st|nd|rd|th)\s+season|part)\s*\d*\b", "", s, flags=re.I).strip()
+
+    bt1 = strip_season_suffix(t1)
+    bt2 = strip_season_suffix(t2)
+    if bt1 and bt2 and bt1 == bt2:
         return True
 
     return False

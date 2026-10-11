@@ -45,6 +45,7 @@ class AniListProvider(MetadataProvider):
             media(search: $search, type: ANIME, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
               id
               title { romaji english native }
+              synonyms
               format
               startDate { year month day }
               description(asHtml: false)
@@ -81,6 +82,7 @@ class AniListProvider(MetadataProvider):
                 rating=(item.get("averageScore") / 10) if item.get("averageScore") is not None else None,
                 genres=item.get("genres") or [],
                 popularity=float(item.get("popularity") or 0),
+                synonyms=item.get("synonyms") or [],
             ))
         return candidates
 
@@ -92,6 +94,7 @@ class AniListProvider(MetadataProvider):
           Media(id: $id, type: ANIME) {
             id
             title { romaji english native }
+            synonyms
             format
             startDate { year month day }
             description(asHtml: false)
@@ -138,6 +141,7 @@ class AniListProvider(MetadataProvider):
             rating=(score / 10) if score is not None else None,
             runtime=item.get("duration"),
             genres=item.get("genres") or [],
+            synonyms=item.get("synonyms") or [],
             raw_metadata={
                 "id": item.get("id"),
                 "original_language": "ja",
