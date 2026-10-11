@@ -39,6 +39,7 @@ class TelegramBotService:
         owner_user_id: Optional[int] = "DEFAULT",
     ):
         self.bot_token = bot_token or settings.TELEGRAM_BOT_TOKEN
+        self.bot_id = self.bot_token.split(":")[0] if self.bot_token and ":" in self.bot_token else None
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
         self.running = False
         self.last_update_id = 0
@@ -91,7 +92,11 @@ class TelegramBotService:
         TELEGRAM_OWNER_USER_ID (owner DM fallback). Returns None if unset.
         """
         if self.service_channel:
-            return self.service_channel
+            clean = str(self.service_channel).strip().lower().lstrip("@")
+            bot_id_str = str(self.bot_id) if getattr(self, "bot_id", None) else ""
+            # If mistakenly set to the bot itself, ignore it (bots cannot send to bots)
+            if clean not in ("stream1_x_bot", "streamx_bot") and clean != bot_id_str:
+                return self.service_channel
         if self.owner_user_id:
             return self.owner_user_id
         return None
@@ -455,8 +460,8 @@ class TelegramBotService:
     ) -> None:
         log_event("TELEGRAM_MEDIA_RECEIVED", filename=filename, size=file_size, chat_id=chat_id)
 
-        # Check if service channel is configured for non-owner uploads
-        is_owner = self.owner_user_id and chat_id == self.owner_user_id
+        # Check if user is the MTProto account owner (only the owner's MTProto session can read their own chat with the bot)
+        is_owner = bool(self.owner_user_id and chat_id == self.owner_user_id)
         if not is_owner and not self.is_forward_target_configured():
             # Non-owner upload but no relay target configured - reject early with clear message
             await self.send_message(
@@ -466,8 +471,7 @@ class TelegramBotService:
                     "This bot requires a Telegram service channel to be configured "
                     "for uploads from non-owner accounts.\n\n"
                     "Please contact the administrator to set up "
-                    "<code>TELEGRAM_SERVICE_CHANNEL</code> or "
-                    "<code>TELEGRAM_OWNER_USER_ID</code>."
+                    "<code>TELEGRAM_SERVICE_CHANNEL</code>."
                 ),
                 reply_to_message_id=message_id,
             )
@@ -498,30 +502,33 @@ class TelegramBotService:
         log_event("TRANSFER_RECORD_CREATED", transfer_id=transfer_id, filename=filename)
 
         # Relay media into a location the MTProto worker can actually read.
-        # The MTProto session is a single user account and cannot read messages
-        # sent to the bot by OTHER users, so forwarding is required for friend
-        # uploads. When no relay target is configured we fall back to the legacy
-        # owner-only path (only the MTProto owner's own files will resolve).
-        try:
-            forwarded = await self.forward_media_to_service(chat_id, message_id)
-        except StreamXError as e:
-            await self._mark_transfer_failed(
-                transfer_id, category=e.category, message=str(e)
-            )
-            log_event(
-                "FORWARD_FAILED_PERMANENT",
-                transfer_id=transfer_id,
-                error_category=e.category.value,
-                filename=filename,
-            )
-            await self.send_message(
-                chat_id=chat_id,
-                text=self._failure_message(
-                    filename, transfer_id, e.category, "Upload could not be started."
-                ),
-                reply_to_message_id=message_id,
-            )
-            return
+        # If the sender is the owner, MTProto can read the bot chat directly.
+        forwarded = None
+        if self.resolve_forward_target() is not None:
+            try:
+                forwarded = await self.forward_media_to_service(chat_id, message_id)
+            except StreamXError as e:
+                if is_owner:
+                    logger.warning(f"Forward failed ({e}), falling back to direct MTProto pickup for owner {chat_id}.")
+                    forwarded = None
+                else:
+                    await self._mark_transfer_failed(
+                        transfer_id, category=e.category, message=str(e)
+                    )
+                    log_event(
+                        "FORWARD_FAILED_PERMANENT",
+                        transfer_id=transfer_id,
+                        error_category=e.category.value,
+                        filename=filename,
+                    )
+                    await self.send_message(
+                        chat_id=chat_id,
+                        text=self._failure_message(
+                            filename, transfer_id, e.category, "Upload could not be started."
+                        ),
+                        reply_to_message_id=message_id,
+                    )
+                    return
 
         if forwarded is not None:
             fwd_chat_id, fwd_msg_id = forwarded

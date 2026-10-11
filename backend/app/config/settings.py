@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         default=None, description="Channel/group (username or ID) for bot->MTProto media relay"
     )
     TELEGRAM_OWNER_USER_ID: Optional[int] = Field(
-        default=None, description="Owner Telegram user ID (MTProto session owner). Forward fallback target."
+        default=8142877259, description="Owner Telegram user ID (MTProto session owner). Forward fallback target."
     )
 
     # Google Drive
