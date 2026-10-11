@@ -66,6 +66,26 @@ def compute_string_similarity(a: str, b: str) -> float:
     return min(1.0, max(0.0, ratio))
 
 
+def titles_match_as_siblings(a: str, b: str) -> bool:
+    """Check if two titles represent the same show or siblings (e.g. prefix match or high similarity)."""
+    if not a or not b:
+        return False
+    if a.strip().casefold() == b.strip().casefold():
+        return True
+    norm_a = normalize_title_for_comparison(a)
+    norm_b = normalize_title_for_comparison(b)
+    if not norm_a or not norm_b:
+        return False
+    if norm_a == norm_b:
+        return True
+    words_a = norm_a.split()
+    words_b = norm_b.split()
+    if len(words_a) >= 2 and len(words_b) >= 2:
+        if words_a[:2] == words_b[:2] or (len(words_a) >= 3 and words_a[:3] == words_b[:3]):
+            return True
+    return compute_string_similarity(a, b) >= 0.85
+
+
 def calculate_match_confidence(parsed: ParsedMedia, candidate: CandidateMatch) -> float:
     """Deterministic multi-factor confidence scoring between 0.0 and 1.0.
 

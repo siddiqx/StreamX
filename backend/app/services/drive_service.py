@@ -128,10 +128,16 @@ class GoogleDriveService:
         """Get the Drive folder ID for a category."""
         if category not in self._folder_cache:
             await self.ensure_folder_structure()
+        if category in ("Anime Movies", "Anime Movie", "Anime Series"):
+            return self._folder_cache.get("Anime", self._folder_cache.get("Other", ""))
         return self._folder_cache.get(category, self._folder_cache.get("Other", ""))
 
     async def get_or_create_show_folder(self, category: str = "Other", show_name: str = "Unknown") -> str:
-        """Get or create a dedicated show/movie folder under StreamX/<Category>/<show_name>."""
+        """Get or create a dedicated show/movie folder under StreamX/<Category>/<show_name>.
+        
+        Reuses existing folders via intelligent sibling & prefix matching to avoid
+        duplicate show folders, consolidates duplicates, and maintains a clean hierarchy.
+        """
         import re
         clean_name = re.sub(r'[\\/*?:"<>|]', '', show_name).strip()
         if not clean_name:
@@ -147,15 +153,65 @@ class GoogleDriveService:
 
         def _sync_show_folder() -> str:
             service = self._get_drive_client(creds)
-            escaped_name = clean_name.replace("'", "\\'")
+            # Query all existing active subfolders inside this category
             query = (
-                f"name = '{escaped_name}' and '{cat_folder_id}' in parents and "
+                f"'{cat_folder_id}' in parents and "
                 "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
             )
-            res = service.files().list(q=query, fields="files(id, name)").execute()
-            files = res.get("files", [])
-            if files:
-                return files[0]["id"]
+            res = service.files().list(q=query, fields="files(id, name)", pageSize=1000).execute()
+            folders = res.get("files", [])
+
+            # 1. Check for exact case-insensitive match
+            exact_matches = [f for f in folders if f.get("name", "").strip().casefold() == clean_name.casefold()]
+            if exact_matches:
+                primary = exact_matches[0]
+                # Consolidate redundant duplicate folders if multiple exist
+                if len(exact_matches) > 1:
+                    for dup in exact_matches[1:]:
+                        dup_id = dup["id"]
+                        try:
+                            c_res = service.files().list(q=f"'{dup_id}' in parents and trashed = false", fields="files(id)").execute()
+                            for child in c_res.get("files", []):
+                                service.files().update(fileId=child["id"], addParents=primary["id"], removeParents=dup_id).execute()
+                            service.files().update(fileId=dup_id, body={"trashed": True}).execute()
+                            log_event("DRIVE_DUPLICATE_FOLDER_CONSOLIDATED", name=clean_name, removed_id=dup_id, target_id=primary["id"])
+                        except Exception as e:
+                            logger.debug(f"Error consolidating duplicate folder {dup_id}: {e}")
+                return primary["id"]
+
+            # 2. Intelligent sibling / prefix / normalized match against existing folders
+            from app.services.confidence_scorer import titles_match_as_siblings, normalize_title_for_comparison
+            norm_target = normalize_title_for_comparison(clean_name)
+            for f in folders:
+                fname = f.get("name", "").strip()
+                norm_f = normalize_title_for_comparison(fname)
+                if not norm_f:
+                    continue
+                is_match = False
+                if norm_f == norm_target:
+                    is_match = True
+                elif titles_match_as_siblings(fname, clean_name):
+                    is_match = True
+                else:
+                    w_f = norm_f.split()
+                    w_t = norm_target.split()
+                    if len(w_f) >= 2 and len(w_t) >= 2:
+                        # If first 2 words match or one is prefix of another
+                        if w_f[:2] == w_t[:2] or (len(w_f) >= 3 and w_f[:3] == w_t[:3]):
+                            is_match = True
+
+                if is_match:
+                    f_id = f["id"]
+                    # If clean_name is more complete/canonical, rename folder in Drive
+                    if len(clean_name) > len(fname):
+                        try:
+                            service.files().update(fileId=f_id, body={"name": clean_name}).execute()
+                            log_event("DRIVE_FOLDER_RENAMED", old_name=fname, new_name=clean_name, folder_id=f_id)
+                        except Exception as e:
+                            logger.debug(f"Failed to rename folder {f_id}: {e}")
+                    return f_id
+
+            # 3. No match found, create a clean new folder
             meta = {
                 "name": clean_name,
                 "mimeType": "application/vnd.google-apps.folder",
@@ -555,6 +611,20 @@ class GoogleDriveService:
                                 removeParents=remove_p,
                                 fields="id, parents",
                             ).execute()
+
+                            # If old parent folder is now empty (and not a root category), trash it!
+                            protected_ids = set(self._folder_cache.values())
+                            for p_id in current_parents:
+                                if p_id not in protected_ids:
+                                    try:
+                                        cq = f"'{p_id}' in parents and trashed = false"
+                                        c_res = service.files().list(q=cq, pageSize=1, fields="files(id)").execute()
+                                        if len(c_res.get("files", [])) == 0:
+                                            service.files().update(fileId=p_id, body={"trashed": True}).execute()
+                                            log_event("DRIVE_OLD_EMPTY_FOLDER_TRASHED", folder_id=p_id)
+                                    except Exception as err:
+                                        logger.debug(f"Error checking old parent {p_id}: {err}")
+
                             return True
                     except Exception as err:
                         logger.debug(f"Failed to move file {file_id} into {dest_folder_id}: {err}")
@@ -567,7 +637,62 @@ class GoogleDriveService:
 
         if moved_count > 0:
             log_event("DRIVE_MEDIA_ORGANIZED", moved_count=moved_count)
+
+        # Always purge any remaining empty folders across all categories
+        try:
+            await self.cleanup_empty_drive_folders()
+        except Exception as e:
+            logger.debug(f"Empty folder cleanup error: {e}")
+
         return moved_count
+
+    async def cleanup_empty_drive_folders(self) -> int:
+        """Scan StreamX category folders (Anime, TV Shows, Movies, Other) for empty subfolders and trash them."""
+        if not self.is_configured():
+            return 0
+
+        creds = await self.get_credentials()
+        loop = asyncio.get_running_loop()
+
+        def _sync_cleanup() -> int:
+            service = self._get_drive_client(creds)
+            categories = ["Anime", "TV Shows", "Movies", "Other"]
+            cleaned = 0
+            cat_ids = set()
+            for cat in categories:
+                c_id = self._folder_cache.get(cat)
+                if c_id:
+                    cat_ids.add(c_id)
+
+            root_id = self._folder_cache.get("StreamX")
+            protected_ids = cat_ids | ({root_id} if root_id else set())
+
+            for cat_id in cat_ids:
+                q = f"'{cat_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+                res = service.files().list(q=q, fields="files(id, name)", pageSize=1000).execute()
+                subfolders = res.get("files", [])
+
+                for sf in subfolders:
+                    sf_id = sf["id"]
+                    if sf_id in protected_ids:
+                        continue
+                    cq = f"'{sf_id}' in parents and trashed = false"
+                    c_res = service.files().list(q=cq, pageSize=1, fields="files(id)").execute()
+                    children = c_res.get("files", [])
+                    if len(children) == 0:
+                        try:
+                            service.files().update(fileId=sf_id, body={"trashed": True}).execute()
+                            cleaned += 1
+                            log_event("DRIVE_EMPTY_FOLDER_TRASHED", name=sf.get("name"), folder_id=sf_id)
+                        except Exception as e:
+                            logger.debug(f"Failed to trash empty folder {sf_id}: {e}")
+
+            return cleaned
+
+        count = await loop.run_in_executor(None, _sync_cleanup)
+        if count > 0:
+            log_event("DRIVE_EMPTY_FOLDERS_CLEANED", total_cleaned=count)
+        return count
 
     async def get_download_stream(self, drive_file_id: str, range_header: Optional[str] = None):
         """Yield chunks directly from Google Drive alt=media endpoint for streaming or ranged downloads."""

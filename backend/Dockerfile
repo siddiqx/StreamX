@@ -20,7 +20,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend application source
 COPY . .
 
+# Set dynamic permissions for database persistence
+RUN chmod -R 777 /app
+
+EXPOSE 7860
 EXPOSE 8000
 
-# Run uvicorn with dynamic $PORT support for cloud platforms
-CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+# Run uvicorn with dynamic $PORT support (defaults to 7860 for HF Spaces, or 8000)
+CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"

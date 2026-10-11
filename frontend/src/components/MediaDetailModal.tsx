@@ -436,43 +436,13 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               background: 'linear-gradient(to top, #111726 0%, rgba(17,23,38,0.85) 50%, rgba(17,23,38,0.25) 80%, transparent 100%)',
             }} />
 
-            {/* Top Navigation & Status Bar inside Header */}
+            {/* Top Navigation Close Button */}
             <div style={{
               position: 'absolute',
-              top: '12px',
-              left: '16px',
+              top: '14px',
               right: '16px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
               zIndex: 20,
             }}>
-              {/* Direct Stream Ready Pill */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '7px',
-                background: 'rgba(0,0,0,0.6)',
-                backdropFilter: 'blur(14px)',
-                WebkitBackdropFilter: 'blur(14px)',
-                border: '1px solid rgba(255,255,255,0.14)',
-                padding: '4px 10px',
-                borderRadius: '999px',
-                fontSize: '0.68rem',
-                fontWeight: 700,
-                color: '#e2e8f0',
-              }}>
-                <span style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: '50%',
-                  background: '#10b981',
-                  boxShadow: '0 0 8px #10b981',
-                }} />
-                <span>VLC Direct Stream</span>
-              </div>
-
-              {/* Frosted Glass Close Button */}
               <button
                 onClick={onClose}
                 aria-label="Close"
@@ -480,10 +450,10 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   width: '38px',
                   height: '38px',
                   borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.65)',
-                  backdropFilter: 'blur(14px)',
-                  WebkitBackdropFilter: 'blur(14px)',
-                  border: '1px solid rgba(255,255,255,0.2)',
+                  background: 'rgba(0, 0, 0, 0.65)',
+                  backdropFilter: 'blur(16px)',
+                  WebkitBackdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -491,13 +461,14 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   cursor: 'pointer',
                   touchAction: 'manipulation',
                   transition: 'all 0.15s ease',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.25)';
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)';
                   e.currentTarget.style.transform = 'scale(1.08)';
                 }}
                 onMouseLeave={e => {
-                  e.currentTarget.style.background = 'rgba(0,0,0,0.65)';
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.65)';
                   e.currentTarget.style.transform = 'scale(1.0)';
                 }}
               >
@@ -999,17 +970,20 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                         className="episode-interactive-card"
                         onClick={() => handleOpenVlcForEpisode(ep.item)}
                         style={{
-                          background: 'rgba(255,255,255,0.035)',
-                          border: '1px solid rgba(255,255,255,0.08)',
-                          borderRadius: '14px',
-                          padding: '12px 14px',
+                          background: 'rgba(255, 255, 255, 0.04)',
+                          backdropFilter: 'blur(10px)',
+                          WebkitBackdropFilter: 'blur(10px)',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          borderRadius: '16px',
+                          padding: '13px 16px',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
-                          gap: '12px',
+                          gap: '14px',
                           cursor: 'pointer',
                           position: 'relative',
                           overflow: 'hidden',
+                          transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
                         }}
                       >
                         {/* Progress line under card */}
@@ -1026,66 +1000,68 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                               width: `${epProgress.progressPercentage}%`,
                               height: '100%',
                               background: 'linear-gradient(90deg, #ef4444, #f87171)',
-                              boxShadow: '0 0 6px rgba(239,68,68,0.7)',
+                              boxShadow: '0 0 8px rgba(239,68,68,0.7)',
                             }} />
                           </div>
                         )}
 
                         {/* Left: Number Disc & Clean Title */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
                           {/* Episode Number Disc */}
                           <div style={{
-                            width: '40px',
-                            height: '40px',
-                            borderRadius: '11px',
+                            width: '42px',
+                            height: '42px',
+                            borderRadius: '12px',
                             background: epProgress?.completed
-                              ? 'rgba(16,185,129,0.2)'
+                              ? 'linear-gradient(135deg, rgba(16,185,129,0.25) 0%, rgba(5,150,105,0.15) 100%)'
                               : epProgress && epProgress.progressPercentage > 0
-                              ? 'rgba(239,68,68,0.22)'
-                              : 'rgba(255,255,255,0.07)',
-                            border: `1px solid ${
+                              ? 'linear-gradient(135deg, rgba(239,68,68,0.25) 0%, rgba(220,38,38,0.15) 100%)'
+                              : 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)',
+                            border: `1.5px solid ${
                               epProgress?.completed
-                                ? 'rgba(16,185,129,0.45)'
+                                ? 'rgba(16,185,129,0.5)'
                                 : epProgress && epProgress.progressPercentage > 0
-                                ? 'rgba(239,68,68,0.45)'
-                                : 'rgba(255,255,255,0.12)'
+                                ? 'rgba(239,68,68,0.5)'
+                                : 'rgba(255,255,255,0.14)'
                             }`,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '0.84rem',
+                            fontSize: '0.86rem',
                             fontWeight: 900,
-                            color: epProgress?.completed ? '#6ee7b7' : epProgress && epProgress.progressPercentage > 0 ? '#fca5a5' : '#e2e8f0',
+                            color: epProgress?.completed ? '#34d399' : epProgress && epProgress.progressPercentage > 0 ? '#fca5a5' : '#f1f5f9',
                             flexShrink: 0,
+                            boxShadow: epProgress?.completed ? '0 0 12px rgba(16,185,129,0.2)' : 'none',
                           }}>
-                            {epProgress?.completed ? <Check size={16} strokeWidth={2.8} /> : epNumStr}
+                            {epProgress?.completed ? <Check size={17} strokeWidth={3} /> : epNumStr}
                           </div>
 
                           {/* Episode Title & Tech specs */}
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <p style={{
-                              fontSize: '0.88rem',
+                              fontSize: '0.90rem',
                               fontWeight: 800,
                               color: '#fff',
                               margin: 0,
                               whiteSpace: 'nowrap',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
+                              letterSpacing: '-0.01em',
                             }}>
                               {ep.cleanTitle}
                             </p>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
                                 {ep.quality} · {ep.extension} · {formatBytes(ep.item.size)}
                               </span>
                               {epProgress?.completed && (
-                                <span style={{ color: '#10b981', fontSize: '0.68rem', fontWeight: 800 }}>
+                                <span style={{ color: '#10b981', fontSize: '0.70rem', fontWeight: 800 }}>
                                   · Watched ✓
                                 </span>
                               )}
                               {epProgress && !epProgress.completed && epProgress.progressPercentage > 0 && (
-                                <span style={{ color: '#f87171', fontSize: '0.68rem', fontWeight: 800 }}>
+                                <span style={{ color: '#f87171', fontSize: '0.70rem', fontWeight: 800 }}>
                                   · {epProgress.progressPercentage}%
                                 </span>
                               )}
@@ -1104,9 +1080,9 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             aria-label={`Play ${ep.cleanTitle}`}
                             title="Play in VLC"
                             style={{
-                              width: '36px',
-                              height: '36px',
-                              borderRadius: '10px',
+                              width: '38px',
+                              height: '38px',
+                              borderRadius: '50%',
                               background: '#ffffff',
                               border: 'none',
                               color: '#090d16',
@@ -1114,13 +1090,19 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                               alignItems: 'center',
                               justifyContent: 'center',
                               cursor: 'pointer',
-                              boxShadow: '0 2px 10px rgba(255,255,255,0.22)',
-                              transition: 'all 0.15s ease',
+                              boxShadow: '0 4px 14px rgba(255,255,255,0.28)',
+                              transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
                             }}
-                            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.08)')}
-                            onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1.0)')}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.transform = 'scale(1.1)';
+                              e.currentTarget.style.boxShadow = '0 6px 20px rgba(255,255,255,0.45)';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.transform = 'scale(1.0)';
+                              e.currentTarget.style.boxShadow = '0 4px 14px rgba(255,255,255,0.28)';
+                            }}
                           >
-                            <Play size={15} fill="#090d16" style={{ marginLeft: '1px' }} />
+                            <Play size={16} fill="#090d16" style={{ marginLeft: '1.5px' }} />
                           </button>
 
                           {/* Download Button */}
@@ -1135,20 +1117,22 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             aria-label="Download Episode"
                             title={epOffline ? 'Downloaded' : 'Download file'}
                             style={{
-                              width: '36px',
-                              height: '36px',
-                              borderRadius: '10px',
+                              width: '38px',
+                              height: '38px',
+                              borderRadius: '50%',
                               background: epOffline ? 'rgba(16,185,129,0.18)' : 'rgba(255,255,255,0.06)',
-                              border: epOffline ? '1px solid rgba(16,185,129,0.35)' : '1px solid rgba(255,255,255,0.12)',
+                              border: epOffline ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.12)',
                               color: epOffline ? '#10b981' : '#cbd5e1',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               cursor: 'pointer',
-                              transition: 'all 0.15s ease',
+                              transition: 'all 0.18s ease',
                             }}
+                            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.08)')}
+                            onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1.0)')}
                           >
-                            {epOffline ? <Check size={16} strokeWidth={2.5} /> : <Download size={15} />}
+                            {epOffline ? <Check size={16} strokeWidth={2.8} /> : <Download size={15} />}
                           </button>
                         </div>
                       </div>
