@@ -5,12 +5,16 @@ export const CLOUD_BACKEND_URL = 'https://streamx-backend-cqm0.onrender.com';
 export const getApiBase = (): string => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('streamx_api_url') || localStorage.getItem('streamx_api_base');
-    // If user previously had unreachable localhost:8000 saved, clean it up
-    if (saved && (saved.includes('localhost:8000') || saved.includes('127.0.0.1:8000'))) {
-      localStorage.removeItem('streamx_api_url');
-      localStorage.removeItem('streamx_api_base');
-    } else if (saved && saved.trim()) {
+    if (saved && saved.trim()) {
       return saved.trim().replace(/\/+$/, '');
+    }
+    // If running in local development or local network, connect directly to local backend
+    if (
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname === '0.0.0.0'
+    ) {
+      return 'http://localhost:8000';
     }
   }
   if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.trim()) {
@@ -18,6 +22,7 @@ export const getApiBase = (): string => {
   }
   return CLOUD_BACKEND_URL;
 };
+
 
 export function setCustomApiBase(url: string): void {
   if (typeof window !== 'undefined') {
@@ -334,14 +339,17 @@ export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'orig
   if (item.poster_override && item.poster_override.trim()) {
     return item.poster_override.trim();
   }
+  if (item.poster_url && item.poster_url.trim()) {
+    const p = item.poster_url.trim();
+    if (p.startsWith('http://') || p.startsWith('https://')) return p;
+    if (p.startsWith('/')) return `${getApiBase()}${p}`;
+  }
   if (item.canonical_metadata?.poster_path) {
     const path = item.canonical_metadata.poster_path;
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
-    return `https://image.tmdb.org/t/p/${size}/${path.replace(/^\//, '')}`;
-  }
-  if (item.poster_url) {
-    if (item.poster_url.startsWith('http://') || item.poster_url.startsWith('https://')) return item.poster_url;
-    if (item.poster_url.startsWith('/')) return `https://image.tmdb.org/t/p/${size}/${item.poster_url.replace(/^\//, '')}`;
+    const cleanPath = path.replace(/^\//, '');
+    const tmdbUrl = `https://image.tmdb.org/t/p/${size}/${cleanPath}`;
+    return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(tmdbUrl)}`;
   }
   if (item.metadata_json) {
     try {
@@ -350,7 +358,9 @@ export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'orig
       if (parsed.poster_path) {
         const p = parsed.poster_path;
         if (p.startsWith('http://') || p.startsWith('https://')) return p;
-        return `https://image.tmdb.org/t/p/${size}/${p.replace(/^\//, '')}`;
+        const cleanPath = p.replace(/^\//, '');
+        const tmdbUrl = `https://image.tmdb.org/t/p/${size}/${cleanPath}`;
+        return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(tmdbUrl)}`;
       }
     } catch {
       // ignore
@@ -366,7 +376,9 @@ export function getMediaBackdropUrl(item: MediaItem, size: 'w780' | 'w1280' | 'o
   if (item.canonical_metadata?.backdrop_path) {
     const path = item.canonical_metadata.backdrop_path;
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
-    return `https://image.tmdb.org/t/p/${size}/${path.replace(/^\//, '')}`;
+    const cleanPath = path.replace(/^\//, '');
+    const tmdbUrl = `https://image.tmdb.org/t/p/${size}/${cleanPath}`;
+    return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(tmdbUrl)}`;
   }
   if (item.metadata_json) {
     try {
@@ -375,7 +387,9 @@ export function getMediaBackdropUrl(item: MediaItem, size: 'w780' | 'w1280' | 'o
       if (parsed.backdrop_path) {
         const bp = parsed.backdrop_path;
         if (bp.startsWith('http://') || bp.startsWith('https://')) return bp;
-        return `https://image.tmdb.org/t/p/${size}/${bp.replace(/^\//, '')}`;
+        const cleanPath = bp.replace(/^\//, '');
+        const tmdbUrl = `https://image.tmdb.org/t/p/${size}/${cleanPath}`;
+        return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(tmdbUrl)}`;
       }
     } catch {
       // ignore
@@ -565,5 +579,41 @@ export async function triggerMetadataBackfill(
   }
 }
 
+export async function retryTransfer(transferId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${getApiBase()}/transfers/${transferId}/retry`, {
+      method: 'POST',
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed to retry transfer:', err);
+    return false;
+  }
+}
 
+export async function deleteTransfer(transferId: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${getApiBase()}/transfers/${transferId}`, {
+      method: 'DELETE',
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed to delete transfer:', err);
+    return false;
+  }
+}
 
+export async function syncDriveLibrary(): Promise<{ status: string; synced_count: number } | null> {
+  try {
+    const res = await fetch(`${getApiBase()}/media/sync`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    invalidateMediaCache();
+    return data;
+  } catch (err) {
+    console.warn('Failed to sync Drive library:', err);
+    return null;
+  }
+}

@@ -304,7 +304,7 @@ class GoogleDriveService:
         return True
 
     async def list_library_files(self) -> List[Dict[str, Any]]:
-        """List all media files inside Google Drive."""
+        """List all media files inside Google Drive with full pagination."""
         if not self.is_configured():
             return []
 
@@ -313,20 +313,42 @@ class GoogleDriveService:
 
         def _fetch():
             service = self._get_drive_client(creds)
-            query = "trashed = false and (mimeType contains 'video/' or name contains '.mkv' or name contains '.mp4' or name contains '.avi')"
-            results = service.files().list(
-                q=query,
-                fields="files(id, name, mimeType, size, parents, createdTime)",
-                pageSize=100,
-            ).execute()
-            return results.get("files", [])
+            query = (
+                "trashed = false and ("
+                "mimeType contains 'video/' or "
+                "name contains '.mkv' or "
+                "name contains '.mp4' or "
+                "name contains '.avi' or "
+                "name contains '.mov' or "
+                "name contains '.webm' or "
+                "name contains '.ts' or "
+                "name contains '.m4v'"
+                ")"
+            )
+            all_files = []
+            page_token = None
+            while True:
+                results = service.files().list(
+                    q=query,
+                    fields="nextPageToken, files(id, name, mimeType, size, parents, createdTime)",
+                    pageSize=100,
+                    pageToken=page_token,
+                ).execute()
+                all_files.extend(results.get("files", []))
+                page_token = results.get("nextPageToken")
+                if not page_token:
+                    break
+            return all_files
 
         return await loop.run_in_executor(None, _fetch)
 
     async def sync_library_to_db(self) -> int:
-        """Scan Google Drive StreamX media and ensure cataloged in SQLite Media table."""
+        """Scan Google Drive StreamX media, catalog new files, and update renamed files."""
         from app.db.database import AsyncSessionLocal
-        from app.db.models import Media, TelegramTransfer, TransferStatus
+        from app.db.models import Media, MetadataStatus, TelegramTransfer, TransferStatus
+        from app.services.metadata_service import metadata_service
+        from app.utils.filename_parser import parse_filename
+        from app.utils.media_classifier import classify_media
         from app.workers.transfer_worker import detect_category
         from sqlalchemy import select
 
@@ -344,7 +366,8 @@ class GoogleDriveService:
                 if mime == "application/vnd.google-apps.folder":
                     continue
                 is_video = mime.startswith("video/") or any(
-                    name.lower().endswith(ext) for ext in [".mkv", ".mp4", ".avi", ".mov", ".webm", ".ts", ".m4v"]
+                    name.lower().endswith(ext)
+                    for ext in [".mkv", ".mp4", ".avi", ".mov", ".webm", ".ts", ".m4v"]
                 )
                 if not is_video:
                     continue
@@ -352,26 +375,59 @@ class GoogleDriveService:
                 # Check if already cataloged
                 stmt = select(Media).where(Media.drive_file_id == drive_id)
                 existing = (await session.execute(stmt)).scalar_one_or_none()
-                category = detect_category(name)
+                parsed_tech = parse_filename(name)
+                taxonomy_type, shelf_cat = classify_media(parsed_tech, raw_filename=name, mime_type=mime)
 
                 if not existing:
-                    from app.services.metadata_service import metadata_service
-                    from app.db.models import MetadataStatus
                     item = Media(
                         drive_file_id=drive_id,
                         filename=name,
                         size=size,
                         mime_type=mime,
-                        category=category,
+                        category=shelf_cat,
+                        media_type=taxonomy_type.value,
+                        season=parsed_tech.season,
+                        episode=parsed_tech.episode,
+                        quality=parsed_tech.quality,
+                        release_group=parsed_tech.release_group,
                         metadata_status=MetadataStatus.PENDING,
                     )
                     session.add(item)
                     await session.flush()
                     await metadata_service.enqueue_media_for_enrichment(item.id, session=session)
                     synced_count += 1
-                elif not existing.metadata_entity_id and not existing.metadata_locked:
-                    from app.services.metadata_service import metadata_service
-                    await metadata_service.enqueue_media_for_enrichment(existing.id, session=session)
+                else:
+                    # File was renamed or updated on Google Drive!
+                    if existing.filename != name:
+                        log_event(
+                            "DRIVE_FILE_RENAMED",
+                            drive_file_id=drive_id,
+                            old_name=existing.filename,
+                            new_name=name,
+                        )
+                        existing.filename = name
+                        existing.size = size
+                        existing.category = shelf_cat
+                        existing.media_type = taxonomy_type.value
+                        existing.season = parsed_tech.season
+                        existing.episode = parsed_tech.episode
+                        existing.quality = parsed_tech.quality
+                        existing.release_group = parsed_tech.release_group
+
+                        # If not explicitly locked by user, reset metadata and re-fetch fresh artwork & synopsis!
+                        if not existing.metadata_locked:
+                            existing.metadata_entity_id = None
+                            existing.metadata_status = MetadataStatus.PENDING
+                            existing.metadata_confidence = None
+                            existing.poster_url = None
+                            existing.poster_override = None
+                            existing.backdrop_override = None
+                            existing.metadata_json = None
+                            existing.series_key = None
+                            await metadata_service.enqueue_media_for_enrichment(existing.id, session=session)
+                        synced_count += 1
+                    elif not existing.metadata_entity_id and not existing.metadata_locked:
+                        await metadata_service.enqueue_media_for_enrichment(existing.id, session=session)
 
                 # Reconcile transfer if exists
                 stmt_t = select(TelegramTransfer).where(TelegramTransfer.filename == name)

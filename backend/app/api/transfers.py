@@ -41,3 +41,44 @@ async def get_transfer(
     if not transfer:
         raise HTTPException(status_code=404, detail="Transfer not found")
     return transfer
+
+
+@router.post("/{transfer_id}/retry", response_model=TransferResponse)
+async def retry_transfer(
+    transfer_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> TransferResponse:
+    """Retry or resume a queued, failed, or cancelled transfer."""
+    stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+    result = await db.execute(stmt)
+    transfer = result.scalar_one_or_none()
+    if not transfer:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+
+    from app.db.models import TransferStatus
+    transfer.status = TransferStatus.QUEUED
+    transfer.scheduled_retry_at = None
+    transfer.error_message = None
+    transfer.error_category = None
+    transfer.retry_count = 0
+    await db.commit()
+    await db.refresh(transfer)
+    return transfer
+
+
+@router.delete("/{transfer_id}")
+async def delete_transfer(
+    transfer_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a transfer record from the transfer queue."""
+    stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+    result = await db.execute(stmt)
+    transfer = result.scalar_one_or_none()
+    if not transfer:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+
+    await db.delete(transfer)
+    await db.commit()
+    return {"ok": True, "message": f"Transfer {transfer_id} deleted", "id": transfer_id}
+

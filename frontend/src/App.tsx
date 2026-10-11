@@ -292,6 +292,7 @@ export const App: React.FC = () => {
         {currentTab === 'downloads' && (
           <DownloadsView
             downloads={downloads}
+            transfers={transfers}
             onPause={handlePauseDownload}
             onResume={handleResumeDownload}
             onCancel={handleCancelDownload}
@@ -299,6 +300,7 @@ export const App: React.FC = () => {
             onPlay={(item) => handlePlayMedia(item)}
             mediaMap={mediaMap}
             isWifiOnly={isWifiOnly}
+            onRefreshData={refreshData}
           />
         )}
 

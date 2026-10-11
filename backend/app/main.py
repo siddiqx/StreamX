@@ -58,10 +58,25 @@ async def _run_metadata_worker_supervisor() -> None:
         await asyncio.sleep(5)
 
 
+async def _run_drive_sync_supervisor() -> None:
+    """Periodic background sync to detect newly uploaded or renamed files on Google Drive."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            if drive_service.is_configured():
+                await drive_service.sync_library_to_db()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Periodic Drive sync check error: {e}")
+        await asyncio.sleep(120)
+
+
 async def _run_keep_alive_ping() -> None:
     """Self-ping loop to prevent free-tier cloud containers (Render) from spinning down."""
     if not settings.KEEP_ALIVE_ENABLED:
         return
+
 
     target_url = settings.RENDER_EXTERNAL_URL or os.getenv("RENDER_EXTERNAL_URL")
     if not target_url:
@@ -136,6 +151,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start Metadata Background Worker under watchdog supervisor
     metadata_task = asyncio.create_task(_run_metadata_worker_supervisor())
 
+    # Start periodic Google Drive library synchronization
+    drive_sync_task = asyncio.create_task(_run_drive_sync_supervisor())
+
     # Start 24/7 keep-alive background ping
     keep_alive_task = asyncio.create_task(_run_keep_alive_ping())
 
@@ -149,12 +167,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Graceful shutdown
+    if drive_sync_task:
+        drive_sync_task.cancel()
+        try:
+            await drive_sync_task
+        except asyncio.CancelledError:
+            pass
+
     if keep_alive_task:
         keep_alive_task.cancel()
         try:
             await keep_alive_task
         except asyncio.CancelledError:
             pass
+
 
     if metadata_task:
         metadata_worker.stop()
