@@ -4,9 +4,13 @@ Environment-based settings using Pydantic Settings.
 Never prints or logs secret credentials.
 """
 
+from pathlib import Path
 from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -22,7 +26,7 @@ class Settings(BaseSettings):
     TELEGRAM_API_HASH: Optional[str] = Field(default=None, description="Telegram MTProto API Hash")
     TELEGRAM_SESSION_STRING: Optional[str] = Field(default=None, description="Telegram MTProto Session String")
     TELEGRAM_ALLOWED_USER_IDS: Optional[str] = Field(
-        default="8142877259,7344705202",
+        default="8142877259,7344705202,8640979779",
         description="Comma-separated user IDs allowed to interact with the bot",
     )
     # Telegram Media Relay: the MTProto worker runs under ONE user account (owner)
@@ -52,15 +56,32 @@ class Settings(BaseSettings):
         default=None, description="The Movie Database (TMDB) API key or v4 read token"
     )
 
+    # 24/7 Hosting Keep-Alive
+    RENDER_EXTERNAL_URL: Optional[str] = Field(
+        default="https://streamx-backend-cqm0.onrender.com",
+        description="Public backend URL for 24/7 keep-alive self-ping on cloud platforms",
+    )
+    KEEP_ALIVE_ENABLED: bool = Field(
+        default=True,
+        description="Enable periodic self-ping to prevent free-tier cloud containers from sleeping",
+    )
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(
+            str(_BACKEND_DIR / ".env"),
+            str(_REPO_ROOT / ".env"),
+            ".env",
+            "../.env",
+        ),
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
     @property
     def allowed_telegram_users(self) -> List[int]:
-        users: List[int] = [8142877259, 7344705202]
+        users: List[int] = [8142877259, 7344705202, 8640979779]
+        if self.TELEGRAM_OWNER_USER_ID and self.TELEGRAM_OWNER_USER_ID not in users:
+            users.append(self.TELEGRAM_OWNER_USER_ID)
         if self.TELEGRAM_ALLOWED_USER_IDS:
             for item in self.TELEGRAM_ALLOWED_USER_IDS.split(","):
                 item = item.strip()

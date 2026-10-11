@@ -59,6 +59,7 @@ export interface MediaItem {
   metadata_status?: MetadataStatus;
   metadata_confidence?: number;
   metadata_locked?: boolean;
+  series_key?: string;
   canonical_metadata?: CanonicalMetadata;
   created_at: string;
   updated_at: string;

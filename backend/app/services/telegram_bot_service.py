@@ -12,6 +12,8 @@ the MTProto account can read. The worker then downloads the forwarded copy.
 
 import asyncio
 from datetime import datetime, timezone
+import html
+import re
 from typing import Any, Dict, Optional, Tuple
 import httpx
 from sqlalchemy import select
@@ -53,7 +55,7 @@ class TelegramBotService:
         return bool(self.bot_token and self.bot_token.strip())
 
     async def send_message(self, chat_id: int, text: str, reply_to_message_id: Optional[int] = None) -> bool:
-        """Send a message to a Telegram chat."""
+        """Send a message to a Telegram chat with automatic HTML parse fallback."""
         if not self.is_configured():
             return False
 
@@ -68,7 +70,16 @@ class TelegramBotService:
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 res = await client.post(f"{self.base_url}/sendMessage", json=payload)
-                return res.status_code == 200
+                if res.status_code == 200:
+                    return True
+                logger.warning(f"Telegram sendMessage to {chat_id} returned HTTP {res.status_code}: {res.text}")
+                # Fallback: if HTML parsing failed, strip HTML and send plain text so message is never dropped
+                if res.status_code == 400 or "parse" in res.text.lower() or "entities" in res.text.lower():
+                    payload.pop("parse_mode", None)
+                    payload["text"] = re.sub(r"<[^>]+>", "", text)
+                    res2 = await client.post(f"{self.base_url}/sendMessage", json=payload)
+                    return res2.status_code == 200
+                return False
         except Exception as e:
             logger.error(f"Failed to send Telegram message to {chat_id}: {e}")
             return False
@@ -283,21 +294,28 @@ class TelegramBotService:
     def is_user_allowed(self, user_id: int) -> bool:
         """Check if user is authorized to use this bot."""
         allowed = settings.allowed_telegram_users
-        if not allowed:
-            # If no allowed users explicitly configured, allow (or default open for owner)
+        if not allowed or (settings.TELEGRAM_ALLOWED_USER_IDS and "*" in settings.TELEGRAM_ALLOWED_USER_IDS):
             return True
-        return user_id in allowed
+        try:
+            return int(user_id) in allowed
+        except (ValueError, TypeError):
+            return str(user_id) in [str(u) for u in allowed]
 
     async def process_update(self, update: Dict[str, Any]) -> None:
-        """Process an individual Telegram update."""
-        message = update.get("message")
+        """Process an individual Telegram update (message, channel_post, or edited)."""
+        message = (
+            update.get("message")
+            or update.get("channel_post")
+            or update.get("edited_message")
+            or update.get("edited_channel_post")
+        )
         if not message:
             return
 
         chat = message.get("chat", {})
         chat_id = chat.get("id")
         user = message.get("from", {})
-        user_id = user.get("id")
+        user_id = user.get("id") or chat_id
         message_id = message.get("message_id")
 
         if not chat_id or not user_id:
@@ -313,7 +331,7 @@ class TelegramBotService:
             )
             return
 
-        text = message.get("text", "").strip()
+        text = (message.get("text") or message.get("caption") or "").strip()
 
         # Handle Commands
         if text.startswith("/start"):
@@ -345,20 +363,31 @@ class TelegramBotService:
         )
 
     def _extract_media_info(self, message: Dict[str, Any]) -> Optional[Tuple[str, str, int]]:
-        """Extract file_id, filename, and size from video, document, or audio messages."""
+        """Extract file_id, filename, and size from video, document, audio, or animation messages."""
+        caption = (message.get("caption") or "").strip()
+
         if "document" in message:
             doc = message["document"]
-            filename = sanitize_filename(doc.get("file_name", "document.bin"))
+            raw_name = doc.get("file_name") or caption or "document.bin"
+            filename = sanitize_filename(raw_name)
             return doc.get("file_id"), filename, doc.get("file_size", 0)
 
         if "video" in message:
             vid = message["video"]
-            filename = sanitize_filename(vid.get("file_name", f"video_{int(datetime.now(timezone.utc).timestamp())}.mp4"))
+            raw_name = vid.get("file_name") or caption or f"video_{int(datetime.now(timezone.utc).timestamp())}.mp4"
+            filename = sanitize_filename(raw_name)
             return vid.get("file_id"), filename, vid.get("file_size", 0)
+
+        if "animation" in message:
+            anim = message["animation"]
+            raw_name = anim.get("file_name") or caption or f"animation_{int(datetime.now(timezone.utc).timestamp())}.mp4"
+            filename = sanitize_filename(raw_name)
+            return anim.get("file_id"), filename, anim.get("file_size", 0)
 
         if "audio" in message:
             aud = message["audio"]
-            filename = sanitize_filename(aud.get("file_name", f"audio_{int(datetime.now(timezone.utc).timestamp())}.mp3"))
+            raw_name = aud.get("file_name") or caption or f"audio_{int(datetime.now(timezone.utc).timestamp())}.mp3"
+            filename = sanitize_filename(raw_name)
             return aud.get("file_id"), filename, aud.get("file_size", 0)
 
         return None
@@ -509,9 +538,10 @@ class TelegramBotService:
             )
 
         # Immediate acknowledgement to user
+        safe_filename = html.escape(filename)
         msg = (
             "🎬 <b>StreamX — Media Received</b>\n\n"
-            f"📁 <b>File:</b> <code>{filename}</code>\n"
+            f"📁 <b>File:</b> <code>{safe_filename}</code>\n"
             f"📦 <b>Size:</b> {format_bytes(file_size)}\n"
             f"⚡ <b>Status:</b> <code>Queued for cloud transfer</code>\n"
             f"🏷️ <b>Transfer ID:</b> <code>#{transfer_id}</code>\n\n"
@@ -539,12 +569,13 @@ class TelegramBotService:
         from app.utils.errors import CATEGORY_USER_MESSAGE
 
         summary = CATEGORY_USER_MESSAGE.get(category, detail or "Upload failed.")
+        safe_filename = html.escape(filename)
         return (
             "⚠️ <b>StreamX — Upload Failed</b>\n\n"
-            f"📁 <b>File:</b> <code>{filename}</code>\n"
+            f"📁 <b>File:</b> <code>{safe_filename}</code>\n"
             f"🏷️ <b>Transfer ID:</b> <code>#{transfer_id}</code>\n"
-            f"📋 <b>Reason:</b> <i>{category.value}</i>\n\n"
-            f"{summary}"
+            f"📋 <b>Reason:</b> <i>{html.escape(category.value)}</i>\n\n"
+            f"{html.escape(summary)}"
         )
 
     async def start_polling(self) -> None:
@@ -556,33 +587,64 @@ class TelegramBotService:
         self.running = True
         log_event("TELEGRAM_POLLING_STARTED", forward_target_configured=self.is_forward_target_configured())
 
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            while self.running:
-                try:
-                    params: Dict[str, Any] = {"timeout": 30}
-                    if self.last_update_id:
-                        params["offset"] = self.last_update_id + 1
+        # Proactively clear any existing webhook so getUpdates is unblocked
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as init_client:
+                await init_client.post(f"{self.base_url}/deleteWebhook", json={"drop_pending_updates": False})
+        except Exception as e:
+            logger.debug(f"Could not clear webhook at polling start: {e}")
 
-                    res = await client.get(f"{self.base_url}/getUpdates", params=params)
-                    if res.status_code == 200:
-                        data = res.json()
-                        updates = data.get("result", [])
-                        for update in updates:
-                            update_id = update.get("update_id")
-                            if update_id:
-                                self.last_update_id = max(self.last_update_id, update_id)
-                            await self.process_update(update)
-                    else:
-                        logger.warning(f"Telegram getUpdates returned status {res.status_code}")
-                        await asyncio.sleep(5)
-                except httpx.TimeoutException:
-                    # Normal long-polling timeout, continue loop
-                    continue
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    logger.error(f"Error in Telegram bot polling: {e}")
-                    await asyncio.sleep(5)
+        consecutive_errors = 0
+        while self.running:
+            try:
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    while self.running:
+                        try:
+                            params: Dict[str, Any] = {"timeout": 30}
+                            if self.last_update_id:
+                                params["offset"] = self.last_update_id + 1
+
+                            res = await client.get(f"{self.base_url}/getUpdates", params=params)
+                            if res.status_code == 200:
+                                consecutive_errors = 0
+                                data = res.json()
+                                updates = data.get("result", [])
+                                if isinstance(updates, list):
+                                    for update in updates:
+                                        update_id = update.get("update_id")
+                                        if update_id:
+                                            self.last_update_id = max(self.last_update_id, update_id)
+                                        try:
+                                            await self.process_update(update)
+                                        except Exception as update_err:
+                                            logger.error(
+                                                f"Error processing Telegram update {update_id}: {update_err}",
+                                                exc_info=True,
+                                            )
+                            elif res.status_code == 409:
+                                logger.warning("Telegram getUpdates returned 409 Conflict: another bot instance is currently polling.")
+                                await asyncio.sleep(5)
+                            else:
+                                logger.warning(f"Telegram getUpdates returned status {res.status_code}")
+                                await asyncio.sleep(5)
+                        except httpx.TimeoutException:
+                            # Normal long-polling timeout, continue loop
+                            consecutive_errors = 0
+                            continue
+                        except asyncio.CancelledError:
+                            return
+                        except Exception as e:
+                            consecutive_errors += 1
+                            logger.error(f"Error in Telegram bot polling iteration ({consecutive_errors}): {e}")
+                            await asyncio.sleep(min(2 * consecutive_errors, 15))
+                            if consecutive_errors >= 3:
+                                # Recreate client with fresh connection pool
+                                break
+            except asyncio.CancelledError:
+                break
+            except Exception as outer_e:
+                logger.error(f"Error in Telegram client session: {outer_e}")
+                await asyncio.sleep(5)
 
         log_event("TELEGRAM_POLLING_STOPPED")
 

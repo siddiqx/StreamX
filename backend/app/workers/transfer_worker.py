@@ -243,15 +243,16 @@ class TransferWorker:
     def _build_error_notification(
         self, transfer_id: int, filename: str, category: ErrorCategory, status: TransferStatus
     ) -> str:
+        import html
         from app.utils.errors import CATEGORY_USER_MESSAGE
 
         summary = CATEGORY_USER_MESSAGE.get(category, "The job has been queued for automatic retry.")
         return (
             f"⚠️ <b>StreamX — Transfer #{transfer_id} Error</b>\n\n"
-            f"📁 <b>File:</b> <code>{filename}</code>\n"
-            f"📋 <b>Reason:</b> <i>{category.value}</i>\n"
-            f"🔄 <b>Status:</b> <code>{status.value}</code>\n\n"
-            f"{summary}"
+            f"📁 <b>File:</b> <code>{html.escape(filename)}</code>\n"
+            f"📋 <b>Reason:</b> <i>{html.escape(category.value)}</i>\n"
+            f"🔄 <b>Status:</b> <code>{html.escape(status.value)}</code>\n\n"
+            f"{html.escape(summary)}"
         )
 
     def _resolve_relay_chat(self):
@@ -276,27 +277,31 @@ class TransferWorker:
 
         # 1. Forwarded copy (modern path, required for non-owner senders).
         if transfer.forwarded_chat_id is not None:
+            chats_to_try = [transfer.forwarded_chat_id]
             configured = self._resolve_relay_chat()
-            chat = configured if configured is not None else transfer.forwarded_chat_id
-            # Direct lookup by forwarded message id first.
-            try:
-                msg = await client.get_messages(chat, ids=transfer.forwarded_message_id)
-                if msg and getattr(msg, "media", None):
-                    return msg
-            except Exception as e:
-                logger.debug(f"Forwarded direct lookup failed for #{transfer.id}: {e}")
+            if configured is not None and configured != transfer.forwarded_chat_id:
+                chats_to_try.append(configured)
 
-            # Robust fallback: scan the relay chat by filename/size.
-            try:
-                async for msg in client.iter_messages(chat, limit=FORWARDED_SEARCH_LIMIT):
-                    if not getattr(msg, "media", None):
-                        continue
-                    name = getattr(getattr(msg, "file", None), "name", None)
-                    size = getattr(getattr(msg, "file", None), "size", 0)
-                    if name == filename or (expected_size and size == expected_size):
+            for chat in chats_to_try:
+                # Direct lookup by forwarded message id first.
+                try:
+                    msg = await client.get_messages(chat, ids=transfer.forwarded_message_id)
+                    if msg and getattr(msg, "media", None):
                         return msg
-            except Exception as e:
-                logger.warning(f"Forwarded chat scan failed for #{transfer.id}: {e}")
+                except Exception as e:
+                    logger.debug(f"Forwarded direct lookup failed for chat {chat} (#{transfer.id}): {e}")
+
+                # Robust fallback: scan the relay chat by filename/size.
+                try:
+                    async for msg in client.iter_messages(chat, limit=FORWARDED_SEARCH_LIMIT):
+                        if not getattr(msg, "media", None):
+                            continue
+                        name = getattr(getattr(msg, "file", None), "name", None)
+                        size = getattr(getattr(msg, "file", None), "size", 0)
+                        if name == filename or (expected_size and size == expected_size):
+                            return msg
+                except Exception as e:
+                    logger.warning(f"Forwarded chat scan failed for chat {chat} (#{transfer.id}): {e}")
 
         # 2. Legacy owner-only path: owner's own message in the owner<->bot chat.
         bot_entity = "Stream1_X_bot"

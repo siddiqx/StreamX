@@ -2,7 +2,7 @@
 
 The parser intentionally separates title identity from release noise and episode
 coordinates. It is deterministic, dependency-free, and tolerant of Telegram
-channel prefixes/suffixes and common anime fansub naming conventions.
+channel prefixes/suffixes, Japanese notation, and common anime fansub conventions.
 """
 from dataclasses import dataclass
 import os
@@ -20,6 +20,9 @@ class ParsedMedia:
     episode: Optional[int] = None
     quality: Optional[str] = None
     release_group: Optional[str] = None
+    is_ambiguous: bool = False
+    is_truncated: bool = False
+    parsing_confidence: float = 1.0
 
 
 VIDEO_EXTENSIONS = {
@@ -44,10 +47,9 @@ _NOISE_TERMS = (
 _NOISE_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + _NOISE_TERMS + r")(?![A-Za-z0-9])", re.I)
 _YEAR_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 _EP_PATTERNS = (
-    re.compile(r"(?<![A-Za-z0-9])S\s*[._ -]?\s*(\d{1,2})\s*[._ -]*E\s*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
-    re.compile(r"(?<![A-Za-z0-9])(?:Season)\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep)\s*(\d{1,4})(?!\d)", re.I),
-    re.compile(r"(?<![A-Za-z0-9])S\s*[._ -]?\s*(\d{1,2})\s*[._ -]*(?:EP|E)\s*(\d{1,4})(?!\d)", re.I),
+    re.compile(r"(?<![A-Za-z0-9])(?:Season|S)\s*[._ -]?\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
     re.compile(r"(?<!\d)(\d{1,2})\s*x\s*(\d{1,4})(?!\d)", re.I),
+    re.compile(r"第\s*(\d{1,4})\s*話", re.I),
 )
 
 
@@ -57,13 +59,22 @@ def _remove_extension(value: str) -> str:
     for ext in VIDEO_EXTENSIONS:
         if lower.endswith(ext):
             return value[:-len(ext)]
-    # Telegram filenames sometimes use an uncommon video extension.
     return re.sub(r"\.[A-Za-z0-9]{2,5}$", "", value)
 
 
 def _strip_channel_tags(value: str) -> str:
-    # Telegram handles are metadata, wherever they occur.
-    value = re.sub(r"(?<!\w)@[A-Za-z0-9_\u2122\u00AE\u00A9]+", " ", value)
+    # Bracketed channel tag: [@Anime_Fury]
+    value = re.sub(r"\[@[A-Za-z0-9_\u2122\u00AE\u00A9]+\]", " ", value)
+    # Channel tag with trademark/copyright symbol: @SeriesArchiveX™ (do not greedily match subsequent words)
+    value = re.sub(r"(?<![A-Za-z0-9])@[A-Za-z0-9_]*?[\u2122\u00AE\u00A9]+", " ", value)
+    # Channel tag followed by space, delimiter (- : ~ |), brackets, or end of string
+    value = re.sub(r"(?<![A-Za-z0-9])@[A-Za-z0-9_]+(?=\s*[-–—:|~]|\s+\[|\s+$)", " ", value)
+    # Channel tag before trailing bracket or extension/end
+    value = re.sub(r"(?<![A-Za-z0-9])@[A-Za-z0-9_]+(?=[._ -]*(?:\[|$))", " ", value)
+    # Channel tag followed by an underscore or separator before a title word
+    value = re.sub(r"(?<![A-Za-z0-9])@[A-Za-z0-9]+(?=[._ -])", " ", value)
+    # General standalone @handle
+    value = re.sub(r"(?<![A-Za-z0-9])@[A-Za-z0-9_]+", " ", value)
     value = re.sub(r"[\u2122\u00AE\u00A9]", " ", value)
     value = re.sub(r"(?i)\b(?:https?://)?(?:t\.me|telegram\.me)/[A-Za-z0-9_]+", " ", value)
     return value
@@ -72,6 +83,8 @@ def _strip_channel_tags(value: str) -> str:
 def _strip_bracket_noise(value: str) -> str:
     def replace_bracket(match: re.Match) -> str:
         inner = match.group(1).strip()
+        if not inner:
+            return " "
         compact = re.sub(r"[\s._-]+", "", inner).lower()
         # Keep meaningful bracketed text; remove technical tags, checksums,
         # and short release-group labels. Episode/year tokens are parsed first.
@@ -85,7 +98,7 @@ def _strip_bracket_noise(value: str) -> str:
         ):
             return " "
         return " " + inner + " "
-    return re.sub(r"[\[(]([^\]\)]{1,100})[\])]", replace_bracket, value)
+    return re.sub(r"[\[({]([^\]\)}]*)[\])}]", replace_bracket, value)
 
 
 def parse_filename(filename: str) -> ParsedMedia:
@@ -110,7 +123,8 @@ def parse_filename(filename: str) -> ParsedMedia:
     leading_group = re.match(r"^\s*\[([^\]]{1,35})\]\s*", working)
     if leading_group:
         label = leading_group.group(1).strip()
-        if label and not _NOISE_RE.search(label) and not re.search(r"(?i)^(?:s\d|ep\d|episode\s*\d|\d{3,})", label):
+        is_ep_marker = bool(re.search(r"(?i)^(?:s\s*\d|ep\s*\d|episode\s*\d|season\s*\d|\d{3,})", label))
+        if label and not _NOISE_RE.search(label) and not is_ep_marker:
             release_group = label
             working = working[leading_group.end():]
 
@@ -136,20 +150,49 @@ def parse_filename(filename: str) -> ParsedMedia:
     episode = None
     media_type = "movie"
 
-    # Separate season / episode parsing for noisy formats like "S1-E07", "S-01 EP-03", "E08 [S01]", etc.
-    sep_s = re.search(r"(?<![A-Za-z0-9])S\s*[-_.]?\s*(\d{1,2})(?!\d)", working, re.I)
-    sep_ep = re.search(r"(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
-    if sep_ep:
-        season = int(sep_s.group(1)) if sep_s else 1
-        episode = int(sep_ep.group(1))
+    # Japanese episode notation: 第03話
+    jp_match = re.search(r"第\s*(\d{1,4})\s*話", working)
+    if jp_match:
+        season = 1
+        episode = int(jp_match.group(1))
         media_type = "tv"
-        working = re.sub(r"(?i)(?<![A-Za-z0-9])S\s*[-_.]?\s*\d{1,2}(?!\d)", " ", working)
-        working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*\d{1,4}(?:v\d+)?(?!\d)", " ", working)
+        working = working[:jp_match.start()] + " " + working[jp_match.end():]
+
+    # Explicit combined season and episode formats: S01E03, Season 3 Episode 9, S1-E07, S-01 EP-03, 1x03
+    if episode is None:
+        for pattern in _EP_PATTERNS:
+            match = pattern.search(working)
+            if match:
+                if len(match.groups()) == 2:
+                    season = int(match.group(1))
+                    episode = int(match.group(2))
+                elif len(match.groups()) == 1:
+                    season = 1
+                    episode = int(match.group(1))
+                media_type = "tv"
+                prefix = working[:match.start()]
+                if re.search(r"[A-Za-z0-9]", prefix):
+                    working = prefix
+                else:
+                    working = working[match.end():]
+                break
+
+    # Separate season / episode parsing for noisy formats like "S1 - 10", "S01 ... EP03", etc.
+    if episode is None:
+        sep_s = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*(\d{1,2})(?!\d)", working, re.I)
+        sep_ep = re.search(r"(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
+        if sep_ep:
+            season = int(sep_s.group(1)) if sep_s else 1
+            episode = int(sep_ep.group(1))
+            media_type = "tv"
+            if sep_s:
+                working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*\d{1,2}(?!\d)", " ", working)
+            working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*\d{1,4}(?:v\d+)?(?!\d)", " ", working)
 
     if episode is None:
         # Some Telegram channels put the episode marker before the series title.
         leading_episode = re.match(
-            r"^\s*(?:S\s*(\d{1,2})\s*[ ._-]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*",
+            r"^\s*(?:(?:Season|S)\s*(\d{1,2})\s*[ ._-]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*",
             working, re.I
         )
         if leading_episode:
@@ -159,17 +202,13 @@ def parse_filename(filename: str) -> ParsedMedia:
             working = working[leading_episode.end():]
 
     if episode is None:
-        for pattern in _EP_PATTERNS:
-            match = pattern.search(working)
-            if match:
-                season = int(match.group(1))
-                episode = int(match.group(2))
-                media_type = "tv"
-                if working[:match.start()].strip():
-                    working = working[:match.start()]
-                else:
-                    working = working[match.end():]
-                break
+        # Season with bare hyphenated episode: "S1 - 10", "S01 - 05"
+        hyphen_ep = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*(\d{1,2})\s*-\s*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
+        if hyphen_ep:
+            season = int(hyphen_ep.group(1))
+            episode = int(hyphen_ep.group(2))
+            media_type = "tv"
+            working = working[:hyphen_ep.start()] if working[:hyphen_ep.start()].strip() else working[hyphen_ep.end():]
 
     if episode is None:
         # Fansub absolute numbering: "Series - 01", "Series - 001v2".
@@ -189,8 +228,15 @@ def parse_filename(filename: str) -> ParsedMedia:
                     season, episode, media_type = 1, number, "tv"
                     working = working[:trailing.start()]
 
+    # Bare season marker with no episode (e.g. "... S01 Episode.mkv" or "... Season 2.mkv")
+    if episode is None:
+        bare_s = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*0*(\d{1,2})(?!\d)", working, re.I)
+        if bare_s and (re.search(r"(?i)\b(?:Episode|Ep|Series|TV)\b", working) or bare_s.start() > 3):
+            season = int(bare_s.group(1))
+            media_type = "tv"
+            working = working[:bare_s.start()] + " " + working[bare_s.end():]
+
     # Remove episode title/release annotations after the first technical marker.
-    # This prevents uploader tags or codec names from contaminating the TMDB query.
     noise_boundary = _NOISE_RE.search(working)
     if noise_boundary:
         working = working[:noise_boundary.start()]
@@ -203,7 +249,7 @@ def parse_filename(filename: str) -> ParsedMedia:
 
     working = re.sub(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}", " ", working)
     working = re.sub(r"(?i)\b(?:EP|Episode|Season)\b", " ", working)
-    # Remove common leading separators left after stripping channel/group labels.
+    # Remove common leading/trailing separators left after stripping tags.
     working = re.sub(r"^[\s._\-–—:|]+|[\s._\-–—:|]+$", " ", working)
     working = re.sub(r"\s+", " ", working).strip(" -._|:")
     working = re.sub(r"\s+([!?])", r"\1", working)
@@ -217,6 +263,17 @@ def parse_filename(filename: str) -> ParsedMedia:
         working = re.sub(r"[_\.]+", " ", working)
         working = re.sub(r"\s+", " ", working).strip(" -._|:")
 
+    # Track parsing uncertainty
+    is_truncated = bool(re.search(r"(?:\.\.\.|…|-|\b(?:and|the|of|in|to)\s*)$", working, re.I))
+    is_ambiguous = len(working) <= 3 or working.isdigit()
+    confidence = 1.0
+    if is_truncated:
+        confidence -= 0.35
+    if is_ambiguous:
+        confidence -= 0.40
+    if not release_group and episode is None and year is None:
+        confidence = min(confidence, 0.85)
+
     return ParsedMedia(
         raw_filename=raw,
         clean_title=working,
@@ -226,4 +283,8 @@ def parse_filename(filename: str) -> ParsedMedia:
         episode=episode,
         quality=quality or "1080p",
         release_group=release_group,
+        is_ambiguous=is_ambiguous,
+        is_truncated=is_truncated,
+        parsing_confidence=round(max(0.1, confidence), 2),
     )
+

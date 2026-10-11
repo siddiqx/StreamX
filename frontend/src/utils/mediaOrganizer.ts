@@ -109,7 +109,7 @@ export function extractEpisodeInfo(filename: string): {
   working = working.replace(/\.(mkv|mp4|avi|mov|m4v|webm|ts|flv|wmv|m4v)$/i, '');
   // Remove Telegram handles before converting underscores; handles often contain
   // multiple underscore-delimited words that must never leak into the title.
-  working = working.replace(/(?<!\w)@[A-Za-z0-9_]{2,}/g, ' ');
+  working = working.replace(/(?<![A-Za-z0-9])@[A-Za-z0-9_]{2,}/g, ' ');
 
   const noise = /\b(2160p|1080p|1080i|720p|576p|480p|4k|uhd|web[ ._-]?dl|web[ ._-]?rip|webrip|bluray|blu[ ._-]?ray|bdrip|brrip|hdrip|hdtv|dvdrip|x264|x265|h[ ._-]?264|h[ ._-]?265|hevc|av1|10[ ._-]?bit|8[ ._-]?bit|aac|ac3|dts|flac|opus|truehd|atmos|dual[ ._-]?audio|multi[ ._-]?audio|subbed|dubbed|subsplease|erai[ ._-]?raws|horriblesubs|judas|crunchyroll|animedynasty|animestation\d*|aniwatch|anime[ ._-]?maniaac|index[ ._-]?station|proper|repack|remux|hdr10\+?|dovi)\b/i;
   let season = 1;
@@ -345,7 +345,10 @@ export function organizeMediaLibrary(
     let groupKey = '';
 
     if (isSeries) {
-      if (item.canonical_metadata?.title) {
+      if (item.series_key) {
+        groupKey = `series_${item.series_key}`;
+        groupTitle = item.canonical_metadata?.title || epInfo.seriesTitleCandidate || getMediaDisplayName(item);
+      } else if (item.canonical_metadata?.title) {
         groupTitle = item.canonical_metadata.title;
         // Provider IDs differ between TMDB and AniList; canonical title is the
         // stable series key so all episodes share one card regardless of provider.
@@ -390,11 +393,15 @@ export function organizeMediaLibrary(
       if (isItemOffline) existing.offlineCount += 1;
       existing.isOffline = existing.offlineCount > 0;
 
-      // Inherit richer poster/backdrop/metadata if existing lacked it
-      if (!existing.posterUrl && getMediaPosterUrl(item)) {
+      // Inherit richer poster/backdrop/metadata if existing lacked it or manual override is present
+      if (item.poster_override && item.poster_override.trim()) {
+        existing.posterUrl = item.poster_override.trim();
+      } else if (!existing.posterUrl && getMediaPosterUrl(item)) {
         existing.posterUrl = getMediaPosterUrl(item);
       }
-      if (!existing.backdropUrl && getMediaBackdropUrl(item)) {
+      if (item.backdrop_override && item.backdrop_override.trim()) {
+        existing.backdropUrl = item.backdrop_override.trim();
+      } else if (!existing.backdropUrl && getMediaBackdropUrl(item)) {
         existing.backdropUrl = getMediaBackdropUrl(item);
       }
       if (!existing.overview && item.canonical_metadata?.overview) {

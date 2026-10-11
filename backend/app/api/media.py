@@ -173,9 +173,15 @@ async def sync_media_library() -> Dict[str, Any]:
 
 @router.get("/image-proxy")
 async def proxy_image(url: str = Query(..., description="The TMDB or CDN image URL to proxy")):
-    """Safely proxy metadata/poster images (e.g. from TMDB) to bypass ISP/client CORS or domain blocks."""
-    if not (url.startswith("https://image.tmdb.org/") or url.startswith("http://image.tmdb.org/")):
-        raise HTTPException(status_code=400, detail="Only TMDB images can be proxied")
+    """Safely proxy metadata/poster images (TMDB and AniList) to bypass ISP/client CORS or domain blocks."""
+    allowed_prefixes = (
+        "https://image.tmdb.org/",
+        "http://image.tmdb.org/",
+        "https://s4.anilist.co/",
+        "https://anilist.co/",
+    )
+    if not any(url.startswith(prefix) for prefix in allowed_prefixes):
+        raise HTTPException(status_code=400, detail="Only official TMDB or AniList images can be proxied")
 
     import httpx
     try:
@@ -193,6 +199,7 @@ async def proxy_image(url: str = Query(..., description="The TMDB or CDN image U
             )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Image proxy error: {str(e)}")
+
 
 
 @router.get("/metadata/stats")

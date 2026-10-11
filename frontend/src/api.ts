@@ -56,6 +56,13 @@ export function setCachedMedia(items: MediaItem[]): void {
   } catch {}
 }
 
+export function invalidateMediaCache(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem('streamx_cached_media');
+  } catch {}
+}
+
 export function getCachedTransfers(): TelegramTransfer[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -409,6 +416,9 @@ export async function selectMetadata(mediaId: number, providerId: string, mediaT
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider_id: providerId, media_type: mediaType, apply_to_series: applyToSeries }),
     });
+    if (res.ok) {
+      invalidateMediaCache();
+    }
     return res.ok;
   } catch (err) {
     console.warn('Failed selecting metadata:', err);
@@ -433,6 +443,9 @@ export async function patchMediaMetadata(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
+    if (res.ok) {
+      invalidateMediaCache();
+    }
     return res.ok;
   } catch (err) {
     console.warn('Failed patching metadata:', err);
@@ -447,6 +460,9 @@ export async function setPosterOverride(mediaId: number, posterUrl: string | nul
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ poster_url: posterUrl }),
     });
+    if (res.ok) {
+      invalidateMediaCache();
+    }
     return res.ok;
   } catch (err) {
     console.warn('Failed setting poster override:', err);
@@ -461,6 +477,9 @@ export async function setBackdropOverride(mediaId: number, backdropUrl: string |
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ backdrop_url: backdropUrl }),
     });
+    if (res.ok) {
+      invalidateMediaCache();
+    }
     return res.ok;
   } catch (err) {
     console.warn('Failed setting backdrop override:', err);
@@ -473,6 +492,9 @@ export async function reprocessMetadata(mediaId: number, force = false): Promise
     const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/reprocess?force=${force}`, {
       method: 'POST',
     });
+    if (res.ok) {
+      invalidateMediaCache();
+    }
     return res.ok;
   } catch (err) {
     console.warn('Failed reprocessing metadata:', err);
@@ -485,6 +507,9 @@ export async function unlockMetadata(mediaId: number): Promise<boolean> {
     const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/unlock`, {
       method: 'POST',
     });
+    if (res.ok) {
+      invalidateMediaCache();
+    }
     return res.ok;
   } catch (err) {
     console.warn('Failed unlocking metadata:', err);
@@ -514,13 +539,26 @@ export async function fetchMediaDiagnostics(mediaId: number): Promise<any | null
   }
 }
 
-export async function triggerMetadataBackfill(force = false): Promise<any | null> {
+export async function triggerMetadataBackfill(
+  force = false,
+  dryRun = false,
+  preserveManual = true
+): Promise<any | null> {
   try {
-    const res = await fetch(`${API_BASE}/metadata/backfill?force=${force}`, {
+    const params = new URLSearchParams({
+      force: String(force),
+      dry_run: String(dryRun),
+      preserve_manual: String(preserveManual),
+    });
+    const res = await fetch(`${API_BASE}/metadata/backfill?${params.toString()}`, {
       method: 'POST',
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    const data = await res.json();
+    if (!dryRun) {
+      invalidateMediaCache();
+    }
+    return data;
   } catch (err) {
     console.warn('Failed triggering metadata backfill:', err);
     return null;

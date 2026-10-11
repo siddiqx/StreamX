@@ -131,7 +131,10 @@ def is_same_work(c1: CandidateMatch, c2: CandidateMatch) -> bool:
 
 
 def rank_candidates(
-    parsed: ParsedMedia, candidates: list[CandidateMatch], high_threshold: float = 0.86, low_threshold: float = 0.35
+    parsed: ParsedMedia,
+    candidates: list[CandidateMatch],
+    high_threshold: float = 0.86,
+    low_threshold: float = 0.35,
 ) -> Tuple[Optional[CandidateMatch], float, str]:
     """Score all candidates and return (best_candidate, best_score, status).
 
@@ -139,7 +142,7 @@ def rank_candidates(
     preventing identical anime entries from TMDB and AniList from flagging each other as ambiguous.
 
     Status outcomes:
-    - MATCHED: best_score >= high_threshold and no distinct competing work within 0.02
+    - MATCHED: best_score >= high_threshold and no distinct competing work within calibrated margin
     - LOW_CONFIDENCE: best_score < high_threshold but >= low_threshold (or multiple close distinct works)
     - NOT_FOUND: no candidates or best_score < low_threshold
     """
@@ -163,7 +166,12 @@ def rank_candidates(
                 competing_work = (cand, score)
                 break
 
-        if competing_work and (best_score - competing_work[1]) < 0.02:
+        # Dynamic ambiguity margin: tighter for high-confidence exact matches, wider for borderline matches
+        required_margin = 0.02 if best_score >= 0.92 else 0.04
+        if getattr(parsed, "is_ambiguous", False) and best_score < 0.95:
+            return best_cand, best_score, "LOW_CONFIDENCE"
+
+        if competing_work and (best_score - competing_work[1]) < required_margin:
             return best_cand, best_score, "LOW_CONFIDENCE"
         return best_cand, best_score, "MATCHED"
 
@@ -171,3 +179,4 @@ def rank_candidates(
         return best_cand, best_score, "LOW_CONFIDENCE"
 
     return best_cand, best_score, "NOT_FOUND"
+

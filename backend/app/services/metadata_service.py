@@ -20,16 +20,19 @@ from app.db.models import (
     MetadataJob,
     MetadataJobStatus,
     MetadataStatus,
+    TelegramTransfer,
     utc_now,
 )
 from app.services.confidence_scorer import calculate_match_confidence, normalize_title_for_comparison, rank_candidates
 from app.services.metadata_providers.base import CandidateMatch, CanonicalMetadata
 from app.services.metadata_providers.tmdb import tmdb_provider
 from app.services.metadata_providers.anilist import anilist_provider
+from app.services.thumbnail_service import thumbnail_service
 from app.utils.filename_parser import ParsedMedia, parse_filename
 from app.utils.image_resolver import get_media_backdrop_url, get_media_poster_url
 from app.utils.logging import log_event, logger
 from app.utils.media_classifier import classify_media, has_anime_signals, is_media_file
+
 
 
 class MetadataService:
@@ -278,11 +281,52 @@ class MetadataService:
                             )
 
                     # Keep searching the second catalogue unless the first result
-                    # is both strong and has usable poster artwork.
-                    if status_str == "MATCHED" and confidence >= 0.86 and best_cand and best_cand.poster_path:
+                    # is strong (artwork is resolved in get_details or preserved from best_cand).
+                    if status_str == "MATCHED" and confidence >= 0.88:
                         break
-                if status_str == "MATCHED" and confidence >= 0.86 and best_cand and best_cand.poster_path:
+                if status_str == "MATCHED" and confidence >= 0.88:
                     break
+
+            # Conditional Telegram Thumbnail OCR Analysis
+            if status_str != "MATCHED" and thumbnail_service.should_trigger_analysis(
+                parsed_title=parsed.clean_title,
+                parsing_confidence=getattr(parsed, "parsing_confidence", 1.0),
+                is_truncated=getattr(parsed, "is_truncated", False),
+                candidate_count=len(candidates_by_id),
+                best_confidence=confidence,
+                is_ambiguous=getattr(parsed, "is_ambiguous", False),
+            ):
+                log_event("METADATA_THUMBNAIL_RETRIEVAL_STARTED", media_id=media_id)
+                transfer = None
+                async with AsyncSessionLocal() as session:
+                    t_stmt = select(TelegramTransfer).where(TelegramTransfer.filename == media.filename)
+                    t_res = await session.execute(t_stmt)
+                    transfer = t_res.scalar_one_or_none()
+
+                if transfer:
+                    thumb_bytes = await thumbnail_service.retrieve_telegram_thumbnail_bytes(
+                        chat_id=transfer.telegram_chat_id,
+                        message_id=transfer.telegram_message_id,
+                        file_id=transfer.telegram_file_id,
+                    )
+                    if thumb_bytes:
+                        evidence = thumbnail_service.analyze_image_bytes(thumb_bytes)
+                        if evidence.candidate_titles:
+                            for ocr_title in evidence.candidate_titles[:2]:
+                                if ocr_title and ocr_title.casefold() not in {q.casefold() for q in query_variants}:
+                                    query_variants.append(ocr_title)
+                                    for provider in providers:
+                                        found = await provider.search(
+                                            query=ocr_title,
+                                            year=parsed.year,
+                                            media_type=parsed.media_type,
+                                        )
+                                        for candidate in found:
+                                            key = (candidate.provider, candidate.media_type, str(candidate.provider_id))
+                                            existing = candidates_by_id.get(key)
+                                            if existing is None or calculate_match_confidence(parsed, candidate) > calculate_match_confidence(parsed, existing):
+                                                candidates_by_id[key] = candidate
+                            best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
 
             log_event(
                 "METADATA_CANDIDATES_RANKED",
@@ -339,7 +383,7 @@ class MetadataService:
                     media_type=best_cand.media_type,
                 )
                 if not details:
-                    m.metadata_status = MetadataStatus.FAILED
+                    m.metadata_status = MetadataStatus.RETRYING
                     await session.commit()
                     return False
 
@@ -373,8 +417,11 @@ class MetadataService:
                     elif best_cand.poster_path:
                         if best_cand.poster_path.startswith(("http://", "https://")):
                             m.poster_url = best_cand.poster_path
+                        elif best_cand.poster_path.startswith(("/t/p/", "t/p/")):
+                            m.poster_url = f"https://image.tmdb.org/{best_cand.poster_path.lstrip('/')}"
                         else:
                             m.poster_url = f"https://image.tmdb.org/t/p/w500/{best_cand.poster_path.lstrip('/')}"
+
                 if details.backdrop_path:
                     meta = json.loads(m.metadata_json or "{}")
                     meta["backdrop_url"] = details.full_backdrop_url()
@@ -446,8 +493,10 @@ class MetadataService:
         results.sort(key=lambda x: x["confidence"], reverse=True)
         return results
 
-    def get_series_key(self, filename: str) -> str:
-        """Deterministic normalized series key from filename clean title."""
+    def get_series_key(self, filename: str, entity: Optional[MetadataEntity] = None) -> str:
+        """Deterministic normalized series key from canonical entity or clean title."""
+        if entity and getattr(entity, "provider_id", None):
+            return f"canonical_{entity.provider}_{entity.provider_id}"
         parsed = parse_filename(filename)
         clean = parsed.clean_title.casefold()
         clean = re.sub(r"^(?:the|a|an)\s+", "", clean)
@@ -494,12 +543,15 @@ class MetadataService:
                 MediaTaxonomy.ANIME_SERIES,
                 MediaTaxonomy.ANIME_EPISODE,
             ):
-                selected_key = self.get_series_key(media.filename)
+                selected_key = self.get_series_key(media.filename, entity=entity)
                 sibling_stmt = select(Media).where(Media.id != media_id)
                 sibling_result = await session.execute(sibling_stmt)
                 for sibling in sibling_result.scalars().all():
                     sibling_key = self.get_series_key(sibling.filename)
-                    if not selected_key or sibling_key != selected_key:
+                    is_same_series = (sibling.metadata_entity_id == entity.id) or (
+                        selected_key and (sibling_key == selected_key or sibling_key == self.get_series_key(media.filename))
+                    )
+                    if not is_same_series:
                         continue
                     # Preserve an explicitly chosen custom poster/backdrop, but
                     # make the selected canonical series entity/artwork shared.
@@ -609,7 +661,10 @@ class MetadataService:
                     sibling_stmt = select(Media).where(Media.id != media_id)
                     sibling_result = await session.execute(sibling_stmt)
                     for sibling in sibling_result.scalars().all():
-                        if self.get_series_key(sibling.filename) == selected_key:
+                        is_same = (media.metadata_entity_id and sibling.metadata_entity_id == media.metadata_entity_id) or (
+                            self.get_series_key(sibling.filename) == selected_key
+                        )
+                        if is_same:
                             sibling.poster_override = val
                             sibling.metadata_locked = True
                             sibling.metadata_status = MetadataStatus.MANUAL
@@ -653,23 +708,19 @@ class MetadataService:
                 return False
             if media.metadata_locked and not force:
                 return False
-            if force:
-                media.metadata_locked = False
             media.metadata_status = MetadataStatus.PENDING
             await session.commit()
 
         await self.enqueue_media_for_enrichment(media_id)
         return True
 
-    async def backfill_library(self, force: bool = False) -> Dict[str, int]:
-        """Enqueue unenriched or failed library items for metadata processing.
+    async def backfill_library(
+        self, force: bool = False, dry_run: bool = False, preserve_manual: bool = True
+    ) -> Dict[str, Any]:
+        """Audit and remediate metadata for library media items safely.
 
-        Also re-enqueues MATCHED items whose linked entity lacks poster_path or
-        backdrop_path — these are incorrectly-matched records that would display
-        blank posters in the UI.
-
-        Avoids creating duplicate active (PENDING/PROCESSING) jobs by checking
-        for existing active jobs before creating new ones.
+        If dry_run is True, classifies records and returns health counts without modifying DB.
+        If dry_run is False, enqueues eligible items while strictly preserving manual locks.
         """
         async with AsyncSessionLocal() as session:
             # Fetch current active job media IDs to avoid duplicates
@@ -681,84 +732,97 @@ class MetadataService:
 
             stmt = select(
                 Media.id, Media.metadata_status, Media.metadata_locked,
-                Media.filename, Media.mime_type, Media.metadata_entity_id
+                Media.filename, Media.mime_type, Media.metadata_entity_id,
+                Media.poster_url, Media.poster_override
             )
             res = await session.execute(stmt)
             rows = res.all()
 
+            correct_with_poster = 0
+            correct_missing_poster = 0
+            unresolved = 0
+            low_confidence = 0
+            manually_locked = 0
+            non_media = 0
             enqueued = 0
-            skipped_locked = 0
-            skipped_non_media = 0
-            skipped_complete = 0
 
             for row in rows:
-                mid, status, locked, fn, mime, entity_id = (
-                    row[0], row[1], row[2], row[3], row[4], row[5]
+                mid, status, locked, fn, mime, entity_id, p_url, p_override = (
+                    row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7]
                 )
                 if not is_media_file(fn, mime):
-                    skipped_non_media += 1
+                    non_media += 1
                     continue
-                if locked and not force:
-                    skipped_locked += 1
+                if locked:
+                    manually_locked += 1
+                    if preserve_manual and not force:
+                        continue
+
+                has_poster = bool(p_override or p_url)
+                if entity_id:
+                    ent = await session.get(MetadataEntity, entity_id)
+                    if ent and ent.poster_path:
+                        has_poster = True
+
+                if status in (MetadataStatus.MATCHED, MetadataStatus.MANUAL):
+                    if has_poster:
+                        correct_with_poster += 1
+                    else:
+                        correct_missing_poster += 1
+                elif status == MetadataStatus.LOW_CONFIDENCE:
+                    low_confidence += 1
+                else:
+                    unresolved += 1
+
+                if dry_run:
                     continue
 
-                # Skip already-active jobs to prevent duplicates
                 if mid in active_job_media_ids:
                     continue
 
-                # Determine if this item needs enrichment
                 needs_enrichment = False
                 if force:
                     needs_enrichment = True
                 elif status not in (MetadataStatus.MATCHED, MetadataStatus.MANUAL):
-                    # Any non-matched, non-manual item is a candidate
                     needs_enrichment = True
-                else:
-                    # MATCHED/MANUAL: still enqueue if entity has missing poster or backdrop
-                    if entity_id:
-                        entity = await session.get(MetadataEntity, entity_id)
-                        if entity and (not entity.poster_path or not entity.backdrop_path):
-                            needs_enrichment = True
-                    elif status == MetadataStatus.MATCHED:
-                        # Marked MATCHED but no entity — corrupted state, re-enqueue
-                        needs_enrichment = True
+                elif not has_poster:
+                    needs_enrichment = True
 
-                if not needs_enrichment:
-                    skipped_complete += 1
-                    continue
-
-                # Reset to PENDING and enqueue
-                m = await session.get(Media, mid)
-                if m and not m.metadata_locked or force:
-                    if m:
-                        m.metadata_status = MetadataStatus.PENDING
-                        if force:
+                if needs_enrichment:
+                    m = await session.get(Media, mid)
+                    if m and (not m.metadata_locked or force or not preserve_manual):
+                        if force and m.metadata_locked:
                             m.metadata_locked = False
-                    job = MetadataJob(
-                        media_id=mid,
-                        status=MetadataJobStatus.PENDING,
-                        attempt_count=0,
-                        scheduled_at=utc_now(),
-                    )
-                    session.add(job)
-                    active_job_media_ids.add(mid)  # prevent double-add in this batch
-                    enqueued += 1
+                        m.metadata_status = MetadataStatus.PENDING
+                        job = MetadataJob(
+                            media_id=mid,
+                            status=MetadataJobStatus.PENDING,
+                            attempt_count=0,
+                            scheduled_at=utc_now(),
+                        )
+                        session.add(job)
+                        active_job_media_ids.add(mid)
+                        enqueued += 1
 
-            await session.commit()
+            if not dry_run:
+                await session.commit()
 
-        log_event(
-            "METADATA_BACKFILL_TRIGGERED",
-            enqueued=enqueued,
-            skipped_locked=skipped_locked,
-            skipped_non_media=skipped_non_media,
-            skipped_complete=skipped_complete,
-        )
-        return {
+        report = {
+            "total_media": len(rows),
+            "correct_with_poster": correct_with_poster,
+            "correct_missing_poster": correct_missing_poster,
+            "unresolved": unresolved,
+            "low_confidence": low_confidence,
+            "manually_locked": manually_locked,
+            "skipped_locked": manually_locked,
+            "skipped_complete": correct_with_poster,
+            "non_media": non_media,
             "enqueued": enqueued,
-            "skipped_locked": skipped_locked,
-            "skipped_non_media": skipped_non_media,
-            "skipped_complete": skipped_complete,
+            "dry_run": dry_run,
         }
+        log_event("METADATA_BACKFILL_AUDIT", **report)
+        return report
+
 
     async def get_metadata_stats(self) -> Dict[str, Any]:
         """Aggregate metadata library health metrics."""
