@@ -47,7 +47,7 @@ _NOISE_TERMS = (
 _NOISE_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + _NOISE_TERMS + r")(?![A-Za-z0-9])", re.I)
 _YEAR_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 _EP_PATTERNS = (
-    re.compile(r"(?<![A-Za-z0-9])(?:Season|S)\s*[._ -]?\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
+    re.compile(r"(?<![A-Za-z0-9])(?:Season|S)\s*[._ ,-]?\s*(\d{1,2})\s*[._ ,-]*(?:Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
     re.compile(r"(?<!\d)(\d{1,2})\s*x\s*(\d{1,4})(?!\d)", re.I),
     re.compile(r"第\s*(\d{1,4})\s*話", re.I),
 )
@@ -88,7 +88,10 @@ def _strip_bracket_noise(value: str) -> str:
         compact = re.sub(r"[\s._-]+", "", inner).lower()
         # Keep meaningful bracketed text; remove technical tags, checksums,
         # and short release-group labels. Episode/year tokens are parsed first.
-        if re.fullmatch(r"(?:S|Season)\s*\d{1,2}|(?:EP|Episode|E)\s*\d{1,4}", inner, re.I):
+        if (
+            re.fullmatch(r"(?:S|Season)\s*\d{1,2}|(?:EP|Episode|E)\s*\d{1,4}", inner, re.I)
+            or re.search(r"(?i)\b(?:S|Season)\s*\d{1,2}\s*[._ ,-]*\s*(?:EP|Episode|E)\s*\d{1,4}\b", inner)
+        ):
             return " " + inner + " "
         if (
             _NOISE_RE.search(inner)
@@ -250,10 +253,11 @@ def parse_filename(filename: str) -> ParsedMedia:
     working = re.sub(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}", " ", working)
     working = re.sub(r"(?i)\b(?:EP|Episode|Season)\b", " ", working)
     # Remove common leading/trailing separators left after stripping tags.
-    working = re.sub(r"^[\s._\-–—:|]+|[\s._\-–—:|]+$", " ", working)
-    working = re.sub(r"\s+", " ", working).strip(" -._|:")
+    working = re.sub(r"^[\s._\-–—:|,]+|[\s._\-–—:|,]+$", " ", working)
+    working = re.sub(r"\s+", " ", working).strip(" -._|:,")
     working = re.sub(r"\s+([!?])", r"\1", working)
     working = re.sub(r"^[\s\[\](){}]+|[\s\[\](){}]+$", "", working).strip()
+    working = re.sub(r"[\s,._\-–—:|]+$", "", working).strip()
 
     # Do not send an empty/noise-only title to the provider.
     if not working:
@@ -261,7 +265,7 @@ def parse_filename(filename: str) -> ParsedMedia:
         fallback = _strip_channel_tags(fallback)
         working = re.sub(r"[\[\](){}]", " ", fallback)
         working = re.sub(r"[_\.]+", " ", working)
-        working = re.sub(r"\s+", " ", working).strip(" -._|:")
+        working = re.sub(r"\s+", " ", working).strip(" -._|:,")
 
     # Track parsing uncertainty
     is_truncated = bool(re.search(r"(?:\.\.\.|…|-|\b(?:and|the|of|in|to)\s*)$", working, re.I))

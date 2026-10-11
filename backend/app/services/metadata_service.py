@@ -287,6 +287,40 @@ class MetadataService:
                 if status_str == "MATCHED" and confidence >= 0.88:
                     break
 
+            # If still not matched or low confidence, check if any library sibling episode
+            # from the same series has already established a canonical entity.
+            if status_str != "MATCHED" and parsed.media_type == "tv" and candidates_by_id:
+                current_series_key = self.get_series_key(media.filename)
+                async with AsyncSessionLocal() as session:
+                    s_stmt = select(Media).where(
+                        Media.id != media_id,
+                        Media.metadata_entity_id.isnot(None),
+                        Media.metadata_status.in_([MetadataStatus.MATCHED, MetadataStatus.MANUAL]),
+                    )
+                    s_res = await session.execute(s_stmt)
+                    siblings = s_res.scalars().all()
+                    for sib in siblings:
+                        sib_key = self.get_series_key(sib.filename)
+                        if (
+                            sib_key
+                            and current_series_key
+                            and (sib_key == current_series_key or sib_key.startswith(current_series_key) or current_series_key.startswith(sib_key))
+                        ):
+                            sib_entity = await session.get(MetadataEntity, sib.metadata_entity_id)
+                            if sib_entity:
+                                cand_key = (sib_entity.provider, sib_entity.media_type, str(sib_entity.provider_id))
+                                if cand_key in candidates_by_id:
+                                    best_cand = candidates_by_id[cand_key]
+                                    confidence = 0.95
+                                    status_str = "MATCHED"
+                                    log_event(
+                                        "METADATA_LIBRARY_SIBLING_MATCH",
+                                        media_id=media_id,
+                                        sibling_id=sib.id,
+                                        canonical_title=sib_entity.title,
+                                    )
+                                    break
+
             # Conditional Telegram Thumbnail OCR Analysis
             if status_str != "MATCHED" and thumbnail_service.should_trigger_analysis(
                 parsed_title=parsed.clean_title,
@@ -414,6 +448,13 @@ class MetadataService:
                     # Refresh stale/empty cached URLs on reprocessing; never overwrite manual overrides.
                     if details.poster_path:
                         m.poster_url = details.full_poster_url()
+                    elif entity.poster_path:
+                        if entity.poster_path.startswith(("http://", "https://")):
+                            m.poster_url = entity.poster_path
+                        elif entity.poster_path.startswith(("/t/p/", "t/p/")):
+                            m.poster_url = f"https://image.tmdb.org/{entity.poster_path.lstrip('/')}"
+                        else:
+                            m.poster_url = f"https://image.tmdb.org/t/p/w500/{entity.poster_path.lstrip('/')}"
                     elif best_cand.poster_path:
                         if best_cand.poster_path.startswith(("http://", "https://")):
                             m.poster_url = best_cand.poster_path

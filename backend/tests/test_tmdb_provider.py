@@ -38,7 +38,7 @@ async def test_tmdb_request_uses_official_api_host(monkeypatch):
     response = await provider._request("/search/movie", {"query": "Example Feature"})
 
     assert response == {"results": []}
-    assert requested["url"] == "https://api.themoviedb.org/3/search/movie"
+    assert requested["url"] in ("https://api.tmdb.org/3/search/movie", "https://api.themoviedb.org/3/search/movie")
     assert requested["kwargs"]["params"]["api_key"] == "test-key"
 
 

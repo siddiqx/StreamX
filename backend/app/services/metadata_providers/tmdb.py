@@ -9,7 +9,11 @@ from app.config.settings import settings
 from app.services.metadata_providers.base import CandidateMatch, CanonicalMetadata, MetadataProvider
 from app.utils.logging import log_event, logger
 
-TMDB_BASE_URL = "https://api.themoviedb.org/3"
+TMDB_BASE_URLS = [
+    "https://api.tmdb.org/3",
+    "https://api.themoviedb.org/3",
+]
+TMDB_BASE_URL = TMDB_BASE_URLS[0]
 
 
 
@@ -49,47 +53,48 @@ class TMDBProvider(MetadataProvider):
             logger.warning("TMDBProvider requested but TMDB_API_KEY is not configured.")
             return None
 
-        url = f"{TMDB_BASE_URL}{endpoint}"
         headers, req_params = self._get_headers_and_params(params)
 
-        for attempt in range(max_retries + 1):
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    res = await client.get(url, headers=headers, params=req_params)
+        for base_url in TMDB_BASE_URLS:
+            url = f"{base_url}{endpoint}"
+            for attempt in range(max_retries + 1):
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        res = await client.get(url, headers=headers, params=req_params)
 
-                    if res.status_code == 200:
-                        return res.json()
+                        if res.status_code == 200:
+                            return res.json()
 
-                    if res.status_code == 429:
-                        retry_after = float(res.headers.get("Retry-After", 1.5))
-                        log_event("TMDB_RATE_LIMITED", retry_after=retry_after, attempt=attempt)
-                        if attempt < max_retries:
-                            await asyncio.sleep(retry_after)
+                        if res.status_code == 429:
+                            retry_after = float(res.headers.get("Retry-After", 1.5))
+                            log_event("TMDB_RATE_LIMITED", retry_after=retry_after, attempt=attempt)
+                            if attempt < max_retries:
+                                await asyncio.sleep(retry_after)
+                                continue
+                            break
+
+                        if res.status_code == 404:
+                            return None
+
+                        if res.status_code in (401, 403):
+                            logger.error(f"TMDB authentication error (HTTP {res.status_code}): Invalid or inactive API key.")
+                            return None
+
+                        logger.warning(f"TMDB API error {res.status_code} for {endpoint}: {res.text[:200]}")
+                        if attempt < max_retries and res.status_code >= 500:
+                            await asyncio.sleep(1.0 * (attempt + 1))
                             continue
-                        return None
+                        break
 
-                    if res.status_code == 404:
-                        return None
-
-                    if res.status_code in (401, 403):
-                        logger.error(f"TMDB authentication error (HTTP {res.status_code}): Invalid or inactive API key.")
-                        return None
-
-                    logger.warning(f"TMDB API error {res.status_code} for {endpoint}: {res.text[:200]}")
-                    if attempt < max_retries and res.status_code >= 500:
-                        await asyncio.sleep(1.0 * (attempt + 1))
+                except (httpx.TimeoutException, httpx.NetworkError) as net_err:
+                    logger.warning(f"Network error querying TMDB {base_url}{endpoint}: {net_err}")
+                    if attempt < max_retries:
+                        await asyncio.sleep(0.5 * (attempt + 1))
                         continue
+                    break
+                except Exception as e:
+                    logger.error(f"Unexpected exception calling TMDB {endpoint}: {e}", exc_info=True)
                     return None
-
-            except (httpx.TimeoutException, httpx.NetworkError) as net_err:
-                logger.warning(f"Network error querying TMDB {endpoint}: {net_err}")
-                if attempt < max_retries:
-                    await asyncio.sleep(1.0 * (attempt + 1))
-                    continue
-                return None
-            except Exception as e:
-                logger.error(f"Unexpected exception calling TMDB {endpoint}: {e}", exc_info=True)
-                return None
 
         return None
 
