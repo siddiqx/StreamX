@@ -701,3 +701,77 @@ async def test_search_result_poster_is_saved_when_details_omit_artwork():
         assert media.metadata_status == MetadataStatus.MATCHED
         assert entity.poster_path == "/poster.jpg"
         assert media.poster_url and "poster.jpg" in media.poster_url
+
+
+# ---------------------------------------------------------------------------
+# Sibling prefix matching and multi-episode propagation
+# ---------------------------------------------------------------------------
+
+def test_titles_match_as_siblings_prefix():
+    full_title = "The Daily Life of a Middle-Aged Online Shopper in Another World"
+    truncated_ep2 = "The Daily Life (S01,e02) .mkv"
+    truncated_ep3 = "S01-03 The Daily Life .mkv"
+    truncated_ep5 = "S01-05 The Daily Life [Sub] 1080p @Anime_x_Universe.mkv"
+    unrelated = "Attack on Titan S01E01.mkv"
+
+    assert MetadataService.titles_match_as_siblings(full_title, truncated_ep2) is True
+    assert MetadataService.titles_match_as_siblings(full_title, truncated_ep3) is True
+    assert MetadataService.titles_match_as_siblings(full_title, truncated_ep5) is True
+    assert MetadataService.titles_match_as_siblings(truncated_ep2, truncated_ep3) is True
+    assert MetadataService.titles_match_as_siblings(full_title, unrelated) is False
+
+
+@pytest.mark.asyncio
+async def test_sibling_propagation_updates_all_episodes():
+    service = MetadataService()
+
+    # Pre-create 3 episodes with truncated names and no metadata
+    ep1_id = await _make_media("S01-01 The Daily Life [Sub] 1080p @Anime_x_Universe.mkv", category="TV Shows")
+    ep2_id = await _make_media("The Daily Life (S01,e02) .mkv", category="TV Shows")
+    # ep5 has been renamed with the full title
+    ep5_id = await _make_media(
+        "S01-05 The Daily Life of a Middle-Aged Online Shopper in Another World [Sub] 1080p @Anime_x_Universe.mkv",
+        category="TV Shows"
+    )
+
+    full_details = CanonicalMetadata(
+        provider="tmdb", provider_id="99999", media_type="tv",
+        title="The Daily Life of a Middle-Aged Online Shopper in Another World",
+        original_title="アラフォー賢者の異世界生活日記",
+        release_date="2025-01-10", release_year=2025,
+        overview="Shopper in another world fantasy.",
+        poster_path="/shopper_poster.jpg", backdrop_path="/shopper_bg.jpg",
+        rating=8.2, runtime=24,
+        genres=["Animation", "Fantasy"],
+        raw_metadata={"id": 99999, "original_language": "ja", "origin_country": ["JP"]},
+    )
+
+    with patch.object(service.provider, "is_configured", return_value=True), \
+         patch.object(service.provider, "search", new_callable=AsyncMock, return_value=[
+             CandidateMatch(
+                 provider="tmdb", provider_id="99999",
+                 title="The Daily Life of a Middle-Aged Online Shopper in Another World",
+                 media_type="tv", release_year=2025, poster_path="/shopper_poster.jpg",
+                 rating=8.2, popularity=85.0
+             )
+         ]), \
+         patch.object(service.provider, "get_details", new_callable=AsyncMock, return_value=full_details), \
+         patch.object(service.anilist_provider, "is_configured", return_value=False):
+        # Enrich the renamed episode
+        await service.process_media_metadata(ep5_id)
+
+    async with AsyncSessionLocal() as session:
+        m1 = await session.get(Media, ep1_id)
+        m2 = await session.get(Media, ep2_id)
+        m5 = await session.get(Media, ep5_id)
+
+        # All 3 episodes must now share the full anime identity and poster!
+        assert m5.metadata_status == MetadataStatus.MATCHED
+        assert m1.metadata_entity_id == m5.metadata_entity_id
+        assert m2.metadata_entity_id == m5.metadata_entity_id
+        assert m1.metadata_status == MetadataStatus.MATCHED
+        assert m2.metadata_status == MetadataStatus.MATCHED
+        assert "shopper_poster.jpg" in (m1.poster_url or "")
+        assert "shopper_poster.jpg" in (m2.poster_url or "")
+        assert m1.category == "Anime"
+        assert m2.category == "Anime"

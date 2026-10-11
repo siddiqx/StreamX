@@ -130,6 +130,7 @@ class Media(Base):
     episode = Column(Integer, nullable=True, index=True)
     quality = Column(String(64), nullable=True)
     release_group = Column(String(128), nullable=True)
+    series_key = Column(String(256), nullable=True, index=True)
 
     # Metadata enrichment columns
     metadata_entity_id = Column(

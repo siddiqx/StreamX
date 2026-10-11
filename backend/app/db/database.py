@@ -58,9 +58,12 @@ def _migrate_schema_sync(connection):
             connection.exec_driver_sql("ALTER TABLE media ADD COLUMN quality VARCHAR(64)")
         if "release_group" not in existing_cols:
             connection.exec_driver_sql("ALTER TABLE media ADD COLUMN release_group VARCHAR(128)")
+        if "series_key" not in existing_cols:
+            connection.exec_driver_sql("ALTER TABLE media ADD COLUMN series_key VARCHAR(256)")
 
         # Create indexes if they do not exist
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_metadata_entity_id ON media (metadata_entity_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_series_key ON media (series_key)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_metadata_status ON media (metadata_status)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_media_type ON media (media_type)")
 

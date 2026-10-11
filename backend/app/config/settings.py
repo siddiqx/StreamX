@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # App
     STREAMX_ENV: str = Field(default="development", description="Environment mode")
     STREAMX_SECRET_KEY: str = Field(default="insecure-dev-secret-replace-in-prod", description="App secret key")
-    DATABASE_URL: str = Field(default="sqlite+aiosqlite:///./streamx.db", description="Database connection URL")
+    DATABASE_URL: str = Field(default=f"sqlite+aiosqlite:///{(_REPO_ROOT / 'streamx.db').as_posix()}", description="Database connection URL")
     LOG_LEVEL: str = Field(default="INFO", description="Logging verbosity")
 
     # Telegram

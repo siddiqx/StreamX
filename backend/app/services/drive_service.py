@@ -40,6 +40,7 @@ class GoogleDriveService:
         )
         self.credentials: Optional[Credentials] = None
         self._folder_cache: Dict[str, str] = {}
+        self._show_folder_cache: Dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     def is_configured(self) -> bool:
@@ -129,16 +130,61 @@ class GoogleDriveService:
             await self.ensure_folder_structure()
         return self._folder_cache.get(category, self._folder_cache.get("Other", ""))
 
+    async def get_or_create_show_folder(self, category: str = "Other", show_name: str = "Unknown") -> str:
+        """Get or create a dedicated show/movie folder under StreamX/<Category>/<show_name>."""
+        import re
+        clean_name = re.sub(r'[\\/*?:"<>|]', '', show_name).strip()
+        if not clean_name:
+            return await self.get_folder_id(category)
+
+        cache_key = f"{category}:{clean_name.casefold()}"
+        if cache_key in self._show_folder_cache:
+            return self._show_folder_cache[cache_key]
+
+        cat_folder_id = await self.get_folder_id(category)
+        creds = await self.get_credentials()
+        loop = asyncio.get_running_loop()
+
+        def _sync_show_folder() -> str:
+            service = self._get_drive_client(creds)
+            escaped_name = clean_name.replace("'", "\\'")
+            query = (
+                f"name = '{escaped_name}' and '{cat_folder_id}' in parents and "
+                "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            )
+            res = service.files().list(q=query, fields="files(id, name)").execute()
+            files = res.get("files", [])
+            if files:
+                return files[0]["id"]
+            meta = {
+                "name": clean_name,
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [cat_folder_id],
+            }
+            folder = service.files().create(body=meta, fields="id").execute()
+            log_event("DRIVE_SHOW_FOLDER_CREATED", show=clean_name, category=category, folder_id=folder["id"])
+            return folder["id"]
+
+        folder_id = await loop.run_in_executor(None, _sync_show_folder)
+        self._show_folder_cache[cache_key] = folder_id
+        return folder_id
+
     async def create_resumable_upload_session(
         self,
         filename: str,
         size: int,
         mime_type: str = "video/mp4",
         category: str = "Other",
+        show_name: Optional[str] = None,
     ) -> str:
-        """Initiate a resumable upload session with Google Drive. Returns the upload session URI."""
+        """Initiate a resumable upload session inside the show's dedicated folder in Google Drive."""
         creds = await self.get_credentials()
-        folder_id = await self.get_folder_id(category)
+        if not show_name:
+            from app.utils.filename_parser import parse_filename
+            parsed = parse_filename(filename)
+            show_name = parsed.clean_title
+
+        folder_id = await self.get_or_create_show_folder(category=category, show_name=show_name)
 
         metadata = {
             "name": filename,
@@ -167,7 +213,7 @@ class GoogleDriveService:
             if not upload_url:
                 raise RuntimeError("Google Drive did not return a resumable Location header.")
 
-            log_event("DRIVE_UPLOAD_SESSION_CREATED", filename=filename, size=size)
+            log_event("DRIVE_UPLOAD_SESSION_CREATED", filename=filename, size=size, folder_id=folder_id)
             return upload_url
 
     def _classify_upload_status(self, status_code: int, body: str) -> Exception:
@@ -447,9 +493,81 @@ class GoogleDriveService:
 
             await session.commit()
 
+        # Organize all library files in Google Drive into their proper show subfolders
+        try:
+            await self.organize_existing_drive_media()
+        except Exception as ex:
+            logger.debug(f"Drive folder organization skipped or failed: {ex}")
+
         if synced_count > 0:
             log_event("DRIVE_LIBRARY_SYNCED", synced_count=synced_count)
         return synced_count
+
+    async def organize_existing_drive_media(self) -> int:
+        """Move loose library files in Google Drive into their proper show subfolders."""
+        if not self.is_configured():
+            return 0
+
+        from app.db.database import AsyncSessionLocal
+        from app.db.models import Media, MetadataEntity
+        from app.utils.filename_parser import parse_filename
+        from sqlalchemy import select
+
+        creds = await self.get_credentials()
+        loop = asyncio.get_running_loop()
+        moved_count = 0
+
+        async with AsyncSessionLocal() as session:
+            stmt = select(Media)
+            res = await session.execute(stmt)
+            medias = res.scalars().all()
+
+            for item in medias:
+                if not item.drive_file_id:
+                    continue
+
+                show_name = None
+                if item.metadata_entity_id:
+                    entity = await session.get(MetadataEntity, item.metadata_entity_id)
+                    if entity and entity.title:
+                        show_name = entity.title
+                if not show_name:
+                    parsed = parse_filename(item.filename)
+                    show_name = parsed.clean_title
+
+                category = item.category or "Other"
+                try:
+                    target_folder_id = await self.get_or_create_show_folder(category=category, show_name=show_name)
+                except Exception as e:
+                    logger.debug(f"Could not get or create show folder for {show_name}: {e}")
+                    continue
+
+                def _check_and_move(file_id: str, dest_folder_id: str):
+                    service = self._get_drive_client(creds)
+                    try:
+                        f = service.files().get(fileId=file_id, fields="id, parents").execute()
+                        current_parents = f.get("parents", [])
+                        if dest_folder_id not in current_parents:
+                            remove_p = ",".join(current_parents) if current_parents else None
+                            service.files().update(
+                                fileId=file_id,
+                                addParents=dest_folder_id,
+                                removeParents=remove_p,
+                                fields="id, parents",
+                            ).execute()
+                            return True
+                    except Exception as err:
+                        logger.debug(f"Failed to move file {file_id} into {dest_folder_id}: {err}")
+                    return False
+
+                did_move = await loop.run_in_executor(None, _check_and_move, item.drive_file_id, target_folder_id)
+                if did_move:
+                    moved_count += 1
+                    log_event("DRIVE_FILE_MOVED_TO_SHOW_FOLDER", file_id=item.drive_file_id, show=show_name, folder_id=target_folder_id)
+
+        if moved_count > 0:
+            log_event("DRIVE_MEDIA_ORGANIZED", moved_count=moved_count)
+        return moved_count
 
     async def get_download_stream(self, drive_file_id: str, range_header: Optional[str] = None):
         """Yield chunks directly from Google Drive alt=media endpoint for streaming or ranged downloads."""

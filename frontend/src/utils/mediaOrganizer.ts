@@ -214,13 +214,52 @@ export function extractEpisodeInfo(filename: string): {
 /**
  * Normalizes title for grouping key (case-insensitive, noise-stripped).
  */
-function normalizeGroupKey(title: string): string {
+export function normalizeGroupKey(title: string): string {
   return title
     .toLowerCase()
-    .replace(/^the\s+/, '')
+    .replace(/^(?:the|a|an)\s+/, '')
     .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, '_')
     .trim();
+}
+
+/**
+ * Checks whether two groups or titles represent the same underlying anime or show.
+ */
+export function groupsAreSameShow(g1: MediaGroup, g2: MediaGroup): boolean {
+  if (g1.id === g2.id) return true;
+
+  // 1. Same canonical entity provider ID
+  const p1 = g1.featuredItem.canonical_metadata?.provider_id;
+  const p2 = g2.featuredItem.canonical_metadata?.provider_id;
+  if (p1 && p2 && p1 === p2) return true;
+
+  // 2. Exact normalized title match
+  const norm1 = normalizeGroupKey(g1.title);
+  const norm2 = normalizeGroupKey(g2.title);
+  if (norm1 && norm2 && norm1 === norm2) return true;
+
+  // 3. First 3 words prefix match (e.g. "The Daily Life" and "The Daily Life of a Middle-Aged...")
+  const words1 = g1.title.toLowerCase().replace(/^(?:the|a|an)\s+/, '').replace(/[^\w\s]/g, '').trim().split(/\s+/).filter(Boolean);
+  const words2 = g2.title.toLowerCase().replace(/^(?:the|a|an)\s+/, '').replace(/[^\w\s]/g, '').trim().split(/\s+/).filter(Boolean);
+  if (words1.length >= 2 && words2.length >= 2) {
+    const minWords = Math.min(3, Math.min(words1.length, words2.length));
+    let match = true;
+    for (let i = 0; i < minWords; i++) {
+      if (words1[i] !== words2[i]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) return true;
+  }
+
+  // 4. Prefix containment (if at least 8 chars long)
+  if (norm1 && norm2 && (norm1.startsWith(norm2) || norm2.startsWith(norm1))) {
+    if (Math.min(norm1.length, norm2.length) >= 8) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -346,22 +385,20 @@ export function organizeMediaLibrary(
 
     if (isSeries) {
       if (item.series_key) {
-        groupKey = `series_${item.series_key}`;
+        groupKey = `series_${normalizeGroupKey(item.series_key)}`;
         groupTitle = item.canonical_metadata?.title || epInfo.seriesTitleCandidate || getMediaDisplayName(item);
       } else if (item.canonical_metadata?.title) {
         groupTitle = item.canonical_metadata.title;
-        // Provider IDs differ between TMDB and AniList; canonical title is the
-        // stable series key so all episodes share one card regardless of provider.
-        groupKey = `series_${taxonomy.category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;
+        groupKey = `series_${normalizeGroupKey(groupTitle)}`;
       } else {
         groupTitle = epInfo.seriesTitleCandidate || getMediaDisplayName(item);
-        groupKey = `series_${taxonomy.category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;
+        groupKey = `series_${normalizeGroupKey(groupTitle)}`;
       }
     } else {
       // Feature Film / Movie / Anime Movie (Deduplicate versions sharing the same entity or canonical title)
       groupTitle = item.canonical_metadata?.title || getMediaDisplayName(item);
       const provId = item.canonical_metadata?.provider_id;
-      groupKey = provId ? `movie_${taxonomy.category.toLowerCase()}_${provId}` : `movie_${taxonomy.category.toLowerCase()}_${normalizeGroupKey(groupTitle)}`;
+      groupKey = provId ? `movie_${item.canonical_metadata?.provider || 'tmdb'}_${provId}` : `movie_${normalizeGroupKey(groupTitle)}`;
     }
 
     const cleanTitle = getCleanEpisodeTitle(item.filename, epInfo.episode);
@@ -481,7 +518,69 @@ export function organizeMediaLibrary(
     }
   }
 
-  const allGroups = Array.from(groupsMap.values());
+  // Unification Pass: Absorb any sister groups that share canonical entity, normalized title, or 3-word title prefix
+  const rawGroupList = Array.from(groupsMap.values());
+  const unifiedGroups: MediaGroup[] = [];
+
+  for (const current of rawGroupList) {
+    const existingMatch = unifiedGroups.find(g => groupsAreSameShow(g, current));
+    if (existingMatch) {
+      // Absorb current into existingMatch
+      const currentIsRicher =
+        (current.featuredItem.canonical_metadata ? 1 : 0) > (existingMatch.featuredItem.canonical_metadata ? 1 : 0) ||
+        current.title.length > existingMatch.title.length;
+
+      if (currentIsRicher) {
+        existingMatch.title = current.title;
+        if (current.posterUrl) existingMatch.posterUrl = current.posterUrl;
+        if (current.backdropUrl) existingMatch.backdropUrl = current.backdropUrl;
+        if (current.overview) existingMatch.overview = current.overview;
+        if (current.rating) existingMatch.rating = current.rating;
+        if (current.year) existingMatch.year = current.year;
+        if (current.featuredItem.canonical_metadata) existingMatch.featuredItem = current.featuredItem;
+      }
+
+      if (current.category === 'Anime' || existingMatch.category === 'Anime') {
+        existingMatch.category = 'Anime';
+        existingMatch.displayCategory = 'Anime';
+      }
+
+      for (const ep of current.episodes) {
+        if (!existingMatch.episodes.some(e => e.item.id === ep.item.id)) {
+          existingMatch.episodes.push(ep);
+        }
+      }
+      for (const ver of current.versions) {
+        if (!existingMatch.versions.some(v => v.item.id === ver.item.id)) {
+          existingMatch.versions.push(ver);
+        }
+      }
+      existingMatch.totalSize += current.totalSize;
+      existingMatch.offlineCount += current.offlineCount;
+      existingMatch.isOffline = existingMatch.offlineCount > 0;
+    } else {
+      unifiedGroups.push(current);
+    }
+  }
+
+  // Sort episodes in each series group
+  for (const group of unifiedGroups) {
+    if (group.type === 'series') {
+      group.episodes.sort((a, b) => {
+        if (a.seasonNumber !== b.seasonNumber) return a.seasonNumber - b.seasonNumber;
+        return a.episodeNumber - b.episodeNumber;
+      });
+    }
+  }
+
+  // Sort groups by newest added episode/file so Recently Added shows latest arrivals
+  unifiedGroups.sort((a, b) => {
+    const timeA = Math.max(...a.episodes.map(e => new Date(e.item.created_at).getTime() || 0), new Date(a.featuredItem.created_at).getTime() || 0);
+    const timeB = Math.max(...b.episodes.map(e => new Date(e.item.created_at).getTime() || 0), new Date(b.featuredItem.created_at).getTime() || 0);
+    return timeB - timeA;
+  });
+
+  const allGroups = unifiedGroups;
 
   // Split into series and movie buckets
   const seriesGroups = allGroups.filter((g) => g.type === 'series');

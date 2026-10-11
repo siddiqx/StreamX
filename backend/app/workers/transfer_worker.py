@@ -386,6 +386,8 @@ class TransferWorker:
         actual_size = getattr(target_message.file, "size", expected_size)
         mime_type = resolve_mime_type(filename)
         category = detect_category(filename)
+        parsed = parse_filename(filename)
+        show_name = parsed.clean_title
 
         # 3. Check / Initialize Google Drive Resumable Session
         upload_url = None
@@ -413,6 +415,7 @@ class TransferWorker:
                 size=actual_size,
                 mime_type=mime_type,
                 category=category,
+                show_name=show_name,
             )
             async with AsyncSessionLocal() as session:
                 stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)

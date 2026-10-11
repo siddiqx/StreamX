@@ -108,12 +108,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     log_event("DATABASE_INITIALIZED")
 
-    # Sync any existing master media files from Google Drive
+    # Sync existing master media files from Google Drive in the background
     if drive_service.is_configured():
-        try:
-            await drive_service.sync_library_to_db()
-        except Exception as e:
-            logger.warning(f"Initial Google Drive sync error: {e}")
+        asyncio.create_task(drive_service.sync_library_to_db())
 
     # Start Telegram bot polling under watchdog supervisor
     bot_task = None

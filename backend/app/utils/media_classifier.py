@@ -75,6 +75,8 @@ def has_anime_signals(
 
     # 1. Provider metadata signals (Highest fidelity)
     if details:
+        if details.provider == "anilist":
+            return True
         genres = [g.lower() for g in (details.genres or [])]
         is_animation = "animation" in genres
 

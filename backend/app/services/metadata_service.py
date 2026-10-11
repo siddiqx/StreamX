@@ -222,70 +222,120 @@ class MetadataService:
             return False
 
         try:
-            # Search the parser's canonical title first. If that is not a clear
-            # match, try a small set of deterministic variants and rank the combined
-            # candidate pool once. Never let a noisy Telegram filename force a
-            # single weak result into the library.
-            query_variants = []
-            for query in (
-                parsed.clean_title,
-                re.sub(r"[^\w\s]", " ", parsed.clean_title),
-                re.sub(r"\s+", " ", parsed.clean_title).strip(),
-            ):
-                query = query.strip()
-                if query and query.casefold() not in {q.casefold() for q in query_variants}:
-                    query_variants.append(query)
-
-            candidates_by_id = {}
+            # Check if another episode in this library has already established canonical metadata for this series.
+            # This prevents short/truncated filenames (e.g. "S01-01 The Daily Life") from erroneously matching
+            # a different popular show (like "The Daily Life of the Immortal King") when a sibling episode
+            # already established the true series identity.
             best_cand, confidence, status_str = None, 0.0, "NOT_FOUND"
-            for provider in providers:
-                for index, query in enumerate(query_variants[:3]):
-                    found = await provider.search(
-                        query=query,
-                        year=parsed.year,
-                        media_type=parsed.media_type,
+            current_series_key = self.get_series_key(media.filename)
+            async with AsyncSessionLocal() as session:
+                s_stmt = select(Media).where(
+                    Media.id != media_id,
+                    Media.metadata_entity_id.isnot(None),
+                    Media.metadata_status.in_([MetadataStatus.MATCHED, MetadataStatus.MANUAL]),
+                )
+                s_res = await session.execute(s_stmt)
+                siblings = s_res.scalars().all()
+                for sib in siblings:
+                    sib_key = sib.series_key or self.get_series_key(sib.filename)
+                    is_match = (
+                        (sib_key and current_series_key and (sib_key == current_series_key or sib_key.startswith(current_series_key) or current_series_key.startswith(sib_key)))
+                        or self.titles_match_as_siblings(media.filename, sib.filename)
                     )
-                    for candidate in found:
-                        key = (candidate.provider, candidate.media_type, str(candidate.provider_id))
-                        existing = candidates_by_id.get(key)
-                        if existing is None or calculate_match_confidence(parsed, candidate) > calculate_match_confidence(parsed, existing):
-                            candidates_by_id[key] = candidate
+                    if is_match:
+                        sib_entity = await session.get(MetadataEntity, sib.metadata_entity_id)
+                        if sib_entity:
+                            from app.services.metadata_providers.base import CandidateMatch
+                            clean_words = len(parsed.clean_title.split())
+                            sib_words = len(sib_entity.title.split())
+                            # If sibling has a longer/more specific title, or was manually locked,
+                            # or current query is short (<= 3 words), immediately adopt the sibling's canonical entity!
+                            if sib_words >= clean_words or sib.metadata_locked or clean_words <= 3:
+                                best_cand = CandidateMatch(
+                                    provider=sib_entity.provider,
+                                    provider_id=sib_entity.provider_id,
+                                    title=sib_entity.title,
+                                    media_type=sib_entity.media_type,
+                                    release_year=sib_entity.release_year,
+                                    poster_path=sib_entity.poster_path,
+                                    rating=sib_entity.rating,
+                                    overview=sib_entity.overview,
+                                )
+                                confidence = 0.99
+                                status_str = "MATCHED"
+                                log_event(
+                                    "METADATA_LIBRARY_SIBLING_PREMATCH",
+                                    media_id=media_id,
+                                    sibling_id=sib.id,
+                                    canonical_title=sib_entity.title,
+                                )
+                                break
 
-                    best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
+            query_variants = [parsed.clean_title]
+            candidates_by_id = {}
+            if status_str != "MATCHED":
+                # Search the parser's canonical title first. If that is not a clear
+                # match, try a small set of deterministic variants and rank the combined
+                # candidate pool once. Never let a noisy Telegram filename force a
+                # single weak result into the library.
+                query_variants = []
+                for query in (
+                    parsed.clean_title,
+                    re.sub(r"[^\w\s]", " ", parsed.clean_title),
+                    re.sub(r"\s+", " ", parsed.clean_title).strip(),
+                ):
+                    query = query.strip()
+                    if query and query.casefold() not in {q.casefold() for q in query_variants}:
+                        query_variants.append(query)
 
-                    # Prefer an exact canonical title over a near-title search collision.
-                    # An exact title (or exact original title) with compatible type/year
-                    # is stronger identity evidence than a fuzzy runner-up. Artwork is not
-                    # part of this decision; get_details below is allowed to fill it in.
-                    if best_cand and status_str == "LOW_CONFIDENCE":
-                        parsed_title = normalize_title_for_comparison(parsed.clean_title)
-                        candidate_titles = {
-                            normalize_title_for_comparison(best_cand.title),
-                            normalize_title_for_comparison(best_cand.original_title or ""),
-                        } - {""}
-                        exact_title = bool(parsed_title and parsed_title in candidate_titles)
-                        year_compatible = (
-                            not parsed.year
-                            or not best_cand.release_year
-                            or abs(parsed.year - best_cand.release_year) <= 1
+                for provider in providers:
+                    for index, query in enumerate(query_variants[:3]):
+                        found = await provider.search(
+                            query=query,
+                            year=parsed.year,
+                            media_type=parsed.media_type,
                         )
-                        type_compatible = parsed.media_type == best_cand.media_type
-                        if exact_title and year_compatible and type_compatible and confidence >= 0.80:
-                            status_str = "MATCHED"
-                            confidence = max(confidence, 0.90)
-                            log_event(
-                                "METADATA_EXACT_TITLE_OVERRIDE",
-                                media_id=media_id,
-                                candidate_title=best_cand.title,
-                                confidence=confidence,
-                            )
+                        for candidate in found:
+                            key = (candidate.provider, candidate.media_type, str(candidate.provider_id))
+                            existing = candidates_by_id.get(key)
+                            if existing is None or calculate_match_confidence(parsed, candidate) > calculate_match_confidence(parsed, existing):
+                                candidates_by_id[key] = candidate
 
-                    # Keep searching the second catalogue unless the first result
-                    # is strong (artwork is resolved in get_details or preserved from best_cand).
+                        best_cand, confidence, status_str = rank_candidates(parsed, list(candidates_by_id.values()))
+
+                        # Prefer an exact canonical title over a near-title search collision.
+                        # An exact title (or exact original title) with compatible type/year
+                        # is stronger identity evidence than a fuzzy runner-up. Artwork is not
+                        # part of this decision; get_details below is allowed to fill it in.
+                        if best_cand and status_str == "LOW_CONFIDENCE":
+                            parsed_title = normalize_title_for_comparison(parsed.clean_title)
+                            candidate_titles = {
+                                normalize_title_for_comparison(best_cand.title),
+                                normalize_title_for_comparison(best_cand.original_title or ""),
+                            } - {""}
+                            exact_title = bool(parsed_title and parsed_title in candidate_titles)
+                            year_compatible = (
+                                not parsed.year
+                                or not best_cand.release_year
+                                or abs(parsed.year - best_cand.release_year) <= 1
+                            )
+                            type_compatible = parsed.media_type == best_cand.media_type
+                            if exact_title and year_compatible and type_compatible and confidence >= 0.80:
+                                status_str = "MATCHED"
+                                confidence = max(confidence, 0.90)
+                                log_event(
+                                    "METADATA_EXACT_TITLE_OVERRIDE",
+                                    media_id=media_id,
+                                    candidate_title=best_cand.title,
+                                    confidence=confidence,
+                                )
+
+                        # Keep searching the second catalogue unless the first result
+                        # is strong (artwork is resolved in get_details or preserved from best_cand).
+                        if status_str == "MATCHED" and confidence >= 0.88:
+                            break
                     if status_str == "MATCHED" and confidence >= 0.88:
                         break
-                if status_str == "MATCHED" and confidence >= 0.88:
-                    break
 
             # If still not matched or low confidence, check if any library sibling episode
             # from the same series has already established a canonical entity.
@@ -301,25 +351,37 @@ class MetadataService:
                     siblings = s_res.scalars().all()
                     for sib in siblings:
                         sib_key = self.get_series_key(sib.filename)
-                        if (
-                            sib_key
-                            and current_series_key
-                            and (sib_key == current_series_key or sib_key.startswith(current_series_key) or current_series_key.startswith(sib_key))
-                        ):
+                        is_match = (
+                            (sib_key and current_series_key and (sib_key == current_series_key or sib_key.startswith(current_series_key) or current_series_key.startswith(sib_key)))
+                            or self.titles_match_as_siblings(media.filename, sib.filename)
+                        )
+                        if is_match:
                             sib_entity = await session.get(MetadataEntity, sib.metadata_entity_id)
                             if sib_entity:
                                 cand_key = (sib_entity.provider, sib_entity.media_type, str(sib_entity.provider_id))
                                 if cand_key in candidates_by_id:
                                     best_cand = candidates_by_id[cand_key]
-                                    confidence = 0.95
-                                    status_str = "MATCHED"
-                                    log_event(
-                                        "METADATA_LIBRARY_SIBLING_MATCH",
-                                        media_id=media_id,
-                                        sibling_id=sib.id,
-                                        canonical_title=sib_entity.title,
+                                else:
+                                    from app.services.metadata_providers.base import CandidateMatch
+                                    best_cand = CandidateMatch(
+                                        provider=sib_entity.provider,
+                                        provider_id=sib_entity.provider_id,
+                                        title=sib_entity.title,
+                                        media_type=sib_entity.media_type,
+                                        release_year=sib_entity.release_year,
+                                        poster_path=sib_entity.poster_path,
+                                        rating=sib_entity.rating,
+                                        overview=sib_entity.overview,
                                     )
-                                    break
+                                confidence = 0.98
+                                status_str = "MATCHED"
+                                log_event(
+                                    "METADATA_LIBRARY_SIBLING_MATCH",
+                                    media_id=media_id,
+                                    sibling_id=sib.id,
+                                    canonical_title=sib_entity.title,
+                                )
+                                break
 
             # Conditional Telegram Thumbnail OCR Analysis
             if status_str != "MATCHED" and thumbnail_service.should_trigger_analysis(
@@ -478,6 +540,13 @@ class MetadataService:
                     category=m.category,
                     confidence=confidence,
                 )
+
+                # Automatically cascade canonical metadata and identity to all prefix sibling episodes
+                try:
+                    await self.propagate_metadata_to_siblings(media_id, session=session)
+                except Exception as ex:
+                    logger.warning(f"Sibling propagation failed for #{media_id}: {ex}")
+
                 return True
 
         except Exception as e:
@@ -534,6 +603,59 @@ class MetadataService:
         results.sort(key=lambda x: x["confidence"], reverse=True)
         return results
 
+    @staticmethod
+    def get_title_prefix(title_or_filename: str, n_words: int = 3) -> str:
+        """Extract normalized first N words, stripping noise, tags, and handles."""
+        cleaned = re.sub(r"\.(mkv|mp4|avi|mov|m4v|webm|ts|flv)$", "", title_or_filename, flags=re.I)
+        cleaned = re.sub(r"@[A-Za-z0-9_]+", " ", cleaned)
+        cleaned = re.sub(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}", " ", cleaned)
+        cleaned = re.sub(
+            r"^\s*(?:s\s*\d{1,2}\s*[-_]?\s*(?:e\s*\d{1,4}|ep\s*\d{1,4}|\d{1,4})|ep\s*\d{1,4}|episode\s*\d{1,4})\s*[-_:]*\s*",
+            "",
+            cleaned,
+            flags=re.I,
+        )
+        cleaned = re.sub(
+            r"\b(?:s\s*0*\d{1,2}\s*[._ -]*e\s*0*\d{1,4}|season\s*\d+|episode\s*\d+|ep\s*\d+|e\d+)\b.*$",
+            "",
+            cleaned,
+            flags=re.I,
+        )
+        cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+        words = [w for w in cleaned.lower().split() if w]
+        if not words:
+            return ""
+        return " ".join(words[:n_words])
+
+    @staticmethod
+    def titles_match_as_siblings(title_a: str, title_b: str) -> bool:
+        """Determines if two titles or filenames belong to the same show/anime."""
+        if not title_a or not title_b:
+            return False
+
+        pref_a = MetadataService.get_title_prefix(title_a, n_words=3)
+        pref_b = MetadataService.get_title_prefix(title_b, n_words=3)
+        if not pref_a or not pref_b:
+            return False
+
+        if pref_a == pref_b:
+            return True
+
+        strip_art = lambda p: re.sub(r"^(?:the|a|an)\s+", "", p).strip()
+        core_a = strip_art(pref_a)
+        core_b = strip_art(pref_b)
+        if core_a and core_b and (core_a == core_b or core_a.startswith(core_b) or core_b.startswith(core_a)):
+            if len(core_a.split()) >= 2 or len(core_b.split()) >= 2 or min(len(core_a), len(core_b)) >= 7:
+                return True
+
+        norm_a = re.sub(r"[^\w]", "", strip_art(title_a).lower())
+        norm_b = re.sub(r"[^\w]", "", strip_art(title_b).lower())
+        if norm_a and norm_b and (norm_a.startswith(norm_b) or norm_b.startswith(norm_a)):
+            if min(len(norm_a), len(norm_b)) >= 8:
+                return True
+
+        return False
+
     def get_series_key(self, filename: str, entity: Optional[MetadataEntity] = None) -> str:
         """Deterministic normalized series key from canonical entity or clean title."""
         if entity and getattr(entity, "provider_id", None):
@@ -542,6 +664,116 @@ class MetadataService:
         clean = parsed.clean_title.casefold()
         clean = re.sub(r"^(?:the|a|an)\s+", "", clean)
         return re.sub(r"[^\w]", "", clean)
+
+    async def propagate_metadata_to_siblings(
+        self,
+        media_id: int,
+        session: Optional[AsyncSession] = None,
+        status: MetadataStatus = MetadataStatus.MATCHED,
+        lock: bool = False,
+    ) -> int:
+        """Cascades canonical metadata, title, category, and poster to all sister episodes."""
+        own_session = session is None
+        sess = session or AsyncSessionLocal()
+        updated_count = 0
+        try:
+            target = await sess.get(Media, media_id)
+            if not target or not target.metadata_entity_id:
+                return 0
+
+            entity = await sess.get(MetadataEntity, target.metadata_entity_id)
+            if not entity:
+                return 0
+
+            target_series_key = f"canonical_{entity.provider}_{entity.provider_id}"
+            target.series_key = target_series_key
+
+            stmt = select(Media).where(Media.id != media_id)
+            res = await sess.execute(stmt)
+            all_other = res.scalars().all()
+
+            for sib in all_other:
+                # Do not override an explicitly user-locked entity if it already points elsewhere
+                if sib.metadata_locked and sib.metadata_entity_id != entity.id and not lock:
+                    continue
+
+                # Do not allow a shorter or less specific title to overwrite an already established
+                # longer/richer canonical entity unless forced/locked.
+                if sib.metadata_entity_id and sib.metadata_entity_id != entity.id and not lock:
+                    sib_ent = await sess.get(MetadataEntity, sib.metadata_entity_id)
+                    if sib_ent and sib_ent.title:
+                        if len(sib_ent.title.split()) > len(entity.title.split()):
+                            continue
+
+                is_sibling = False
+                if sib.series_key == target_series_key:
+                    is_sibling = True
+                elif sib.metadata_entity_id == entity.id:
+                    is_sibling = True
+                elif self.titles_match_as_siblings(entity.title, sib.filename):
+                    is_sibling = True
+                elif self.titles_match_as_siblings(target.filename, sib.filename):
+                    is_sibling = True
+                else:
+                    sib_clean = parse_filename(sib.filename).clean_title
+                    target_clean = parse_filename(target.filename).clean_title
+                    if self.titles_match_as_siblings(entity.title, sib_clean) or self.titles_match_as_siblings(
+                        target_clean, sib_clean
+                    ):
+                        is_sibling = True
+
+                if is_sibling:
+                    sib.metadata_entity_id = entity.id
+                    sib.metadata_status = status
+                    if lock:
+                        sib.metadata_locked = True
+                    sib.metadata_confidence = max(sib.metadata_confidence or 0.0, 0.99)
+                    sib.series_key = target_series_key
+                    if not sib.poster_override and target.poster_url:
+                        sib.poster_url = target.poster_url
+                    if not sib.backdrop_override and target.metadata_json:
+                        sib.metadata_json = target.metadata_json
+                    if target.category:
+                        sib.category = target.category
+                    elif entity.category:
+                        sib.category = entity.category
+                    if target.media_type:
+                        sib.media_type = target.media_type
+                    updated_count += 1
+
+                    # Cancel any pending/processing jobs for this sibling so they do not overwrite this match
+                    from sqlalchemy import update
+                    await sess.execute(
+                        update(MetadataJob)
+                        .where(
+                            MetadataJob.media_id == sib.id,
+                            MetadataJob.status.in_([MetadataJobStatus.PENDING, MetadataJobStatus.PROCESSING]),
+                        )
+                        .values(status=MetadataJobStatus.COMPLETED)
+                    )
+
+                    log_event(
+                        "METADATA_SIBLING_PROPAGATED",
+                        source_media_id=media_id,
+                        sibling_media_id=sib.id,
+                        sibling_filename=sib.filename,
+                        canonical_title=entity.title,
+                    )
+
+            await sess.commit()
+
+            if updated_count > 0:
+                try:
+                    from app.services.drive_service import drive_service
+                    if drive_service.is_configured():
+                        asyncio.create_task(drive_service.organize_existing_drive_media())
+                except Exception as dex:
+                    logger.debug(f"Drive re-org on sibling propagation: {dex}")
+
+            return updated_count
+        finally:
+            if own_session:
+                await sess.close()
 
     async def manually_select_metadata(
         self, media_id: int, provider_id: str, media_type: str = "movie", apply_to_series: bool = True
@@ -569,6 +801,7 @@ class MetadataService:
             media.metadata_locked = True
             media.category = cat
             media.media_type = taxonomy.value
+            media.series_key = f"canonical_{entity.provider}_{entity.provider_id}"
 
             if details.poster_path and not media.poster_override:
                 media.poster_url = details.full_poster_url()
@@ -577,43 +810,13 @@ class MetadataService:
                 meta["backdrop_url"] = details.full_backdrop_url()
                 media.metadata_json = json.dumps(meta)
 
-            # Apply one canonical match/artwork to every sibling episode.
-            if apply_to_series and taxonomy in (
-                MediaTaxonomy.TV_SERIES,
-                MediaTaxonomy.TV_EPISODE,
-                MediaTaxonomy.ANIME_SERIES,
-                MediaTaxonomy.ANIME_EPISODE,
-            ):
-                selected_key = self.get_series_key(media.filename, entity=entity)
-                sibling_stmt = select(Media).where(Media.id != media_id)
-                sibling_result = await session.execute(sibling_stmt)
-                for sibling in sibling_result.scalars().all():
-                    sibling_key = self.get_series_key(sibling.filename)
-                    is_same_series = (sibling.metadata_entity_id == entity.id) or (
-                        selected_key and (sibling_key == selected_key or sibling_key == self.get_series_key(media.filename))
-                    )
-                    if not is_same_series:
-                        continue
-                    # Preserve an explicitly chosen custom poster/backdrop, but
-                    # make the selected canonical series entity/artwork shared.
-                    sibling_parsed = parse_filename(sibling.filename)
-                    sibling_tax, sibling_cat = classify_media(
-                        sibling_parsed, details, raw_filename=sibling.filename
-                    )
-                    sibling.metadata_entity_id = entity.id
-                    sibling.metadata_status = MetadataStatus.MANUAL
-                    sibling.metadata_confidence = 1.0
-                    sibling.metadata_locked = True
-                    sibling.category = sibling_cat
-                    sibling.media_type = sibling_tax.value
-                    if details.poster_path and not sibling.poster_override:
-                        sibling.poster_url = details.full_poster_url()
-                    if details.backdrop_path and not sibling.backdrop_override:
-                        sibling_meta = json.loads(sibling.metadata_json or "{}")
-                        sibling_meta["backdrop_url"] = details.full_backdrop_url()
-                        sibling.metadata_json = json.dumps(sibling_meta)
-
             await session.commit()
+
+            # Apply one canonical match/artwork to every sibling episode.
+            if apply_to_series:
+                await self.propagate_metadata_to_siblings(
+                    media_id, session=session, status=MetadataStatus.MANUAL, lock=True
+                )
             log_event(
                 "METADATA_MANUALLY_OVERRIDDEN",
                 media_id=media_id,

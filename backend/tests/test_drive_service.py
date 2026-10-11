@@ -164,3 +164,25 @@ async def test_get_resumable_offset_reads_range_header():
     with patch("httpx.AsyncClient.put", new_callable=AsyncMock, return_value=resp):
         offset = await service.get_resumable_offset("http://upload/session", 2048)
     assert offset == 1048576
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_show_folder():
+    service = GoogleDriveService(client_id="cid", client_secret="csec", refresh_token="reftok")
+    service._folder_cache = {"Anime": "anime_cat_folder_id"}
+
+    fake_client = MagicMock()
+    # List returns empty -> creates folder
+    fake_client.files().list().execute.return_value = {"files": []}
+    fake_client.files().create().execute.return_value = {"id": "show_folder_123"}
+
+    fake_creds = MagicMock()
+    with patch.object(service, "get_credentials", new_callable=AsyncMock, return_value=fake_creds), \
+         patch.object(service, "_get_drive_client", return_value=fake_client):
+        folder_id = await service.get_or_create_show_folder(
+            category="Anime",
+            show_name="The Daily Life of a Middle-Aged Online Shopper in Another World"
+        )
+
+    assert folder_id == "show_folder_123"
+    assert "Anime:the daily life of a middle-aged online shopper in another world" in service._show_folder_cache
