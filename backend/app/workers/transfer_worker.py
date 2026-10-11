@@ -397,7 +397,15 @@ class TransferWorker:
             if t and t.resumable_upload_url:
                 upload_url = t.resumable_upload_url
                 start_offset = await drive_service.get_resumable_offset(upload_url, actual_size)
-                log_event("RECOVERY_OFFSET_RESUMED", transfer_id=transfer_id, start_offset=start_offset)
+                if start_offset < 0:
+                    log_event("RESUMABLE_SESSION_EXPIRED", transfer_id=transfer_id, url=upload_url)
+                    upload_url = None
+                    start_offset = 0
+                    t.resumable_upload_url = None
+                    t.bytes_transferred = 0
+                    await session.commit()
+                else:
+                    log_event("RECOVERY_OFFSET_RESUMED", transfer_id=transfer_id, start_offset=start_offset)
 
         if not upload_url:
             upload_url = await drive_service.create_resumable_upload_session(
@@ -443,13 +451,25 @@ class TransferWorker:
                 chunk_bytes = bytes(buffer)
                 buffer.clear()
 
-                completed, file_id = await drive_service.upload_chunk(
-                    upload_url=upload_url,
-                    chunk=chunk_bytes,
-                    start_byte=current_offset,
-                    total_size=actual_size,
-                )
+                try:
+                    completed, file_id = await drive_service.upload_chunk(
+                        upload_url=upload_url,
+                        chunk=chunk_bytes,
+                        start_byte=current_offset,
+                        total_size=actual_size,
+                    )
+                except DriveUploadError as e:
+                    if "404" in str(e):
+                        async with AsyncSessionLocal() as session:
+                            stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                            t = (await session.execute(stmt)).scalar_one_or_none()
+                            if t:
+                                t.resumable_upload_url = None
+                                t.bytes_transferred = 0
+                                await session.commit()
+                    raise
                 current_offset += len(chunk_bytes)
+
 
                 pct = int((current_offset / actual_size) * 100) if actual_size > 0 else 0
                 log_event(

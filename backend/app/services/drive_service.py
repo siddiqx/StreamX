@@ -258,19 +258,28 @@ class GoogleDriveService:
             )
 
     async def get_resumable_offset(self, upload_url: str, total_size: int) -> int:
-        """Query how many bytes Google Drive has acknowledged for this session (restart recovery)."""
+        """Query how many bytes Google Drive has acknowledged for this session (restart recovery).
+        Returns the byte offset, or -1 if the resumable session is expired / invalid (HTTP 404/410).
+        """
         headers = {
             "Content-Range": f"bytes */{total_size}",
         }
         async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.put(upload_url, headers=headers)
-            if res.status_code == 308:
-                range_header = res.headers.get("Range")
-                if range_header:
-                    # Format: 'bytes=0-1048575'
-                    last_byte = int(range_header.split("-")[1])
-                    return last_byte + 1
+            try:
+                res = await client.put(upload_url, headers=headers)
+                if res.status_code == 308:
+                    range_header = res.headers.get("Range")
+                    if range_header:
+                        # Format: 'bytes=0-1048575'
+                        last_byte = int(range_header.split("-")[1])
+                        return last_byte + 1
+                    return 0
+                if res.status_code in (404, 410):
+                    return -1
+            except Exception:
+                pass
             return 0
+
 
     async def verify_file(self, drive_file_id: str, expected_size: int, filename: str) -> bool:
         """Verify an uploaded Drive file: exists, correct size.
