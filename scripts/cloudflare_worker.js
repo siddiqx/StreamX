@@ -39,6 +39,7 @@ async function getGoogleAccessToken(env) {
     throw new Error("Google Drive credentials not configured in Cloudflare Worker environment variables.");
   }
 
+
   const params = new URLSearchParams({
     client_id: clientId,
     client_secret: clientSecret,
@@ -130,10 +131,32 @@ async function handleTelegramWebhook(request, env, rawBase) {
       return new Response("OK", { status: 200 });
     }
 
+    // 1. When your PC is running, proxy directly to the local backend.
+    // The backend has full SQLite access, live progress bars, speed, library stats, and command handlers.
+    let handledByBackend = false;
+    try {
+      const backendRes = await fetch(`${rawBase}/telegram/webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(update),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (backendRes.ok) {
+        handledByBackend = true;
+      }
+    } catch (_) {
+      handledByBackend = false;
+    }
+
+    if (handledByBackend) {
+      return new Response("OK", { status: 200 });
+    }
+
+    // --- PC IS OFFLINE / BACKEND UNREACHABLE: 24/7 EDGE FALLBACK MODE ---
     const text = (msg.text || msg.caption || "").trim();
     const cmd = text.split(/\s+/)[0].toLowerCase().split("@")[0];
 
-    // Commands
+    // Commands in Edge Mode
     if (cmd === "/start") {
       await sendTelegram(
         chatId,
@@ -145,6 +168,8 @@ async function handleTelegramWebhook(request, env, rawBase) {
         `• <b>Automatic Downloads:</b> When your PC is running, all queued files stream directly to Google Drive.\n\n` +
         `<b>Commands:</b>\n` +
         `• /status — Check 24/7 edge & download status\n` +
+        `• /queue — Active download queue\n` +
+        `• /library — Media library overview\n` +
         `• /ping — Test edge responsiveness\n` +
         `• /help — Full instructions`,
         msgId
@@ -178,18 +203,23 @@ async function handleTelegramWebhook(request, env, rawBase) {
     }
 
     if (cmd === "/status" || cmd === "/queue") {
-      let isPcOnline = false;
-      try {
-        const pingRes = await fetch(`${rawBase}/health`, { signal: AbortSignal.timeout(2000) });
-        if (pingRes.ok) isPcOnline = true;
-      } catch (_) {}
-
       await sendTelegram(
         chatId,
         `📊 <b>StreamX System Status</b>\n\n` +
         `🟢 <b>Edge Bot Engine:</b> Active 24/7 (Always Responding)\n` +
-        `💻 <b>Download Worker:</b> ${isPcOnline ? '🟢 Online & Downloading' : '🟡 Standby (Queued files download when PC boots)'}\n` +
-        `☁️ <b>Google Drive:</b> Connected`,
+        `💻 <b>Download Worker:</b> 🟡 Standby (PC is offline — queued files will automatically download when your PC turns on)\n` +
+        `☁️ <b>Google Drive:</b> Connected 24/7`,
+        msgId
+      );
+      return new Response("OK", { status: 200 });
+    }
+
+    if (cmd === "/library") {
+      await sendTelegram(
+        chatId,
+        `📚 <b>StreamX Media Library</b>\n\n` +
+        `Your entire library is accessible 24/7 on the StreamX web app and PWA.\n` +
+        `Click <b>Play</b> on any item to stream directly in VLC.`,
         msgId
       );
       return new Response("OK", { status: 200 });
@@ -217,16 +247,6 @@ async function handleTelegramWebhook(request, env, rawBase) {
         `<i>Your file is safely queued in the cloud. It will automatically download to Google Drive as soon as your PC is running!</i>`,
         msgId
       );
-
-      // If PC is running right now, notify local backend to start immediately
-      try {
-        await fetch(`${rawBase}/transfers/sync`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(3000),
-        });
-      } catch (_) {}
-
       return new Response("OK", { status: 200 });
     }
 

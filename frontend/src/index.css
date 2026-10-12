@@ -64,6 +64,15 @@ body {
 .animate-scale-in { animation: fadeInScale 0.3s cubic-bezier(0.16,1,0.3,1) both; }
 .animate-slide-up { animation: slideUp 0.38s cubic-bezier(0.16,1,0.3,1) both; }
 .beacon-dot { width:7px; height:7px; border-radius:50%; animation: pulseBeacon 2s infinite ease-in-out; }
+@keyframes transferShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.progress-fill-active {
+  background: linear-gradient(90deg, #6366f1 0%, #a855f7 35%, #06b6d4 70%, #6366f1 100%);
+  background-size: 200% 100%;
+  animation: transferShimmer 2s linear infinite;
+}
 .glass-nav { background: rgba(7,9,14,0.92); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); }
 .glass-pill { background: rgba(255,255,255,0.06); backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); border-radius: var(--radius-full); transition: all 0.2s; }
 .glass-pill:hover,.glass-pill:active { background: rgba(255,255,255,0.1); border-color: var(--border-hover); }

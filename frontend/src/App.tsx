@@ -145,19 +145,59 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Poll media catalog & cloud transfers
+  // Adaptive high-performance catalog & transfer sync
+  const refreshTransfers = async () => {
+    try {
+      const transfersRes = await fetchTransfers();
+      setTransfers((prev) => {
+        // Detect newly completed transfers to instantly refresh media catalog!
+        const prevCompleted = prev.filter((t) => t.status === 'COMPLETED').length;
+        const newCompleted = transfersRes.filter((t) => t.status === 'COMPLETED').length;
+        if (newCompleted > prevCompleted) {
+          fetchMedia().then((m) => {
+            if (m && m.length > 0) setMedia(m);
+          });
+        }
+        return transfersRes;
+      });
+    } catch (_) {}
+  };
+
+  const refreshMedia = async () => {
+    try {
+      const mediaRes = await fetchMedia();
+      if (mediaRes && mediaRes.length > 0) {
+        setMedia((prev) => {
+          if (prev.length === mediaRes.length && prev[0]?.id === mediaRes[0]?.id) {
+            return prev;
+          }
+          return mediaRes;
+        });
+      }
+    } catch (_) {}
+  };
+
   const refreshData = async () => {
-    const [mediaRes, transfersRes] = await Promise.all([
-      fetchMedia(),
-      fetchTransfers(),
-    ]);
-    setMedia(mediaRes);
-    setTransfers(transfersRes);
+    await Promise.all([refreshMedia(), refreshTransfers()]);
   };
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(refreshData, 4000);
+  }, []);
+
+  // Smart adaptive transfer polling: 2.5s while items are syncing, 10s when idle
+  useEffect(() => {
+    const hasActive = transfers.some(
+      (t) => t.status === 'UPLOADING_DRIVE' || t.status === 'FETCHING_TELEGRAM' || t.status === 'QUEUED' || t.status === 'RETRYING'
+    );
+    const intervalMs = hasActive ? 2500 : 10000;
+    const interval = setInterval(refreshTransfers, intervalMs);
+    return () => clearInterval(interval);
+  }, [transfers]);
+
+  // Periodic background media catalog check (every 60s)
+  useEffect(() => {
+    const interval = setInterval(refreshMedia, 60000);
     return () => clearInterval(interval);
   }, []);
 

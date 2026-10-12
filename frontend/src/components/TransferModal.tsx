@@ -1,7 +1,7 @@
-import React from 'react';
-import { X, Cloud, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Cloud, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, Clock, Trash2 } from 'lucide-react';
 import type { TelegramTransfer, TransferStatus } from '../types';
-import { formatBytes } from '../api';
+import { formatBytes, retryTransfer, deleteTransfer } from '../api';
 
 interface TransferModalProps {
   isOpen: boolean;
@@ -16,7 +16,29 @@ export const TransferModal: React.FC<TransferModalProps> = ({
   transfers,
   onRefresh,
 }) => {
+  const [processingId, setProcessingId] = useState<number | null>(null);
+
   if (!isOpen) return null;
+
+  const handleRetry = async (transferId: number) => {
+    setProcessingId(transferId);
+    try {
+      await retryTransfer(transferId);
+      onRefresh();
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleCancel = async (transferId: number) => {
+    setProcessingId(transferId);
+    try {
+      await deleteTransfer(transferId);
+      onRefresh();
+    } finally {
+      setProcessingId(null);
+    }
+  };
 
   const getStatusBadge = (status: TransferStatus) => {
     switch (status) {
@@ -37,9 +59,13 @@ export const TransferModal: React.FC<TransferModalProps> = ({
     }
   };
 
+  const activeCount = transfers.filter(
+    (t) => t.status === 'UPLOADING_DRIVE' || t.status === 'FETCHING_TELEGRAM' || t.status === 'QUEUED'
+  ).length;
+
   return (
     <div className="bottom-sheet-backdrop animate-fade-in" onClick={onClose}>
-      <div className="bottom-sheet" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '82dvh' }}>
+      <div className="bottom-sheet" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '85dvh' }}>
         <div className="bottom-sheet-handle" />
 
         {/* Header */}
@@ -62,14 +88,22 @@ export const TransferModal: React.FC<TransferModalProps> = ({
             }}>
               <Cloud size={17} color="#fff" />
             </div>
-            <h2 style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', fontFamily: 'var(--font-display)' }}>
-              Transfers ({transfers.length})
-            </h2>
+            <div>
+              <h2 style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', fontFamily: 'var(--font-display)' }}>
+                Transfer Queue ({transfers.length})
+              </h2>
+              {activeCount > 0 && (
+                <span style={{ fontSize: '0.72rem', color: '#a5b4fc', fontWeight: 600 }}>
+                  {activeCount} active in pipeline
+                </span>
+              )}
+            </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
               onClick={onRefresh}
+              aria-label="Refresh transfers"
               style={{
                 background: 'rgba(255, 255, 255, 0.06)',
                 border: '1px solid rgba(255,255,255,0.1)',
@@ -87,6 +121,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
             </button>
             <button
               onClick={onClose}
+              aria-label="Close"
               style={{
                 background: 'rgba(255, 255, 255, 0.06)',
                 border: '1px solid rgba(255,255,255,0.1)',
@@ -110,25 +145,33 @@ export const TransferModal: React.FC<TransferModalProps> = ({
           {transfers.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '50px 20px', color: 'var(--text-faint)' }}>
               <Cloud size={40} style={{ opacity: 0.25, marginBottom: '10px' }} />
-              <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>No transfers</p>
+              <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>No transfers in queue</p>
+              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Forward any media file in Telegram to automatically queue it!
+              </p>
             </div>
           ) : (
             transfers.map((t) => {
               const badge = getStatusBadge(t.status);
               const BadgeIcon = badge.icon;
               const pct = t.size > 0 ? Math.min(100, Math.round((t.bytes_transferred / t.size) * 100)) : 0;
+              const isActive = t.status === 'UPLOADING_DRIVE' || t.status === 'FETCHING_TELEGRAM';
+              const isFailed = t.status === 'FAILED';
+              const isQueued = t.status === 'QUEUED' || t.status === 'RETRYING';
+              const isBusy = processingId === t.id;
 
               return (
                 <div
                   key={t.id}
                   style={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                    border: '1px solid rgba(255, 255, 255, 0.07)',
+                    backgroundColor: isActive ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                    border: isActive ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid rgba(255, 255, 255, 0.07)',
                     borderRadius: '14px',
                     padding: '12px 14px',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '8px',
+                    transition: 'all 0.2s',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
@@ -143,49 +186,107 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                       }}>
                         {t.filename}
                       </p>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-faint)' }}>
-                        {formatBytes(t.bytes_transferred)} / {formatBytes(t.size)}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-faint)' }}>
+                          {formatBytes(t.bytes_transferred)} / {formatBytes(t.size)}
+                        </span>
+                        {isActive && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.7rem', color: '#818cf8', fontWeight: 600 }}>
+                            <span className="beacon-dot" style={{ width: '5px', height: '5px', background: '#6366f1' }} />
+                            Live Streaming
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      background: badge.bg,
-                      color: badge.color,
-                      padding: '3px 8px',
-                      borderRadius: 'var(--radius-full)',
-                      fontSize: '0.68rem',
-                      fontWeight: 800,
-                      whiteSpace: 'nowrap',
-                    }}>
-                      <BadgeIcon size={11} />
-                      <span>{badge.label}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: badge.bg,
+                        color: badge.color,
+                        padding: '3px 8px',
+                        borderRadius: 'var(--radius-full)',
+                        fontSize: '0.68rem',
+                        fontWeight: 800,
+                        whiteSpace: 'nowrap',
+                      }}>
+                        <BadgeIcon size={11} />
+                        <span>{badge.label}</span>
+                      </div>
+
+                      {isFailed && (
+                        <button
+                          disabled={isBusy}
+                          onClick={() => handleRetry(t.id)}
+                          title="Retry transfer"
+                          style={{
+                            background: 'rgba(245, 158, 11, 0.15)',
+                            border: '1px solid rgba(245, 158, 11, 0.3)',
+                            borderRadius: 'var(--radius-full)',
+                            padding: '3px 8px',
+                            color: '#fbbf24',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            cursor: isBusy ? 'wait' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                          }}
+                        >
+                          <RefreshCw size={10} />
+                          <span>Retry</span>
+                        </button>
+                      )}
+
+                      {(isQueued || isFailed) && (
+                        <button
+                          disabled={isBusy}
+                          onClick={() => handleCancel(t.id)}
+                          title="Remove from queue"
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: '50%',
+                            width: '24px',
+                            height: '24px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'var(--text-faint)',
+                            cursor: isBusy ? 'wait' : 'pointer',
+                          }}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   {/* Progress bar */}
                   <div style={{
                     width: '100%',
-                    height: '4px',
+                    height: '5px',
                     backgroundColor: 'rgba(255, 255, 255, 0.08)',
                     borderRadius: 'var(--radius-full)',
                     overflow: 'hidden',
                   }}>
                     <div
+                      className={isActive ? 'progress-fill-active' : ''}
                       style={{
                         height: '100%',
                         width: `${pct}%`,
-                        backgroundColor: t.status === 'COMPLETED' ? 'var(--accent-emerald)' : '#818cf8',
+                        backgroundColor: t.status === 'COMPLETED' ? 'var(--accent-emerald)' : (!isActive ? '#818cf8' : undefined),
                         borderRadius: 'var(--radius-full)',
-                        transition: 'width 0.3s ease',
+                        transition: 'width 0.4s ease',
                       }}
                     />
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', fontSize: '0.68rem', color: 'var(--text-faint)' }}>
-                    <span>{pct}%</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.68rem', color: 'var(--text-faint)' }}>
+                    <span>#{t.id}</span>
+                    <span style={{ fontWeight: 700, color: isActive ? '#a5b4fc' : undefined }}>{pct}%</span>
                   </div>
                 </div>
               );

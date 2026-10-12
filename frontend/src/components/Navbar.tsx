@@ -11,6 +11,13 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTransfers, onOpenTransfers
     (t) => t.status === 'FETCHING_TELEGRAM' || t.status === 'UPLOADING_DRIVE' || t.status === 'QUEUED'
   ).length;
 
+  const currentUploading = activeTransfers.find(
+    (t) => t.status === 'UPLOADING_DRIVE' || t.status === 'FETCHING_TELEGRAM'
+  );
+  const currentPct = currentUploading && currentUploading.size > 0
+    ? Math.min(100, Math.round((currentUploading.bytes_transferred / currentUploading.size) * 100))
+    : null;
+
   return (
     <header
       className="glass-nav"
@@ -58,7 +65,9 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTransfers, onOpenTransfers
             background: '#6366f1',
             boxShadow: '0 0 8px #6366f1', flexShrink: 0,
           }} />
-          <span>{activeCount} Syncing</span>
+          <span>
+            {currentPct !== null ? `${activeCount} Syncing (${currentPct}%)` : `${activeCount} Queued`}
+          </span>
         </button>
       )}
     </header>
