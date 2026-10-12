@@ -38,7 +38,7 @@ from app.utils.errors import (
     ErrorCategory,
     classify_error,
 )
-from app.utils.filenames import format_bytes, resolve_mime_type
+from app.utils.filenames import format_bytes, resolve_mime_type, sanitize_filename
 from app.utils.logging import log_event, logger
 
 

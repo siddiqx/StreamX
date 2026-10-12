@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.health import router as health_router
 from app.api.media import router as media_router
 from app.api.metadata import router as metadata_router
+from app.api.telegram import router as telegram_router
 from app.api.transfers import router as transfers_router
 from app.config.settings import settings
 from app.db.database import init_db
@@ -251,3 +252,4 @@ app.include_router(health_router)
 app.include_router(transfers_router)
 app.include_router(media_router)
 app.include_router(metadata_router)
+app.include_router(telegram_router)
