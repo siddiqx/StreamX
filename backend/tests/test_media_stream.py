@@ -76,6 +76,12 @@ async def test_stream_and_download_endpoints(sample_media):
             assert "attachment" in res_download.headers["Content-Disposition"]
             assert len(res_download.content) == 1024
 
+            # 3. Test HEAD probe on stream endpoint (essential for VLC & browser preflight)
+            res_head = await client.head(f"/media/{sample_media}/stream")
+            assert res_head.status_code == 200
+            assert res_head.headers["Accept-Ranges"] == "bytes"
+            assert res_head.headers["Content-Length"] == "1048576"
+
 
 @pytest.mark.asyncio
 async def test_unicode_filename_stream_and_m3u():

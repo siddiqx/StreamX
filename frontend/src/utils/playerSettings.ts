@@ -4,10 +4,8 @@
 
 import type { MediaItem } from '../types';
 import {
-  API_BASE,
   getMediaDisplayName,
   getStreamUrl,
-  getVlcProtocolUrl,
   getPlaylistUrl,
   openVlcOnHost
 } from '../api';
@@ -73,7 +71,7 @@ export async function launchVlcWithTracking(
 
   // 2. Android Launch (Intent directly launches VLC app with native hardware decode)
   if (isAndroid) {
-    const streamUrl = getStreamUrl(item.id);
+    const streamUrl = getStreamUrl(item.id, item.drive_file_id);
     const rawUrl = streamUrl.replace(/^https?:\/\//, '');
     const scheme = streamUrl.startsWith('https') ? 'https' : 'http';
     const intentUrl = `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};S.title=${encodeURIComponent(title)};end`;
@@ -87,7 +85,7 @@ export async function launchVlcWithTracking(
 
   // 3. iOS Launch (VLC for iOS callback handler)
   if (isIos) {
-    const streamUrl = getStreamUrl(item.id);
+    const streamUrl = getStreamUrl(item.id, item.drive_file_id);
     const vlcCallback = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(streamUrl)}`;
     const vlcProto = `vlc://${streamUrl}`;
     window.location.href = vlcCallback;
@@ -100,46 +98,26 @@ export async function launchVlcWithTracking(
   }
 
   // 4. Desktop (Windows / Mac / Linux)
-  // Try local backend host launcher first if running locally
+  // Try launching VLC directly on host machine via backend API (works over HTTPS & localhost)
   try {
-    const localRes = await fetch(`http://localhost:8000/media/${item.id}/open-vlc`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(600),
-    });
-    if (localRes.ok) {
-      if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
-      return { success: true, message: 'Launched in VLC' };
-    }
-  } catch {}
-
-  if (API_BASE.includes('localhost') || API_BASE.includes('127.0.0.1')) {
     const hostRes = await openVlcOnHost(item.id);
     if (hostRes.success) {
       if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
       return hostRes;
     }
-  }
-
-  // Desktop cloud stream: Trigger vlc:// protocol & instant M3U stream file
-  try {
-    const vlcProto = getVlcProtocolUrl(item.id);
-    const link = document.createElement('a');
-    link.href = vlcProto;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   } catch {}
 
+  // Desktop remote stream fallback: Trigger instant M3U stream file
   setTimeout(() => {
     try {
       const m3uLink = document.createElement('a');
-      m3uLink.href = getPlaylistUrl(item.id);
+      m3uLink.href = getPlaylistUrl(item.id, item.drive_file_id);
       m3uLink.download = `${title}.m3u`;
       document.body.appendChild(m3uLink);
       m3uLink.click();
       document.body.removeChild(m3uLink);
     } catch {}
-  }, 350);
+  }, 200);
 
   if (onStatusUpdate) onStatusUpdate('✓ VLC Stream Ready');
   return { success: true, message: 'Opening in VLC...' };

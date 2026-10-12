@@ -63,8 +63,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
 
   const streamUrl = item
     ? (streamMode === 'universal'
-        ? getCompatibleStreamUrl(item.id, seekOffset > 0 ? seekOffset : undefined, transcodeForced ? 'transcode' : 'auto')
-        : getStreamUrl(item.id))
+        ? getCompatibleStreamUrl(item.id, seekOffset > 0 ? seekOffset : undefined, transcodeForced ? 'transcode' : 'auto', item.drive_file_id)
+        : getStreamUrl(item.id, item.drive_file_id))
     : '';
 
   // Resume position from watch history if available
@@ -138,7 +138,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       setCurrentTime(0);
       setIsLoading(true);
       if (videoRef.current) {
-        videoRef.current.src = getCompatibleStreamUrl(item.id, target);
+        videoRef.current.src = getCompatibleStreamUrl(item.id, target, undefined, item.drive_file_id);
         videoRef.current.play().catch(() => {});
       }
     } else {
@@ -156,7 +156,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       setCurrentTime(0);
       setIsLoading(true);
       if (videoRef.current) {
-        videoRef.current.src = getCompatibleStreamUrl(item.id, target);
+        videoRef.current.src = getCompatibleStreamUrl(item.id, target, undefined, item.drive_file_id);
         videoRef.current.play().catch(() => {});
       }
     } else {
@@ -175,7 +175,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
     setCurrentTime(0);
     setIsLoading(true);
     if (videoRef.current) {
-      const nextUrl = nextMode === 'universal' ? getCompatibleStreamUrl(item.id) : getStreamUrl(item.id);
+      const nextUrl = nextMode === 'universal' ? getCompatibleStreamUrl(item.id, undefined, undefined, item.drive_file_id) : getStreamUrl(item.id, item.drive_file_id);
       videoRef.current.src = nextUrl;
       videoRef.current.play().catch(() => {});
     }
@@ -321,7 +321,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                   setSeekOffset(0);
                   setCurrentTime(0);
                   setIsLoading(true);
-                  v.src = getCompatibleStreamUrl(item.id, undefined, transcodeForced ? 'transcode' : 'auto');
+                  v.src = getCompatibleStreamUrl(item.id, undefined, transcodeForced ? 'transcode' : 'auto', item.drive_file_id);
                   v.play().catch(() => {});
                 } else if (!isAudioOnlyDetected && v.currentTime > 3.0) {
                   // Universal stream also lacks 10-bit hardware decode in this browser
@@ -508,7 +508,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             </button>
 
             <a
-              href={getPlaylistUrl(item.id)}
+              href={getPlaylistUrl(item.id, item.drive_file_id)}
               download={`${displayName}.m3u`}
               style={{
                 height: '40px',
@@ -601,7 +601,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                 setIsAudioOnlyDetected(false);
                 setIsLoading(true);
                 if (videoRef.current) {
-                  videoRef.current.src = getCompatibleStreamUrl(item.id, currentTime, 'transcode');
+                  videoRef.current.src = getCompatibleStreamUrl(item.id, currentTime, 'transcode', item.drive_file_id);
                   videoRef.current.play().catch(() => {});
                 }
               }}

@@ -361,21 +361,41 @@ async def unlock_media_metadata(
 
 
 
-@router.get("/{media_id}/stream")
+@router.api_route("/{media_id}/stream", methods=["GET", "HEAD"])
 async def stream_media(
     media_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Stream media file directly from Google Drive with full HTTP Range (seek) support."""
+    """Stream media file directly from Google Drive with full HTTP Range (seek) and HEAD probe support."""
     stmt = select(Media).where(Media.id == media_id)
     result = await db.execute(stmt)
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Media item not found")
 
+    content_type = resolve_mime_type(item.filename, item.mime_type)
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": content_type,
+        "Content-Disposition": make_content_disposition("inline", item.filename),
+    }
+
+    # Handle HEAD request (used by VLC, Safari, and web video players to probe headers/seeking)
+    if request.method == "HEAD":
+        if item.size:
+            headers["Content-Length"] = str(item.size)
+        return Response(content=b"", status_code=200, headers=headers)
+
     range_header = request.headers.get("Range")
     client, res = await drive_service.get_download_stream(item.drive_file_id, range_header)
+
+    if res.status_code not in (200, 206):
+        err_text = await res.aread()
+        await res.aclose()
+        await client.aclose()
+        logger.error(f"Google Drive streaming error HTTP {res.status_code} for file {item.drive_file_id}: {err_text}")
+        raise HTTPException(status_code=res.status_code, detail=f"Google Drive stream error: {res.status_code}")
 
     async def stream_generator():
         try:
@@ -385,12 +405,6 @@ async def stream_media(
             await res.aclose()
             await client.aclose()
 
-    content_type = resolve_mime_type(item.filename, item.mime_type)
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Type": content_type,
-        "Content-Disposition": make_content_disposition("inline", item.filename),
-    }
     if "Content-Range" in res.headers:
         headers["Content-Range"] = res.headers["Content-Range"]
     if "Content-Length" in res.headers:
@@ -467,9 +481,10 @@ async def probe_media_codecs(drive_file_id: str, token: str) -> Dict[str, str]:
         return {"video": "h264", "audio": "opus", "pix_fmt": "yuv420p"}
 
 
-@router.get("/{media_id}/stream/compatible")
+@router.api_route("/{media_id}/stream/compatible", methods=["GET", "HEAD"])
 async def stream_compatible_media(
     media_id: int,
+    request: Request,
     start: float = Query(0.0, ge=0.0, description="Seek start position in seconds"),
     mode: str = Query("auto", description="Streaming strategy: 'auto', 'remux', or 'transcode'"),
     db: AsyncSession = Depends(get_db),
@@ -481,12 +496,24 @@ async def stream_compatible_media(
     - Zero-delay audio conversion to AAC stereo when audio is Opus/AC3/Vorbis.
     - Input keyframe seeking for instant response when scrubbing.
     - 100% compatible with Chrome, Safari, Firefox, Edge, iOS, and Android web players.
+    - Full HTTP HEAD probe support for browser preflights.
     """
     stmt = select(Media).where(Media.id == media_id)
     result = await db.execute(stmt)
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Media item not found")
+
+    headers = {
+        "Content-Type": "video/mp4",
+        "Content-Disposition": make_content_disposition("inline", f"{item.filename}.mp4"),
+        "Accept-Ranges": "none",
+        "Cache-Control": "no-cache",
+    }
+
+    # Handle HEAD request for browser probe without spinning up ffmpeg
+    if request.method == "HEAD":
+        return Response(content=b"", status_code=200, headers=headers)
 
     creds = await drive_service.get_credentials()
     drive_url = f"https://www.googleapis.com/drive/v3/files/{item.drive_file_id}?alt=media"
@@ -562,12 +589,7 @@ async def stream_compatible_media(
     return StreamingResponse(
         transcode_generator(),
         media_type="video/mp4",
-        headers={
-            "Content-Type": "video/mp4",
-            "Content-Disposition": make_content_disposition("inline", f"{item.filename}.mp4"),
-            "Accept-Ranges": "none",
-            "Cache-Control": "no-cache",
-        },
+        headers=headers,
     )
 
 
@@ -577,7 +599,7 @@ async def open_in_vlc(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Launch VLC Media Player directly on the host system to play the media stream."""
+    """Launch VLC Media Player directly on the host system to play the media stream with zero network latency."""
     import subprocess
     import os
 
@@ -591,9 +613,8 @@ async def open_in_vlc(
     if not vlc_bin:
         raise HTTPException(status_code=404, detail="VLC Media Player was not found on this system.")
 
-    host = request.headers.get("host") or "127.0.0.1:8000"
-    scheme = request.url.scheme
-    stream_url = f"{scheme}://{host}/media/{media_id}/stream"
+    # Direct local loopback URL bypasses external cloud tunnel, ensuring instant, buffer-free playback
+    stream_url = f"http://127.0.0.1:8000/media/{media_id}/stream"
 
     try:
         if os.name == "nt":
@@ -623,7 +644,7 @@ async def get_m3u_playlist(
 
     clean_title = sanitize_filename(item.filename)
     host = request.headers.get("host") or "127.0.0.1:8000"
-    scheme = request.url.scheme
+    scheme = "https" if ("trycloudflare.com" in host or request.headers.get("x-forwarded-proto") == "https") else request.url.scheme
     stream_url = f"{scheme}://{host}/media/{media_id}/stream"
 
     m3u_content = f"#EXTM3U\n#EXTINF:-1,{clean_title}\n{stream_url}\n"

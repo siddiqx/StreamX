@@ -1,6 +1,6 @@
 import type { CategorySummary, MediaItem, TelegramTransfer } from './types';
 
-export const CLOUD_BACKEND_URL = 'https://senior-concerning-economies-tap.trycloudflare.com';
+export const CLOUD_BACKEND_URL = 'https://streamx-worker.siddiqsiddiq00012.workers.dev';
 
 export const getApiBase = (): string => {
   if (typeof window !== 'undefined') {
@@ -264,24 +264,28 @@ export async function fetchSystemStatus(): Promise<SystemStatus | null> {
   }
 }
 
-export function getStreamUrl(mediaId: number): string {
-  return `${API_BASE}/media/${mediaId}/stream`;
+export function getStreamUrl(mediaId: number, driveFileId?: string): string {
+  const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
+  return `${API_BASE}/media/${mediaId}/stream${qs}`;
 }
 
-export function getCompatibleStreamUrl(mediaId: number, start?: number, mode?: string): string {
+export function getCompatibleStreamUrl(mediaId: number, start?: number, mode?: string, driveFileId?: string): string {
   const params = new URLSearchParams();
   if (start && start > 0) params.set('start', start.toString());
   if (mode) params.set('mode', mode);
+  if (driveFileId) params.set('drive_id', driveFileId);
   const qs = params.toString();
   return `${API_BASE}/media/${mediaId}/stream/compatible${qs ? `?${qs}` : ''}`;
 }
 
-export function getDownloadUrl(mediaId: number): string {
-  return `${API_BASE}/media/${mediaId}/download`;
+export function getDownloadUrl(mediaId: number, driveFileId?: string): string {
+  const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
+  return `${API_BASE}/media/${mediaId}/download${qs}`;
 }
 
-export function getPlaylistUrl(mediaId: number): string {
-  return `${API_BASE}/media/${mediaId}/playlist.m3u`;
+export function getPlaylistUrl(mediaId: number, driveFileId?: string): string {
+  const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
+  return `${API_BASE}/media/${mediaId}/playlist.m3u${qs}`;
 }
 
 export function getVlcProtocolUrl(mediaId: number): string {

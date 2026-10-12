@@ -49,6 +49,7 @@ class Settings(BaseSettings):
 
     # Streaming & Worker
     CHUNK_BUFFER_SIZE_BYTES: int = Field(default=8 * 1024 * 1024, description="In-memory chunk buffer (8MB)")
+    TRANSFER_MAX_CONCURRENT: int = Field(default=1, description="Max concurrent transfers (1 = sequential queue)")
     MAX_RETRIES: int = Field(default=3, description="Bounded retry attempts")
 
     # TMDB Metadata Provider

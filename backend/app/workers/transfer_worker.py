@@ -63,11 +63,13 @@ db_claim_lock = asyncio.Lock()
 
 
 class TransferWorker:
-    def __init__(self, max_concurrent_transfers: int = 5):
+    def __init__(self, max_concurrent_transfers: Optional[int] = None):
         self.running = False
         self.task: Optional[asyncio.Task] = None
-        self.max_concurrent_transfers = max_concurrent_transfers
-        self.semaphore = asyncio.Semaphore(max_concurrent_transfers)
+        self.max_concurrent_transfers = (
+            max_concurrent_transfers if max_concurrent_transfers is not None else settings.TRANSFER_MAX_CONCURRENT
+        )
+        self.semaphore = asyncio.Semaphore(self.max_concurrent_transfers)
         self.active_tasks = set()
 
     async def reconcile_incomplete_transfers(self) -> None:
