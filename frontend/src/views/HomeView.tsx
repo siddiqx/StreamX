@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Play, Info, Radio, ArrowRight, Sparkles, Tv, Film,
+  Play, Info, ArrowRight, Sparkles, Tv, Film,
   Star, Clock, Flame, Heart, Compass, Laugh,
   ChevronLeft, ChevronRight, AlertCircle, Settings
 } from 'lucide-react';
 
-import type { MediaItem, TelegramTransfer } from '../types';
+import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
 import { organizeMediaLibrary } from '../utils/mediaOrganizer';
 import { MediaCard } from '../components/MediaCard';
@@ -24,12 +24,10 @@ import { launchVlcWithTracking } from '../utils/playerSettings';
 interface HomeViewProps {
   media: MediaItem[];
   offlineIds: Set<number>;
-  activeTransfers: TelegramTransfer[];
   onSelectMedia: (item: MediaItem) => void;
   onSelectGroup?: (group: MediaGroup) => void;
   onPlayMedia: (item: MediaItem) => void;
   onViewAllLibrary: (category?: string) => void;
-  onOpenTransfers: () => void;
   apiHealth?: ApiHealthStatus;
   onNavigateSettings?: () => void;
   onRetry?: () => void;
@@ -40,12 +38,10 @@ const CARD_W = 'clamp(126px, 34vw, 150px)';
 export const HomeView: React.FC<HomeViewProps> = ({
   media,
   offlineIds,
-  activeTransfers,
   onSelectMedia,
   onSelectGroup,
   onPlayMedia,
   onViewAllLibrary,
-  onOpenTransfers,
   apiHealth,
   onNavigateSettings,
   onRetry,
@@ -177,10 +173,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const featuredGenres = featuredGroup?.genres || featured?.canonical_metadata?.genres || [];
   const featuredOverview = featuredGroup?.overview || featured?.canonical_metadata?.overview;
 
-  const activeTransfer = activeTransfers.find(
-    t => t.status === 'FETCHING_TELEGRAM' || t.status === 'UPLOADING_DRIVE' || t.status === 'QUEUED'
-  );
-
   const handleHeroStream = () => {
     if (!featured) return;
     launchVlcWithTracking(featured);
@@ -221,54 +213,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '28px' }}>
-
-      {/* Active Telegram Ingestion Banner */}
-      {activeTransfer && (
-        <div
-          onClick={onOpenTransfers}
-          style={{
-            margin: '0 16px',
-            padding: '12px 14px',
-            background: 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(139,92,246,0.12) 100%)',
-            border: '1px solid rgba(99,102,241,0.35)',
-            borderRadius: '14px',
-            display: 'flex', alignItems: 'center', gap: '12px',
-            cursor: 'pointer',
-          }}
-          className="animate-fade-in"
-        >
-          <div style={{
-            width: '32px', height: '32px', borderRadius: '50%',
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            boxShadow: '0 2px 10px rgba(99,102,241,0.4)',
-          }}>
-            <Radio size={14} color="#fff" />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{
-              fontSize: '0.8rem', fontWeight: 700, color: '#f8fafc',
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {activeTransfer.filename}
-            </p>
-            <div style={{
-              marginTop: '4px', height: '3px', borderRadius: '3px',
-              background: 'rgba(255,255,255,0.1)', overflow: 'hidden',
-            }}>
-              <div style={{
-                height: '100%',
-                width: `${activeTransfer.size > 0 ? Math.round((activeTransfer.bytes_transferred / activeTransfer.size) * 100) : 0}%`,
-                background: 'linear-gradient(90deg, #6366f1, #a855f7)',
-                transition: 'width 0.3s ease',
-              }} />
-            </div>
-          </div>
-          <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#a5b4fc', flexShrink: 0 }}>
-            {activeTransfer.size > 0 ? Math.round((activeTransfer.bytes_transferred / activeTransfer.size) * 100) : 0}%
-          </span>
-        </div>
-      )}
 
       {/* Netflix-Style Featured Spotlight Hero with Animated Recommendations */}
       {featured ? (

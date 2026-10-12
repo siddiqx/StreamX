@@ -285,10 +285,7 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-      <Navbar
-        activeTransfers={transfers}
-        onOpenTransfers={() => setIsTransfersOpen(true)}
-      />
+      <Navbar />
 
       <main style={{
         flex: 1,
@@ -303,7 +300,6 @@ export const App: React.FC = () => {
           <HomeView
             media={media}
             offlineIds={offlineIds}
-            activeTransfers={transfers}
             onSelectMedia={(item) => {
               setSelectedMedia(item);
               setSelectedGroup(null);
@@ -317,12 +313,10 @@ export const App: React.FC = () => {
               setSelectedCategoryFilter(cat || 'All');
               setCurrentTab('library');
             }}
-            onOpenTransfers={() => setIsTransfersOpen(true)}
             apiHealth={apiHealth}
             onNavigateSettings={() => setCurrentTab('settings')}
             onRetry={refreshData}
           />
-
         )}
 
         {currentTab === 'search' && (
