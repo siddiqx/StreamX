@@ -276,54 +276,56 @@ class TransferWorker:
         created before forwarding was deployed.
         """
         filename = transfer.filename
+        clean_filename = sanitize_filename(filename).lower()
+        bot_entity = "Stream1_X_bot"
 
-        # 1. Forwarded copy (modern path, required for non-owner senders).
+        # Build comprehensive list of chats to check for the media
+        chats_to_try = []
         if transfer.forwarded_chat_id is not None:
-            chats_to_try = [transfer.forwarded_chat_id]
-            configured = self._resolve_relay_chat()
-            if configured is not None and configured != transfer.forwarded_chat_id:
-                chats_to_try.append(configured)
+            chats_to_try.append(transfer.forwarded_chat_id)
+        configured = self._resolve_relay_chat()
+        if configured is not None and configured not in chats_to_try:
+            chats_to_try.append(configured)
+        if bot_entity not in chats_to_try:
+            chats_to_try.append(bot_entity)
 
-            for chat in chats_to_try:
-                # Direct lookup by forwarded message id first.
+        # 1. Direct lookup by forwarded message id or telegram message id across candidate chats
+        ids_to_try = []
+        if transfer.forwarded_message_id:
+            ids_to_try.append(transfer.forwarded_message_id)
+        if transfer.telegram_message_id and transfer.telegram_message_id not in ids_to_try:
+            ids_to_try.append(transfer.telegram_message_id)
+
+        for chat in chats_to_try:
+            for mid in ids_to_try:
                 try:
-                    msg = await client.get_messages(chat, ids=transfer.forwarded_message_id)
+                    msg = await client.get_messages(chat, ids=mid)
                     if msg and getattr(msg, "media", None):
-                        return msg
-                except Exception as e:
-                    logger.debug(f"Forwarded direct lookup failed for chat {chat} (#{transfer.id}): {e}")
-
-                # Robust fallback: scan the relay chat by filename/size.
-                try:
-                    async for msg in client.iter_messages(chat, limit=FORWARDED_SEARCH_LIMIT):
-                        if not getattr(msg, "media", None):
-                            continue
-                        name = getattr(getattr(msg, "file", None), "name", None)
-                        size = getattr(getattr(msg, "file", None), "size", 0)
-                        if name == filename or (expected_size and size == expected_size):
+                        m_name = getattr(getattr(msg, "file", None), "name", None)
+                        m_size = getattr(getattr(msg, "file", None), "size", 0)
+                        if m_name == filename or (expected_size and m_size == expected_size):
                             return msg
                 except Exception as e:
-                    logger.warning(f"Forwarded chat scan failed for chat {chat} (#{transfer.id}): {e}")
+                    logger.debug(f"Direct lookup failed for chat {chat} id {mid}: {e}")
 
-        # 2. Legacy owner-only path: owner's own message in the owner<->bot chat.
-        bot_entity = "Stream1_X_bot"
-        try:
-            msg = await client.get_messages(bot_entity, ids=transfer.telegram_message_id)
-            if msg and getattr(msg, "media", None):
-                return msg
-        except Exception as e:
-            logger.debug(f"Legacy message lookup failed, will search recent: {e}")
-
-        try:
-            async for msg in client.iter_messages(bot_entity, limit=10):
-                if not getattr(msg, "media", None):
-                    continue
-                name = getattr(getattr(msg, "file", None), "name", None)
-                size = getattr(getattr(msg, "file", None), "size", 0)
-                if name == filename or (expected_size and size == expected_size):
-                    return msg
-        except Exception as e:
-            logger.warning(f"Legacy chat scan failed for #{transfer.id}: {e}")
+        # 2. Deep scan across chats (up to 250 recent messages) by filename/size
+        for chat in chats_to_try:
+            try:
+                async for msg in client.iter_messages(chat, limit=250):
+                    if not getattr(msg, "media", None):
+                        continue
+                    m_name = getattr(getattr(msg, "file", None), "name", None)
+                    m_size = getattr(getattr(msg, "file", None), "size", 0)
+                    if not m_name:
+                        continue
+                    if (
+                        m_name == filename
+                        or (expected_size and m_size == expected_size)
+                        or sanitize_filename(m_name).lower() == clean_filename
+                    ):
+                        return msg
+            except Exception as e:
+                logger.warning(f"Chat scan failed for chat {chat} (#{transfer.id}): {e}")
 
         return None
 
