@@ -127,6 +127,8 @@ def has_anime_signals(
         r"\bhorriblesubs\b",
         r"\bsubsplease\b",
         r"\berai-raws\b",
+        r"@[a-z0-9_]*anime[a-z0-9_]*",
+        r"\bxanime\w*\b",
     ]
     for pattern in anime_tokens:
         if re.search(pattern, filename_lower):

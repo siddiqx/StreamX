@@ -1,6 +1,6 @@
 import type { CategorySummary, MediaItem, TelegramTransfer } from './types';
 
-export const CLOUD_BACKEND_URL = 'https://desired-magical-alot-beatles.trycloudflare.com';
+export const CLOUD_BACKEND_URL = 'https://senior-concerning-economies-tap.trycloudflare.com';
 
 export const getApiBase = (): string => {
   if (typeof window !== 'undefined') {

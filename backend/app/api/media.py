@@ -167,8 +167,22 @@ async def sync_media_library() -> Dict[str, Any]:
         return {"status": "ok", "synced_count": synced_count}
     except Exception as e:
         logger.error(f"Manual library sync failed: {e}", exc_info=True)
+@router.post("/rename-series")
+async def rename_series_endpoint(
+    current_name: str = Query(..., description="Current folder name or ID in Google Drive"),
+    new_name: str = Query(..., description="New show title (e.g. Alya Sometimes Hides Her Feelings in Russian)"),
+) -> Dict[str, Any]:
+    """Rename a series folder, propagate title to all files, re-classify category, and refresh metadata."""
+    if not drive_service.is_configured():
+        raise HTTPException(status_code=503, detail="Google Drive service not configured")
+    try:
+        res = await drive_service.rename_series_folder(current_name, new_name)
+        return {"status": "ok", "details": res}
+    except FileNotFoundError as fnf:
+        raise HTTPException(status_code=404, detail=str(fnf))
+    except Exception as e:
+        logger.error(f"Rename series failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @router.get("/image-proxy")

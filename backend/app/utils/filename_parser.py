@@ -292,3 +292,43 @@ def parse_filename(filename: str) -> ParsedMedia:
         parsing_confidence=round(max(0.1, confidence), 2),
     )
 
+
+def update_filename_title(original_filename: str, new_title: str) -> str:
+    """Update only the title portion of a media filename, preserving season, episode, quality, and tags.
+    
+    Example:
+        'S01-02 Alya [Dual] 1080p @XANIME_UNIVERSE.mkv'
+        with new_title='Alya Sometimes Hides Her Feelings in Russian'
+        becomes:
+        'S01-02 Alya Sometimes Hides Her Feelings in Russian [Dual] 1080p @XANIME_UNIVERSE.mkv'
+    """
+    clean_new = (new_title or "").strip()
+    if not clean_new:
+        return original_filename
+
+    parsed = parse_filename(original_filename)
+    old_title = (parsed.clean_title or "").strip()
+
+    # 1. Match old_title with word boundary in original filename
+    if old_title and len(old_title) >= 2:
+        escaped = re.escape(old_title)
+        pattern = re.compile(rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])", re.IGNORECASE)
+        if pattern.search(original_filename):
+            return pattern.sub(clean_new, original_filename, count=1)
+
+        # 2. Try substring match if boundary fails
+        pattern_sub = re.compile(escaped, re.IGNORECASE)
+        if pattern_sub.search(original_filename):
+            return pattern_sub.sub(clean_new, original_filename, count=1)
+
+    # 3. If old_title is not in filename, preserve episode code and replace
+    name_no_ext, ext = os.path.splitext(original_filename)
+    ep_match = re.search(r"(?i)\b(?:S\d{1,2}\s*[-_ .]?\s*E\d{1,4}|S\d{1,2}-\d{1,4}|\d{1,2}x\d{1,4})\b", name_no_ext)
+    if ep_match:
+        if ep_match.start() == 0:
+            rest = name_no_ext[ep_match.end():].strip(" ._-")
+            return f"{ep_match.group(0)} {clean_new}" + (f" {rest}" if rest else "") + ext
+        return f"{clean_new} {ep_match.group(0)}" + ext
+
+    return f"{clean_new} - {original_filename}"
+

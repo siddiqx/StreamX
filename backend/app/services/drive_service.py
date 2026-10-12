@@ -569,6 +569,12 @@ class GoogleDriveService:
 
             await session.commit()
 
+        # Check for user-renamed folders in Google Drive, auto-rename files, and relocate categories
+        try:
+            await self.sync_folder_renames_and_reorganize()
+        except Exception as ex:
+            logger.debug(f"Drive folder rename sync skipped or failed: {ex}")
+
         # Organize all library files in Google Drive into their proper show subfolders
         try:
             await self.organize_existing_drive_media()
@@ -713,6 +719,246 @@ class GoogleDriveService:
         if count > 0:
             log_event("DRIVE_EMPTY_FOLDERS_CLEANED", total_cleaned=count)
         return count
+
+    async def sync_folder_renames_and_reorganize(self) -> Dict[str, Any]:
+        """Detect when a user renames a series folder in Google Drive.
+        
+        Automatically:
+        1. Renames all video files inside that folder to match the new series title,
+           preserving season/episode numbers (e.g. S01-02), quality, and audio/release tags.
+        2. Queries TMDB / AniList metadata for the new folder name to fetch high-res posters,
+           backdrops, and canonical metadata.
+        3. Identifies the correct category (e.g. Japanese animation -> Anime) and moves
+           the folder from TV Shows to Anime in Google Drive.
+        4. Updates all SQLite media records and enqueues fresh metadata enrichment.
+        """
+        if not self.is_configured():
+            return {"status": "not_configured"}
+
+        from app.db.database import AsyncSessionLocal
+        from app.db.models import Media, MetadataStatus
+        from app.services.metadata_service import metadata_service
+        from app.utils.filename_parser import parse_filename, update_filename_title
+        from app.utils.media_classifier import has_anime_signals
+        from sqlalchemy import select
+
+        creds = await self.get_credentials()
+        loop = asyncio.get_running_loop()
+
+        categories = ["TV Shows", "Anime", "Movies", "Other"]
+        cat_map: Dict[str, str] = {}
+        for cat in categories:
+            cid = await self.get_folder_id(cat)
+            if cid:
+                cat_map[cat] = cid
+
+        def _scan_and_propagate():
+            service = self._get_drive_client(creds)
+            changes = []
+
+            for current_cat, cat_id in cat_map.items():
+                if not cat_id:
+                    continue
+                q = f"'{cat_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+                res = service.files().list(q=q, fields="files(id, name, parents)", pageSize=1000).execute()
+                subfolders = res.get("files", [])
+
+                for sf in subfolders:
+                    folder_id = sf["id"]
+                    folder_name = sf.get("name", "").strip()
+                    if not folder_name:
+                        continue
+
+                    # List video files in this folder
+                    q_files = (
+                        f"'{folder_id}' in parents and trashed = false and "
+                        "mimeType != 'application/vnd.google-apps.folder'"
+                    )
+                    f_res = service.files().list(q=q_files, fields="files(id, name, mimeType, size)", pageSize=1000).execute()
+                    files = f_res.get("files", [])
+                    if not files:
+                        continue
+
+                    folder_needs_file_renames = []
+                    for f in files:
+                        fid = f["id"]
+                        fname = f.get("name", "")
+                        parsed = parse_filename(fname)
+                        clean_title = parsed.clean_title
+                        if clean_title and folder_name and clean_title.casefold() != folder_name.casefold():
+                            new_name = update_filename_title(fname, folder_name)
+                            if new_name != fname:
+                                folder_needs_file_renames.append((fid, fname, new_name))
+
+                    if folder_needs_file_renames:
+                        renamed_files = []
+                        for fid, old_n, new_n in folder_needs_file_renames:
+                            try:
+                                service.files().update(fileId=fid, body={"name": new_n}).execute()
+                                renamed_files.append((fid, old_n, new_n))
+                                log_event("DRIVE_FILE_AUTO_RENAMED", folder=folder_name, old_name=old_n, new_name=new_n)
+                            except Exception as ex:
+                                logger.error(f"Failed to rename file {fid} ({old_n} -> {new_n}): {ex}")
+
+                        if renamed_files:
+                            changes.append({
+                                "folder_id": folder_id,
+                                "folder_name": folder_name,
+                                "current_category": current_cat,
+                                "current_cat_id": cat_id,
+                                "renamed_files": renamed_files,
+                            })
+
+            return changes
+
+        changes = await loop.run_in_executor(None, _scan_and_propagate)
+        total_renamed = 0
+        total_relocated = 0
+
+        if changes:
+            async with AsyncSessionLocal() as session:
+                for item in changes:
+                    folder_id = item["folder_id"]
+                    folder_name = item["folder_name"]
+                    current_cat = item["current_category"]
+                    current_cat_id = item["current_cat_id"]
+                    renamed_files = item["renamed_files"]
+
+                    # 1. Update SQLite records and enqueue metadata
+                    for fid, old_n, new_n in renamed_files:
+                        total_renamed += 1
+                        stmt = select(Media).where(Media.drive_file_id == fid)
+                        media_rec = (await session.execute(stmt)).scalar_one_or_none()
+                        if media_rec:
+                            media_rec.filename = new_n
+                            media_rec.series_key = folder_name
+                            media_rec.metadata_locked = False
+                            media_rec.metadata_entity_id = None
+                            media_rec.metadata_status = MetadataStatus.PENDING
+                            media_rec.metadata_confidence = None
+                            media_rec.poster_url = None
+                            media_rec.poster_override = None
+                            media_rec.backdrop_override = None
+                            await metadata_service.enqueue_media_for_enrichment(media_rec.id, session=session)
+
+                    # 2. Determine target category from metadata/signals
+                    target_category = current_cat
+                    try:
+                        from app.utils.media_classifier import classify_media, MediaTaxonomy
+                        parsed_sample = parse_filename(folder_name)
+                        # If already in Anime, check if any file or details confirm anime
+                        if current_cat == "Anime" or has_anime_signals(parsed_sample, raw_filename=folder_name):
+                            target_category = "Anime"
+                        else:
+                            from app.services.metadata_providers.tmdb import TMDBProvider
+                            from app.config.settings import settings
+                            provider = TMDBProvider(api_key=settings.TMDB_API_KEY)
+                            candidates = await provider.search(folder_name, media_type="tv")
+                            if not candidates:
+                                candidates = await provider.search(folder_name, media_type="movie")
+                            details = None
+                            if candidates:
+                                top = candidates[0]
+                                details = await provider.get_details(top.provider_id, media_type=top.media_type)
+                            tax, cat = classify_media(parsed_sample, details=details, raw_filename=folder_name)
+                            if cat in ("Anime", "Anime Movies") or has_anime_signals(parsed_sample, details=details, raw_filename=folder_name):
+                                target_category = "Anime"
+                            elif cat == "Movies" or tax == MediaTaxonomy.MOVIE:
+                                target_category = "Movies"
+                            else:
+                                target_category = "TV Shows"
+                    except Exception as ex:
+                        logger.debug(f"Metadata lookup for folder relocation ({folder_name}): {ex}")
+                        parsed_sample = parse_filename(folder_name)
+                        if has_anime_signals(parsed_sample, raw_filename=folder_name) or current_cat == "Anime":
+                            target_category = "Anime"
+
+                    # 3. Move folder in Google Drive if target category differs!
+                    if target_category != current_cat and target_category in cat_map:
+                        target_cat_id = cat_map[target_category]
+                        def _move_folder(f_id: str, dest_cat_id: str, src_cat_id: str):
+                            service = self._get_drive_client(creds)
+                            service.files().update(
+                                fileId=f_id,
+                                addParents=dest_cat_id,
+                                removeParents=src_cat_id,
+                                fields="id, parents",
+                            ).execute()
+
+                        try:
+                            await loop.run_in_executor(None, _move_folder, folder_id, target_cat_id, current_cat_id)
+                            total_relocated += 1
+                            log_event(
+                                "DRIVE_FOLDER_RELOCATED",
+                                folder=folder_name,
+                                from_category=current_cat,
+                                to_category=target_category,
+                            )
+                            # Update Media category in database
+                            for fid, _, _ in renamed_files:
+                                stmt = select(Media).where(Media.drive_file_id == fid)
+                                m = (await session.execute(stmt)).scalar_one_or_none()
+                                if m:
+                                    m.category = target_category
+                        except Exception as ex:
+                            logger.error(f"Failed to relocate folder {folder_name} to {target_category}: {ex}")
+
+                await session.commit()
+
+            # Invalidate folder cache
+            self._show_folder_cache.clear()
+
+        return {
+            "status": "ok",
+            "folders_modified": len(changes),
+            "files_renamed": total_renamed,
+            "folders_relocated": total_relocated,
+        }
+
+    async def rename_series_folder(self, current_name_or_id: str, new_name: str) -> Dict[str, Any]:
+        """Explicitly rename a series folder in Google Drive and propagate all changes."""
+        clean_new = new_name.strip()
+        if not clean_new:
+            raise ValueError("New name cannot be empty")
+
+        creds = await self.get_credentials()
+        loop = asyncio.get_running_loop()
+
+        def _rename_in_drive():
+            service = self._get_drive_client(creds)
+            folder_id = None
+            if len(current_name_or_id) > 20 and " " not in current_name_or_id:
+                folder_id = current_name_or_id
+            else:
+                q = (
+                    f"mimeType = 'application/vnd.google-apps.folder' and "
+                    f"name = '{current_name_or_id}' and trashed = false"
+                )
+                res = service.files().list(q=q, fields="files(id, name)").execute()
+                items = res.get("files", [])
+                if items:
+                    folder_id = items[0]["id"]
+
+            if not folder_id:
+                q = "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+                res = service.files().list(q=q, fields="files(id, name)").execute()
+                for f in res.get("files", []):
+                    if f.get("name", "").strip().casefold() == current_name_or_id.strip().casefold():
+                        folder_id = f["id"]
+                        break
+
+            if not folder_id:
+                raise FileNotFoundError(f"Folder '{current_name_or_id}' not found in Google Drive")
+
+            service.files().update(fileId=folder_id, body={"name": clean_new}).execute()
+            log_event("DRIVE_FOLDER_RENAMED", old_name=current_name_or_id, new_name=clean_new, folder_id=folder_id)
+            return folder_id
+
+        fid = await loop.run_in_executor(None, _rename_in_drive)
+        sync_res = await self.sync_folder_renames_and_reorganize()
+        sync_res["folder_id"] = fid
+        sync_res["new_name"] = clean_new
+        return sync_res
 
     async def get_download_stream(self, drive_file_id: str, range_header: Optional[str] = None):
         """Yield chunks directly from Google Drive alt=media endpoint for streaming or ranged downloads."""

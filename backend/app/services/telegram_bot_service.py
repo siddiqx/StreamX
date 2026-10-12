@@ -170,6 +170,7 @@ class TelegramBotService:
             {"command": "status", "description": "📊 Live transfer progress & queue"},
             {"command": "queue", "description": "⏳ Active transfers currently running"},
             {"command": "library", "description": "📚 Google Drive library overview"},
+            {"command": "rename", "description": "✏️ Rename series folder & update episodes"},
             {"command": "retry", "description": "🔄 Resume/retry any failed transfers"},
             {"command": "cancel", "description": "🚫 Cancel a transfer by ID"},
             {"command": "ping", "description": "🏓 24/7 server latency & health"},
@@ -402,6 +403,9 @@ class TelegramBotService:
             return
         elif cmd == "/cancel":
             await self._handle_cancel(chat_id, args)
+            return
+        elif cmd == "/rename":
+            await self._handle_rename(chat_id, text)
             return
         elif cmd == "/ping":
             await self._handle_ping(chat_id)
@@ -661,6 +665,70 @@ class TelegramBotService:
             "⚡ <b>Edge Gateway:</b> Cloudflare Connected"
         )
         await self.send_message(chat_id, msg)
+
+    async def _handle_rename(self, chat_id: int, full_text: str) -> None:
+        """Handle /rename command to rename a series folder, all its files, and move to Anime."""
+        from app.services.drive_service import drive_service
+
+        raw = full_text.split(None, 1)
+        if len(raw) < 2:
+            await self.send_message(
+                chat_id,
+                "✏️ <b>Rename Series & Update All Episodes</b>\n\n"
+                "<b>Usage:</b>\n"
+                "<code>/rename [Current Folder Name] to [New Series Name]</code>\n\n"
+                "<b>Example:</b>\n"
+                "<code>/rename Alya to Alya Sometimes Hides Her Feelings in Russian</code>\n\n"
+                "<i>This will:</i>\n"
+                "1. Rename the folder in Google Drive\n"
+                "2. Rename every episode file inside, preserving episode numbers and quality\n"
+                "3. Fetch official posters and synopsis from TMDB\n"
+                "4. Move the folder to Anime if Japanese animation!"
+            )
+            return
+
+        body = raw[1].strip()
+        parts = []
+        if " to " in body.lower():
+            idx = body.lower().index(" to ")
+            parts = [body[:idx].strip(), body[idx + 4:].strip()]
+        elif "," in body:
+            parts = [p.strip() for p in body.split(",", 1)]
+
+        if len(parts) < 2 or not parts[0] or not parts[1]:
+            await self.send_message(
+                chat_id,
+                "⚠️ <b>Invalid format.</b>\n"
+                "Usage: <code>/rename Old Name to New Name</code>\n"
+                "Example: <code>/rename Alya to Alya Sometimes Hides Her Feelings in Russian</code>"
+            )
+            return
+
+        old_name, new_name = parts[0], parts[1]
+        await self.send_message(
+            chat_id,
+            f"🔄 <b>Processing series rename...</b>\n\n"
+            f"📁 <b>Folder:</b> <code>{html.escape(old_name)}</code> ➔ <code>{html.escape(new_name)}</code>\n"
+            "🎬 Renaming episode files in Google Drive...\n"
+            "✨ Pulling TMDB anime artwork & classifying..."
+        )
+
+        try:
+            res = await drive_service.rename_series_folder(old_name, new_name)
+            files_renamed = res.get("files_renamed", 0)
+            relocated = res.get("folders_relocated", 0)
+            cat_text = "Relocated to Anime" if relocated > 0 else "Updated in library"
+            await self.send_message(
+                chat_id,
+                f"✅ <b>Series Successfully Updated!</b>\n\n"
+                f"📁 <b>Folder:</b> <code>{html.escape(new_name)}</code>\n"
+                f"🎬 <b>Episodes Renamed:</b> {files_renamed}\n"
+                f"🏷️ <b>Category:</b> {cat_text}\n"
+                "✨ <b>Metadata:</b> Official posters, synopsis & episode indexing enqueued!"
+            )
+        except Exception as e:
+            logger.error(f"Telegram /rename failed: {e}", exc_info=True)
+            await self.send_message(chat_id, f"❌ <b>Rename failed:</b> {html.escape(str(e))}")
 
     async def _handle_media(
         self, chat_id: int, message_id: int, file_id: str, filename: str, file_size: int
