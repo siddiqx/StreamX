@@ -8,6 +8,15 @@ import re
 import sys
 from typing import Any
 
+# Ensure stdout and stderr handle arbitrary Unicode (Japanese, fansub symbols) on Windows consoles
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 SENSITIVE_REPLACEMENTS = [
     (re.compile(r"bot\d+:[A-Za-z0-9_-]+", re.IGNORECASE), "bot[REDACTED_TOKEN]"),
     (
