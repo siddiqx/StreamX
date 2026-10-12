@@ -21,6 +21,7 @@ import asyncio
 import time
 from datetime import timedelta
 from typing import Optional
+import httpx
 from sqlalchemy import or_, select
 
 from app.config.settings import settings
@@ -35,6 +36,7 @@ from app.services.drive_service import drive_service
 from app.services.telegram_bot_service import bot_service
 from app.services.telegram_mtproto_service import mtproto_service
 from app.utils.errors import (
+    DriveUploadError,
     ErrorCategory,
     classify_error,
 )
@@ -472,76 +474,128 @@ class TransferWorker:
         start_time = time.time()
         current_offset = start_offset
         drive_file_id = None
-        buffer = bytearray()
-        target_chunk_size = settings.CHUNK_BUFFER_SIZE_BYTES  # 8MB chunk buffer for Drive
-        mtproto_slice_size = 128 * 1024  # 128KB MTProto wire limit for Telegram
+        target_chunk_size = 4 * 1024 * 1024  # 4MB chunk buffer for Drive (16 * 256KB)
+        mtproto_slice_size = 512 * 1024      # 512KB MTProto wire limit for Telegram
 
-        async for raw_slice in client.iter_download(
-            target_message.media,
-            offset=start_offset,
-            chunk_size=mtproto_slice_size,
-            request_size=mtproto_slice_size,
-        ):
-            buffer.extend(raw_slice)
+        # Concurrent Double-Buffered Queue (up to 2 chunks = 8MB in RAM)
+        chunk_queue: asyncio.Queue = asyncio.Queue(maxsize=2)
+        producer_error: Optional[Exception] = None
+        consumer_error: Optional[Exception] = None
+        stop_event = asyncio.Event()
 
-            if len(buffer) >= target_chunk_size or (current_offset + len(buffer)) >= actual_size:
-                chunk_bytes = bytes(buffer)
-                buffer.clear()
+        async def download_producer():
+            nonlocal producer_error
+            try:
+                buffer = bytearray()
+                offset_cursor = start_offset
+                async for raw_slice in client.iter_download(
+                    target_message.media,
+                    offset=start_offset,
+                    chunk_size=mtproto_slice_size,
+                    request_size=mtproto_slice_size,
+                ):
+                    if stop_event.is_set():
+                        break
+                    buffer.extend(raw_slice)
+                    if len(buffer) >= target_chunk_size or (offset_cursor + len(buffer)) >= actual_size:
+                        chunk_bytes = bytes(buffer)
+                        buffer.clear()
+                        while not stop_event.is_set():
+                            try:
+                                chunk_queue.put_nowait((chunk_bytes, offset_cursor))
+                                break
+                            except asyncio.QueueFull:
+                                await asyncio.sleep(0.05)
+                        offset_cursor += len(chunk_bytes)
+                        if offset_cursor >= actual_size or stop_event.is_set():
+                            break
 
+                # Flush any remainder
+                if len(buffer) > 0 and not stop_event.is_set():
+                    chunk_bytes = bytes(buffer)
+                    buffer.clear()
+                    while not stop_event.is_set():
+                        try:
+                            chunk_queue.put_nowait((chunk_bytes, offset_cursor))
+                            break
+                        except asyncio.QueueFull:
+                            await asyncio.sleep(0.05)
+                    offset_cursor += len(chunk_bytes)
+
+                # Signal EOF
+                await chunk_queue.put(None)
+            except Exception as e:
+                logger.error(f"Download producer error for transfer #{transfer_id}: {e}", exc_info=True)
+                producer_error = e
+                stop_event.set()
                 try:
-                    completed, file_id = await drive_service.upload_chunk(
-                        upload_url=upload_url,
-                        chunk=chunk_bytes,
-                        start_byte=current_offset,
-                        total_size=actual_size,
-                    )
-                except DriveUploadError as e:
-                    if "404" in str(e):
+                    chunk_queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
+
+        async def upload_consumer():
+            nonlocal consumer_error, drive_file_id, current_offset
+            try:
+                async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as http_client:
+                    while not stop_event.is_set():
+                        item = await chunk_queue.get()
+                        if item is None:
+                            chunk_queue.task_done()
+                            break
+
+                        chunk_bytes, chunk_start = item
+                        try:
+                            completed, file_id = await drive_service.upload_chunk(
+                                upload_url=upload_url,
+                                chunk=chunk_bytes,
+                                start_byte=chunk_start,
+                                total_size=actual_size,
+                                client=http_client,
+                            )
+                        except DriveUploadError as e:
+                            if "404" in str(e):
+                                async with AsyncSessionLocal() as session:
+                                    stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                                    t = (await session.execute(stmt)).scalar_one_or_none()
+                                    if t:
+                                        t.resumable_upload_url = None
+                                        t.bytes_transferred = 0
+                                        await session.commit()
+                            raise
+
+                        current_offset = chunk_start + len(chunk_bytes)
+                        pct = int((current_offset / actual_size) * 100) if actual_size > 0 else 0
+                        log_event(
+                            "TRANSFER_CHUNK_UPLOADED",
+                            transfer_id=transfer_id,
+                            bytes_uploaded=current_offset,
+                            total_bytes=actual_size,
+                            progress_pct=pct,
+                        )
+
                         async with AsyncSessionLocal() as session:
                             stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
                             t = (await session.execute(stmt)).scalar_one_or_none()
                             if t:
-                                t.resumable_upload_url = None
-                                t.bytes_transferred = 0
+                                t.bytes_transferred = current_offset
                                 await session.commit()
-                    raise
-                current_offset += len(chunk_bytes)
 
+                        if completed:
+                            drive_file_id = file_id
 
-                pct = int((current_offset / actual_size) * 100) if actual_size > 0 else 0
-                log_event(
-                    "TRANSFER_CHUNK_UPLOADED",
-                    transfer_id=transfer_id,
-                    bytes_uploaded=current_offset,
-                    total_bytes=actual_size,
-                    progress_pct=pct,
-                )
+                        chunk_queue.task_done()
+            except Exception as e:
+                logger.error(f"Upload consumer error for transfer #{transfer_id}: {e}", exc_info=True)
+                consumer_error = e
+                stop_event.set()
 
-                async with AsyncSessionLocal() as session:
-                    stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
-                    t = (await session.execute(stmt)).scalar_one_or_none()
-                    if t:
-                        t.bytes_transferred = current_offset
-                        await session.commit()
+        # Concurrently stream from Telegram while streaming to Google Drive
+        await asyncio.gather(download_producer(), upload_consumer())
 
-                if completed:
-                    drive_file_id = file_id
-                    break
-
-        # Flush any remaining buffer if file not yet completed
-        if not drive_file_id and len(buffer) > 0:
-            chunk_bytes = bytes(buffer)
-            buffer.clear()
-            completed, file_id = await drive_service.upload_chunk(
-                upload_url=upload_url,
-                chunk=chunk_bytes,
-                start_byte=current_offset,
-                total_size=actual_size,
-            )
-            current_offset += len(chunk_bytes)
-            if completed:
-                drive_file_id = file_id
-
+        if producer_error:
+            raise producer_error
+        if consumer_error:
+            raise consumer_error
         if not drive_file_id:
             raise RuntimeError(
                 "Streaming ended without Google Drive confirming file completion."

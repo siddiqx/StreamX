@@ -335,6 +335,7 @@ class GoogleDriveService:
         chunk: Any,
         start_byte: int,
         total_size: int,
+        client: Optional[httpx.AsyncClient] = None,
     ) -> Tuple[bool, Optional[str]]:
         """Upload a chunk to a resumable session with bounded per-chunk retry.
 
@@ -342,6 +343,7 @@ class GoogleDriveService:
         exponential backoff; permanent errors (401/403/404-config) propagate
         immediately so the job layer can fail fast without burning retries.
 
+        Reuses persistent httpx client if supplied to eliminate TLS handshakes.
         Returns (is_completed, drive_file_id).
         """
         chunk_bytes = bytes(chunk) if not isinstance(chunk, bytes) else chunk
@@ -353,48 +355,48 @@ class GoogleDriveService:
         }
 
         max_chunk_retries = 3
-        for attempt in range(1, max_chunk_retries + 1):
-            async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
+        close_local_client = False
+        active_client = client
+        if active_client is None:
+            active_client = httpx.AsyncClient(timeout=120.0, follow_redirects=False)
+            close_local_client = True
+
+        try:
+            for attempt in range(1, max_chunk_retries + 1):
                 try:
-                    res = await client.put(upload_url, headers=headers, content=chunk_bytes)
+                    res = await active_client.put(upload_url, headers=headers, content=chunk_bytes)
                 except (httpx.TimeoutException, httpx.TransportError) as e:
                     if attempt < max_chunk_retries:
                         await asyncio.sleep(min(2 ** (attempt - 1), 8))
                         continue
                     raise DriveUploadError(f"Drive chunk transport error after retries: {e}")
 
-            # HTTP 308 Resume Incomplete -> chunk received, upload still in progress
-            if res.status_code == 308:
-                return False, None
+                # HTTP 308 Resume Incomplete -> chunk received, upload still in progress
+                if res.status_code == 308:
+                    return False, None
 
-            # HTTP 200 / 201 -> upload completed!
-            if res.status_code in (200, 201):
-                try:
-                    data = res.json()
-                except Exception:
-                    data = {}
-                drive_file_id = data.get("id")
-                log_event("DRIVE_UPLOAD_COMPLETED", drive_file_id=drive_file_id)
-                return True, drive_file_id
+                # HTTP 200 / 201 -> upload completed!
+                if res.status_code in (200, 201):
+                    try:
+                        data = res.json()
+                    except Exception:
+                        data = {}
+                    drive_file_id = data.get("id")
+                    log_event("DRIVE_UPLOAD_COMPLETED", drive_file_id=drive_file_id)
+                    return True, drive_file_id
 
-            error_exc = self._classify_upload_status(res.status_code, res.text)
-            # Permanent errors propagate immediately.
-            if error_exc is not None and not getattr(error_exc, "retryable", True):
-                raise error_exc
-            # Transient errors: back off and retry the chunk.
-            if attempt < max_chunk_retries:
-                wait = min(2 ** (attempt - 1), 8)
-                log_event(
-                    "DRIVE_CHUNK_RETRY",
-                    attempt=attempt,
-                    status_code=res.status_code,
-                    retry_after=wait,
-                )
-                await asyncio.sleep(wait)
-                continue
-            raise error_exc if error_exc else DriveUploadError(
-                f"Drive chunk upload failed after retries: HTTP {res.status_code}: {res.text}"
-            )
+                error_exc = self._classify_upload_status(res.status_code, res.text)
+                if error_exc is not None and not getattr(error_exc, "retryable", True):
+                    raise error_exc
+                if attempt < max_chunk_retries:
+                    wait = min(2 ** (attempt - 1), 8)
+                    log_event("DRIVE_CHUNK_RETRY", attempt=attempt, status_code=res.status_code, retry_after=wait)
+                    await asyncio.sleep(wait)
+                    continue
+                raise error_exc if error_exc else DriveUploadError(f"Drive chunk failed HTTP {res.status_code}")
+        finally:
+            if close_local_client:
+                await active_client.aclose()
 
     async def get_resumable_offset(self, upload_url: str, total_size: int) -> int:
         """Query how many bytes Google Drive has acknowledged for this session (restart recovery).
