@@ -11,7 +11,7 @@
  */
 
 // Replace with your 24/7 Cloud Backend URL (e.g. your cloudflared tunnel, Hugging Face Space, or Koyeb URL)
-const BACKEND_URL = "https://desired-magical-alot-beatles.trycloudflare.com";
+const BACKEND_URL = "https://senior-concerning-economies-tap.trycloudflare.com";
 
 export default {
   async fetch(request, env, ctx) {
