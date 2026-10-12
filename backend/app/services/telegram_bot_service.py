@@ -646,13 +646,22 @@ class TelegramBotService:
                 await self.send_message(chat_id, f"❌ Transfer #{tid} not found.")
                 return
 
-            if t.status in (TransferStatus.COMPLETED, TransferStatus.CANCELLED):
+            if t.status in (TransferStatus.COMPLETED, TransferStatus.CANCELLED) or getattr(t, "is_deleted", False):
                 await self.send_message(chat_id, f"ℹ️ Transfer #{tid} is already <code>{t.status.value}</code>.")
                 return
 
             t.status = TransferStatus.CANCELLED
+            t.is_deleted = True
             t.error_message = "Cancelled by user via Telegram command."
+            t.scheduled_retry_at = None
             await session.commit()
+
+        # Stop active worker job if running
+        try:
+            from app.workers.transfer_worker import transfer_worker
+            transfer_worker.cancel_transfer(tid)
+        except Exception as e:
+            logger.debug(f"Could not signal transfer cancellation to worker: {e}")
 
         await self.send_message(chat_id, f"🚫 <b>Transfer #{tid} Cancelled</b>\n<code>{html.escape(t.filename)}</code>")
 
@@ -1009,6 +1018,9 @@ class TelegramBotService:
                                 forwarded_message_id=m.id,
                             )
                             session.add(t)
+                            existing_tids.add(m.id)
+                            existing_fwds.add(m.id)
+                            existing_filenames.add(fname)
                             enqueued_transfers.append((fname, fsize, m.id))
                             new_count += 1
 

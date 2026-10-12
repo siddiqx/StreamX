@@ -82,9 +82,12 @@ def _migrate_schema_sync(connection):
             connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN started_at DATETIME")
         if "completed_at" not in transfer_cols:
             connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN completed_at DATETIME")
+        if "is_deleted" not in transfer_cols:
+            connection.exec_driver_sql("ALTER TABLE telegram_transfers ADD COLUMN is_deleted BOOLEAN DEFAULT 0")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_telegram_transfers_error_category ON telegram_transfers (error_category)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_telegram_transfers_forwarded_chat_id ON telegram_transfers (forwarded_chat_id)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_telegram_transfers_scheduled_retry_at ON telegram_transfers (scheduled_retry_at)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_telegram_transfers_is_deleted ON telegram_transfers (is_deleted)")
 
     res_ent = connection.exec_driver_sql("PRAGMA table_info(metadata_entities)").fetchall()
     existing_ent_cols = {row[1] for row in res_ent}

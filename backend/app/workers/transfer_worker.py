@@ -73,6 +73,18 @@ class TransferWorker:
         )
         self.semaphore = asyncio.Semaphore(self.max_concurrent_transfers)
         self.active_tasks = set()
+        self.active_jobs = {}  # transfer_id -> (task, stop_event)
+
+    def cancel_transfer(self, transfer_id: int) -> bool:
+        """Cancel an in-flight transfer immediately without retry or failure notification."""
+        job = self.active_jobs.get(transfer_id)
+        if job:
+            task, stop_event = job
+            stop_event.set()
+            task.cancel()
+            log_event("TRANSFER_CANCELLED_BY_USER", transfer_id=transfer_id)
+            return True
+        return False
 
     async def reconcile_incomplete_transfers(self) -> None:
         """Section 37: Reconcile transfers left incomplete by dead or restarted processes."""
@@ -80,7 +92,8 @@ class TransferWorker:
             stmt = select(TelegramTransfer).where(
                 TelegramTransfer.status.in_(
                     [TransferStatus.FETCHING_TELEGRAM, TransferStatus.UPLOADING_DRIVE]
-                )
+                ),
+                TelegramTransfer.is_deleted.is_(False),
             )
             result = await session.execute(stmt)
             incomplete = result.scalars().all()
@@ -128,7 +141,7 @@ class TransferWorker:
         has elapsed, giving transient failures time to recover.
         """
         # Ensure a concurrency slot is free before claiming from the DB.
-        if self.semaphore.locked():
+        if len(self.active_tasks) >= self.max_concurrent_transfers or self.semaphore.locked():
             return False
 
         now = utc_now()
@@ -137,6 +150,7 @@ class TransferWorker:
                 stmt = (
                     select(TelegramTransfer)
                     .where(
+                        TelegramTransfer.is_deleted.is_(False),
                         TelegramTransfer.status.in_(
                             [TransferStatus.QUEUED, TransferStatus.RETRYING]
                         ),
@@ -192,57 +206,90 @@ class TransferWorker:
         filename: str,
         expected_size: int,
     ) -> None:
-        async with self.semaphore:
-            try:
-                await self._execute_transfer(
-                    transfer_id=transfer_id,
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    filename=filename,
-                    expected_size=expected_size,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                category = classify_error(e)
-                retryable = category not in {
-                    ErrorCategory.TELEGRAM_FORWARD_FAILED,
-                    ErrorCategory.DRIVE_AUTH_FAILED,
-                    ErrorCategory.DRIVE_PERMISSION_DENIED,
-                    ErrorCategory.DRIVE_QUOTA_EXCEEDED,
-                }
-                logger.error(
-                    f"Transfer #{transfer_id} failed: {category.value}: {e}",
-                    exc_info=True,
-                )
-                t = None
+        stop_event = asyncio.Event()
+        current_task = asyncio.current_task()
+        self.active_jobs[transfer_id] = (current_task, stop_event)
+        try:
+            async with self.semaphore:
+                # Check if transfer was cancelled or deleted before starting
                 async with AsyncSessionLocal() as session:
                     stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
                     t = (await session.execute(stmt)).scalar_one_or_none()
-                    if t:
-                        t.retry_count += 1
-                        t.error_message = str(e)
-                        t.error_category = category
-                        if retryable and t.retry_count < settings.MAX_RETRIES:
-                            t.status = TransferStatus.RETRYING
-                            delay = min(2 ** t.retry_count * 5, 60)
-                            t.scheduled_retry_at = utc_now() + timedelta(seconds=delay)
-                        else:
-                            t.status = TransferStatus.FAILED
-                            t.error_message = str(e)
-                            t.completed_at = utc_now()
-                        await session.commit()
+                    if not t or t.status == TransferStatus.CANCELLED or getattr(t, "is_deleted", False):
+                        log_event("TRANSFER_JOB_SKIPPED_CANCELLED", transfer_id=transfer_id)
+                        return
 
-                # User-facing: actionable, secret-free.
-                status_label = (
-                    TransferStatus.RETRYING
-                    if t and t.status == TransferStatus.RETRYING
-                    else TransferStatus.FAILED
-                )
-                user_text = self._build_error_notification(
-                    transfer_id, filename, category, status_label
-                )
-                await bot_service.send_message(chat_id=chat_id, text=user_text)
+                try:
+                    await self._execute_transfer(
+                        transfer_id=transfer_id,
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        filename=filename,
+                        expected_size=expected_size,
+                        stop_event=stop_event,
+                    )
+                except asyncio.CancelledError:
+                    log_event("TRANSFER_JOB_CANCELLED", transfer_id=transfer_id)
+                    # Check if transfer was marked cancelled/deleted; if so, exit silently without error
+                    async with AsyncSessionLocal() as session:
+                        stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                        t = (await session.execute(stmt)).scalar_one_or_none()
+                        if t and (t.status == TransferStatus.CANCELLED or getattr(t, "is_deleted", False)):
+                            return
+                    raise
+                except Exception as e:
+                    # Check if transfer was cancelled or soft-deleted while running
+                    async with AsyncSessionLocal() as session:
+                        stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                        t = (await session.execute(stmt)).scalar_one_or_none()
+                        if not t or t.status == TransferStatus.CANCELLED or getattr(t, "is_deleted", False):
+                            log_event("TRANSFER_JOB_CANCELLED_IGNORING_ERROR", transfer_id=transfer_id, error=str(e))
+                            return
+
+                    category = classify_error(e)
+                    retryable = category not in {
+                        ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                        ErrorCategory.DRIVE_AUTH_FAILED,
+                        ErrorCategory.DRIVE_PERMISSION_DENIED,
+                        ErrorCategory.DRIVE_QUOTA_EXCEEDED,
+                    }
+                    logger.error(
+                        f"Transfer #{transfer_id} failed: {category.value}: {e}",
+                        exc_info=True,
+                    )
+                    async with AsyncSessionLocal() as session:
+                        stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                        t = (await session.execute(stmt)).scalar_one_or_none()
+                        if t:
+                            # Re-verify in case status changed concurrently
+                            if t.status == TransferStatus.CANCELLED or getattr(t, "is_deleted", False):
+                                return
+                            t.retry_count += 1
+                            t.error_message = str(e)
+                            t.error_category = category
+                            if retryable and t.retry_count < settings.MAX_RETRIES:
+                                t.status = TransferStatus.RETRYING
+                                delay = min(2 ** t.retry_count * 5, 60)
+                                t.scheduled_retry_at = utc_now() + timedelta(seconds=delay)
+                            else:
+                                t.status = TransferStatus.FAILED
+                                t.error_message = str(e)
+                                t.completed_at = utc_now()
+                            await session.commit()
+
+                    # User-facing: actionable, secret-free. Only send if not cancelled/deleted
+                    if t and t.status not in (TransferStatus.CANCELLED, TransferStatus.COMPLETED) and not getattr(t, "is_deleted", False):
+                        status_label = (
+                            TransferStatus.RETRYING
+                            if t.status == TransferStatus.RETRYING
+                            else TransferStatus.FAILED
+                        )
+                        user_text = self._build_error_notification(
+                            transfer_id, filename, category, status_label
+                        )
+                        await bot_service.send_message(chat_id=chat_id, text=user_text)
+        finally:
+            self.active_jobs.pop(transfer_id, None)
 
     def _build_error_notification(
         self, transfer_id: int, filename: str, category: ErrorCategory, status: TransferStatus
@@ -338,6 +385,7 @@ class TransferWorker:
         message_id: int,
         filename: str,
         expected_size: int,
+        stop_event: Optional[asyncio.Event] = None,
     ) -> None:
         """Stream chunks from Telegram via MTProto directly into Google Drive resumable upload."""
         # 1. Duplicate Detection (Section 23)
@@ -405,11 +453,17 @@ class TransferWorker:
                 return
 
         # 2. Locate the media message via MTProto (forwarded copy for non-owners).
+        if stop_event and stop_event.is_set():
+            return
+
         client = await mtproto_service.get_client()
         async with AsyncSessionLocal() as session:
             transfer = await session.get(TelegramTransfer, transfer_id)
             if not transfer:
                 raise ValueError(f"Transfer #{transfer_id} not found")
+            if transfer.status == TransferStatus.CANCELLED or getattr(transfer, "is_deleted", False):
+                log_event("TRANSFER_ABORTED_ON_CANCEL", transfer_id=transfer_id)
+                return
 
         target_message = await self._locate_target_message(client, transfer, expected_size)
         if not target_message:
@@ -457,6 +511,9 @@ class TransferWorker:
                 stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
                 t = (await session.execute(stmt)).scalar_one_or_none()
                 if t:
+                    if t.status == TransferStatus.CANCELLED or getattr(t, "is_deleted", False):
+                        log_event("TRANSFER_ABORTED_ON_CANCEL", transfer_id=transfer_id)
+                        return
                     t.resumable_upload_url = upload_url
                     t.status = TransferStatus.UPLOADING_DRIVE
                     await session.commit()
@@ -481,7 +538,7 @@ class TransferWorker:
         chunk_queue: asyncio.Queue = asyncio.Queue(maxsize=2)
         producer_error: Optional[Exception] = None
         consumer_error: Optional[Exception] = None
-        stop_event = asyncio.Event()
+        stop_event = stop_event or asyncio.Event()
 
         async def download_producer():
             nonlocal producer_error
@@ -591,6 +648,10 @@ class TransferWorker:
 
         # Concurrently stream from Telegram while streaming to Google Drive
         await asyncio.gather(download_producer(), upload_consumer())
+
+        if stop_event.is_set():
+            log_event("TRANSFER_STREAMING_STOPPED_BY_EVENT", transfer_id=transfer_id)
+            return
 
         if producer_error:
             raise producer_error

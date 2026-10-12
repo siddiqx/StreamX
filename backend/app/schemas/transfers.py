@@ -31,6 +31,7 @@ class TransferResponse(TransferBase):
     scheduled_retry_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    is_deleted: bool = False
     created_at: datetime
     updated_at: datetime
 
