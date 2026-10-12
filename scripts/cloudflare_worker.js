@@ -172,6 +172,11 @@ export default {
       const response = await fetch(targetUrl.toString(), fetchInit);
       clearTimeout(timeoutId);
 
+      // If tunnel returned server error (502, 503, 504, 520, 521, 522, 523, 530), treat as tunnel down
+      if (response.status >= 500) {
+        throw new Error(`Backend tunnel unreachable or returned HTTP ${response.status}`);
+      }
+
       // Cache catalog response on success
       if (isCatalog && response.status === 200) {
         try {
