@@ -58,6 +58,19 @@ async def _run_metadata_worker_supervisor() -> None:
         await asyncio.sleep(5)
 
 
+async def _run_telegram_sync_supervisor() -> None:
+    """Watchdog loop to keep MTProto sync scanning for queued media every 30s."""
+    await asyncio.sleep(5)
+    while True:
+        try:
+            await bot_service.sync_forwarded_messages()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Telegram sync supervisor error: {e}")
+        await asyncio.sleep(30)
+
+
 async def _run_drive_sync_supervisor() -> None:
     """Periodic background sync to detect newly uploaded or renamed files on Google Drive."""
     await asyncio.sleep(60)
@@ -151,6 +164,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start periodic Google Drive library synchronization
     drive_sync_task = asyncio.create_task(_run_drive_sync_supervisor())
 
+    # Start periodic Telegram MTProto forwarded message sync
+    telegram_sync_task = asyncio.create_task(_run_telegram_sync_supervisor())
+
     # Start 24/7 keep-alive background ping
     keep_alive_task = asyncio.create_task(_run_keep_alive_ping())
 
@@ -168,6 +184,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         drive_sync_task.cancel()
         try:
             await drive_sync_task
+        except asyncio.CancelledError:
+            pass
+
+    if telegram_sync_task:
+        telegram_sync_task.cancel()
+        try:
+            await telegram_sync_task
         except asyncio.CancelledError:
             pass
 

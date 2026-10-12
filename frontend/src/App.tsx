@@ -11,6 +11,7 @@ import {
   type ApiHealthStatus,
 } from './api';
 import { syncActiveWatchSession } from './utils/watchHistory';
+import { launchVlcWithTracking } from './utils/playerSettings';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
@@ -237,9 +238,9 @@ export const App: React.FC = () => {
     }
   };
 
-  // Direct Playback Router: Launches cinema in-browser player with direct VLC handoff
+  // Direct Playback Router: Directly launches VLC Media Player
   const handlePlayMedia = (item: MediaItem) => {
-    setPlayingMedia(item);
+    launchVlcWithTracking(item);
   };
 
   return (
@@ -369,11 +370,6 @@ export const App: React.FC = () => {
         isOffline={selectedMedia ? offlineIds.has(selectedMedia.id) : false}
         onStartDownload={handleStartDownload}
         onDeleteDownload={handleDeleteDownload}
-        onWatch={(item) => {
-          setSelectedMedia(null);
-          setSelectedGroup(null);
-          setPlayingMedia(item);
-        }}
         deviceFreeBytes={deviceFreeBytes}
         onItemUpdated={(updated) => {
           setSelectedMedia(updated);

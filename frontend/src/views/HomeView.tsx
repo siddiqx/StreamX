@@ -552,7 +552,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onClick={handleHeroStream}
               >
                 <Play size={18} fill="#090d16" />
-                Play in VLC
+                Play
               </button>
 
               <button

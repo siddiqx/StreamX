@@ -44,7 +44,6 @@ export interface MediaDetailModalProps {
   isOffline: boolean;
   onStartDownload: (item: MediaItem) => void;
   onDeleteDownload: (item: MediaItem) => void;
-  onWatch?: (item: MediaItem) => void;
   deviceFreeBytes: number;
   onItemUpdated?: (updatedItem: MediaItem) => void;
 }
@@ -57,7 +56,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   isOffline: isOfflineProp,
   onStartDownload,
   onDeleteDownload,
-  onWatch,
   deviceFreeBytes,
   onItemUpdated,
 }) => {
@@ -248,10 +246,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   const handlePrimaryPlayAction = async () => {
     const targetItem = activeEpisodeTarget ? activeEpisodeTarget.ep.item : item;
-    if (onWatch) {
-      onWatch(targetItem);
-      return;
-    }
     setIsLaunchingVlc(true);
     await launchVlcWithTracking(targetItem, (msg) => setVlcStatus(msg));
     setIsLaunchingVlc(false);
@@ -663,10 +657,11 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
             {/* Action Center: Big Streaming CTA + Frosted Toolbar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {/* Primary Streaming & VLC Action Bar */}
+              {/* Single Play Action (Direct VLC Handoff) */}
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
                   onClick={handlePrimaryPlayAction}
+                  disabled={isLaunchingVlc}
                   style={{
                     flex: 1,
                     height: '52px',
@@ -680,7 +675,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '9px',
-                    cursor: 'pointer',
+                    cursor: isLaunchingVlc ? 'wait' : 'pointer',
                     border: 'none',
                     transition: 'all 0.18s ease',
                     letterSpacing: '0.01em',
@@ -700,45 +695,14 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     <Play size={14} fill="#ffffff" color="#ffffff" style={{ marginLeft: '1px' }} />
                   </div>
                   <span>
-                    {activeEpisodeTarget
-                      ? `${activeEpisodeTarget.label}`
+                    {isLaunchingVlc
+                      ? 'Opening in VLC...'
+                      : activeEpisodeTarget
+                      ? `Play ${activeEpisodeTarget.label}`
                       : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
-                      ? `Resume (${watchProgress.progressPercentage}%)`
-                      : 'Watch Now'}
+                      ? `Resume Play (${watchProgress.progressPercentage}%)`
+                      : 'Play'}
                   </span>
-                </button>
-
-                <button
-                  onClick={async () => {
-                    const targetItem = activeEpisodeTarget ? activeEpisodeTarget.ep.item : item;
-                    setIsLaunchingVlc(true);
-                    await launchVlcWithTracking(targetItem, (msg) => setVlcStatus(msg));
-                    setIsLaunchingVlc(false);
-                    setTimeout(() => setVlcStatus(null), 3500);
-                  }}
-                  disabled={isLaunchingVlc}
-                  title="Open stream in VLC Media Player"
-                  style={{
-                    height: '52px',
-                    padding: '0 18px',
-                    borderRadius: '14px',
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    border: '1px solid rgba(255, 255, 255, 0.16)',
-                    color: '#fff',
-                    fontSize: '0.86rem',
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    cursor: isLaunchingVlc ? 'wait' : 'pointer',
-                    transition: 'all 0.18s ease',
-                    flexShrink: 0,
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)')}
-                >
-                  <Tv size={16} color="#fb923c" />
-                  <span>{isLaunchingVlc ? 'Launching...' : 'Play in VLC'}</span>
                 </button>
               </div>
 
@@ -1004,10 +968,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                       <div
                         key={ep.item.id}
                         className="episode-interactive-card"
-                        onClick={() => {
-                          if (onWatch) onWatch(ep.item);
-                          else handleOpenVlcForEpisode(ep.item);
-                        }}
+                        onClick={() => handleOpenVlcForEpisode(ep.item)}
                         style={{
                           background: 'rgba(255, 255, 255, 0.04)',
                           backdropFilter: 'blur(10px)',
@@ -1108,19 +1069,15 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Right: Quick Launch Buttons */}
+                        {/* Right: Single Play Button (Direct VLC) */}
                         <div
                           style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {/* Watch in Browser Button */}
                           <button
-                            onClick={() => {
-                              if (onWatch) onWatch(ep.item);
-                              else handleOpenVlcForEpisode(ep.item);
-                            }}
-                            aria-label={`Watch ${ep.cleanTitle}`}
-                            title="Watch Now"
+                            onClick={() => handleOpenVlcForEpisode(ep.item)}
+                            aria-label={`Play ${ep.cleanTitle}`}
+                            title="Play"
                             style={{
                               width: '38px',
                               height: '38px',
@@ -1145,36 +1102,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             }}
                           >
                             <Play size={16} fill="#090d16" style={{ marginLeft: '1.5px' }} />
-                          </button>
-
-                          {/* Play in VLC Button */}
-                          <button
-                            onClick={() => handleOpenVlcForEpisode(ep.item)}
-                            aria-label={`Play ${ep.cleanTitle} in VLC`}
-                            title="Play in VLC"
-                            style={{
-                              width: '38px',
-                              height: '38px',
-                              borderRadius: '50%',
-                              background: 'rgba(255, 255, 255, 0.08)',
-                              border: '1px solid rgba(255, 255, 255, 0.16)',
-                              color: '#fb923c',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                              transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
-                            }}
-                            onMouseEnter={e => {
-                              e.currentTarget.style.transform = 'scale(1.1)';
-                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.16)';
-                            }}
-                            onMouseLeave={e => {
-                              e.currentTarget.style.transform = 'scale(1.0)';
-                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-                            }}
-                          >
-                            <Tv size={16} color="#fb923c" />
                           </button>
 
                           {/* Download Button */}

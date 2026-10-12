@@ -969,6 +969,54 @@ class TelegramBotService:
             f"{html.escape(summary)}"
         )
 
+    async def sync_forwarded_messages(self) -> int:
+        """Scan bot/owner chat via MTProto for newly forwarded media not yet recorded in SQLite."""
+        from app.services.telegram_mtproto_service import mtproto_service
+        if not mtproto_service.is_configured():
+            return 0
+
+        try:
+            client = await mtproto_service.get_client()
+            bot_entity = "Stream1_X_bot"
+            messages = await client.get_messages(bot_entity, limit=50)
+            async with AsyncSessionLocal() as session:
+                existing_tids = set((await session.execute(select(TelegramTransfer.telegram_message_id))).scalars().all())
+                existing_fwds = set((await session.execute(select(TelegramTransfer.forwarded_message_id))).scalars().all())
+                existing_filenames = set((await session.execute(select(TelegramTransfer.filename))).scalars().all())
+                existing_media = set((await session.execute(select(Media.filename))).scalars().all())
+
+                new_count = 0
+                for m in messages:
+                    file_obj = getattr(m, "file", None)
+                    if file_obj and getattr(file_obj, "name", None):
+                        fname = sanitize_filename(file_obj.name)
+                        fsize = getattr(file_obj, "size", 0) or 0
+                        if (
+                            m.id not in existing_tids
+                            and m.id not in existing_fwds
+                            and fname not in existing_filenames
+                            and fname not in existing_media
+                        ):
+                            t = TelegramTransfer(
+                                telegram_chat_id=self.owner_user_id or settings.TELEGRAM_OWNER_USER_ID,
+                                telegram_message_id=m.id,
+                                filename=fname,
+                                size=fsize,
+                                status=TransferStatus.QUEUED,
+                                forwarded_chat_id=self.owner_user_id or settings.TELEGRAM_OWNER_USER_ID,
+                                forwarded_message_id=m.id,
+                            )
+                            session.add(t)
+                            new_count += 1
+
+                if new_count > 0:
+                    await session.commit()
+                    log_event("MTPROTO_SYNC_ENQUEUED_TRANSFERS", count=new_count)
+                return new_count
+        except Exception as e:
+            logger.debug(f"MTProto message sync check: {e}")
+            return 0
+
     async def start_polling(self) -> None:
         """Start polling loop for incoming Telegram updates."""
         if not self.is_configured():
@@ -976,20 +1024,50 @@ class TelegramBotService:
             return
 
         self.running = True
-        log_event("TELEGRAM_POLLING_STARTED", forward_target_configured=self.is_forward_target_configured())
 
-        # Proactively clear any existing webhook so getUpdates is unblocked
+        # Check if webhook is active (e.g. Cloudflare Worker handling updates 24/7)
+        webhook_active = False
         try:
-            async with httpx.AsyncClient(timeout=15.0) as init_client:
-                await init_client.post(f"{self.base_url}/deleteWebhook", json={"drop_pending_updates": False})
+            async with httpx.AsyncClient(timeout=10.0) as init_client:
+                wh_res = await init_client.get(f"{self.base_url}/getWebhookInfo")
+                if wh_res.status_code == 200:
+                    wh_data = wh_res.json().get("result", {})
+                    wh_url = wh_data.get("url", "")
+                    if wh_url:
+                        webhook_active = True
+                        log_event("TELEGRAM_WEBHOOK_ACTIVE_MODE", url=wh_url)
         except Exception as e:
-            logger.debug(f"Could not clear webhook at polling start: {e}")
+            logger.debug(f"Webhook check at startup: {e}")
 
         # Register command menu in Telegram so Menu button ([/]) appears
         try:
             await self.register_bot_commands()
         except Exception as e:
             logger.debug(f"Could not register commands at polling start: {e}")
+
+        if webhook_active:
+            # Cloudflare Worker is handling updates 24/7.
+            # Local worker runs sync loop via MTProto to download queued files.
+            logger.info("Telegram Bot is running in 24/7 Cloudflare Webhook mode. Local MTProto sync active.")
+            while self.running:
+                try:
+                    await self.sync_forwarded_messages()
+                    await asyncio.sleep(25)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.debug(f"Webhook sync loop error: {e}")
+                    await asyncio.sleep(10)
+            return
+
+        log_event("TELEGRAM_POLLING_STARTED", forward_target_configured=self.is_forward_target_configured())
+
+        # Polling fallback: Clear any existing webhook so getUpdates is unblocked
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as init_client:
+                await init_client.post(f"{self.base_url}/deleteWebhook", json={"drop_pending_updates": False})
+        except Exception as e:
+            logger.debug(f"Could not clear webhook at polling start: {e}")
 
         consecutive_errors = 0
         while self.running:

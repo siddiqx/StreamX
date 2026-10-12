@@ -82,3 +82,11 @@ async def delete_transfer(
     await db.commit()
     return {"ok": True, "message": f"Transfer {transfer_id} deleted", "id": transfer_id}
 
+
+@router.post("/sync")
+async def sync_transfers():
+    """Trigger on-demand sync for queued Telegram media messages."""
+    from app.services.telegram_bot_service import bot_service
+    count = await bot_service.sync_forwarded_messages()
+    return {"ok": True, "new_transfers_enqueued": count}
+
