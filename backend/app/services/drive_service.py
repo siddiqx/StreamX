@@ -151,21 +151,30 @@ class GoogleDriveService:
         creds = await self.get_credentials()
         loop = asyncio.get_running_loop()
 
+        # Build list of category folder IDs to search across
+        categories_to_check = ["Anime", "TV Shows", "Movies", "Other"]
+        cat_ids_to_check = []
+        for c in categories_to_check:
+            cid = await self.get_folder_id(c)
+            if cid and cid not in cat_ids_to_check:
+                cat_ids_to_check.append(cid)
+
         def _sync_show_folder() -> str:
             service = self._get_drive_client(creds)
-            # Query all existing active subfolders inside this category
-            query = (
-                f"'{cat_folder_id}' in parents and "
-                "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-            )
-            res = service.files().list(q=query, fields="files(id, name)", pageSize=1000).execute()
-            folders = res.get("files", [])
+            # Query all existing active subfolders across categories to prevent duplicate folders
+            folders = []
+            for c_id in cat_ids_to_check:
+                query = (
+                    f"'{c_id}' in parents and "
+                    "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+                )
+                res = service.files().list(q=query, fields="files(id, name, parents)", pageSize=1000).execute()
+                folders.extend(res.get("files", []))
 
             # 1. Check for exact case-insensitive match
             exact_matches = [f for f in folders if f.get("name", "").strip().casefold() == clean_name.casefold()]
             if exact_matches:
                 primary = exact_matches[0]
-                # Consolidate redundant duplicate folders if multiple exist
                 if len(exact_matches) > 1:
                     for dup in exact_matches[1:]:
                         dup_id = dup["id"]
@@ -179,36 +188,43 @@ class GoogleDriveService:
                             logger.debug(f"Error consolidating duplicate folder {dup_id}: {e}")
                 return primary["id"]
 
-            # 2. Intelligent sibling / prefix / normalized match against existing folders
-            from app.services.confidence_scorer import titles_match_as_siblings, normalize_title_for_comparison
-            norm_target = normalize_title_for_comparison(clean_name)
+            # 2. Intelligent First-Word & Continuation Matcher
+            # Strips common articles (The, A, An) so "The Daily Life" and "The Promised" never collide.
+            import re
+            STOPWORDS = {"the", "a", "an", "le", "la", "der", "die", "das", "el"}
+
+            def _get_sig_words(title: str) -> list[str]:
+                words = [re.sub(r"[^a-z0-9]", "", w.lower()) for w in title.split()]
+                words = [w for w in words if w]
+                while words and words[0] in STOPWORDS:
+                    words = words[1:]
+                return words
+
+            target_sig = _get_sig_words(clean_name)
+
             for f in folders:
                 fname = f.get("name", "").strip()
-                norm_f = normalize_title_for_comparison(fname)
-                if not norm_f:
+                if not fname:
                     continue
+                folder_sig = _get_sig_words(fname)
+                if not target_sig or not folder_sig:
+                    continue
+
                 is_match = False
-                if norm_f == norm_target:
-                    is_match = True
-                elif titles_match_as_siblings(fname, clean_name):
-                    is_match = True
-                else:
-                    w_f = norm_f.split()
-                    w_t = norm_target.split()
-                    if len(w_f) >= 2 and len(w_t) >= 2:
-                        # If first 2 words match or one is prefix of another
-                        if w_f[:2] == w_t[:2] or (len(w_f) >= 3 and w_f[:3] == w_t[:3]):
+                # First significant word must match (e.g. 'alya' == 'alya' or 'promised' == 'promised')
+                if target_sig[0] == folder_sig[0]:
+                    if len(target_sig) == 1:
+                        # Single word query like 'Alya' matching 'Alya Sometimes Hides Her Feelings in Russian'
+                        if len(target_sig[0]) >= 3:
+                            is_match = True
+                    elif len(target_sig) <= len(folder_sig):
+                        # Multi-word prefix like 'The Promised' matching 'The Promised Neverland'
+                        if folder_sig[:len(target_sig)] == target_sig:
                             is_match = True
 
                 if is_match:
                     f_id = f["id"]
-                    # If clean_name is more complete/canonical, rename folder in Drive
-                    if len(clean_name) > len(fname):
-                        try:
-                            service.files().update(fileId=f_id, body={"name": clean_name}).execute()
-                            log_event("DRIVE_FOLDER_RENAMED", old_name=fname, new_name=clean_name, folder_id=f_id)
-                        except Exception as e:
-                            logger.debug(f"Failed to rename folder {f_id}: {e}")
+                    log_event("DRIVE_EXISTING_SHOW_FOLDER_MATCHED", incoming_name=clean_name, matched_folder=fname, folder_id=f_id)
                     return f_id
 
             # 3. No match found, create a clean new folder
