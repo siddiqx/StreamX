@@ -10,13 +10,13 @@ import {
   getLastApiHealth,
   type ApiHealthStatus,
 } from './api';
-import { launchVlcWithTracking } from './utils/playerSettings';
 import { syncActiveWatchSession } from './utils/watchHistory';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
 import { TransferModal } from './components/TransferModal';
 import { MediaDetailModal } from './components/MediaDetailModal';
+import { VideoPlayerModal } from './components/VideoPlayerModal';
 import { HomeView } from './views/HomeView';
 import { SearchView } from './views/SearchView';
 import { LibraryView } from './views/LibraryView';
@@ -31,6 +31,7 @@ export const App: React.FC = () => {
   const [apiHealth, setApiHealth] = useState<ApiHealthStatus>(getLastApiHealth);
 
   const [selectedGroup, setSelectedGroup] = useState<MediaGroup | null>(null);
+  const [playingMedia, setPlayingMedia] = useState<MediaItem | null>(null);
   const [downloads, setDownloads] = useState<DeviceDownload[]>(() => {
     try {
       const saved = localStorage.getItem('streamx_downloads');
@@ -236,9 +237,9 @@ export const App: React.FC = () => {
     }
   };
 
-  // Direct Playback Router (VLC is the exclusive default player: 0 friction, immediate launch)
+  // Direct Playback Router: Launches cinema in-browser player with direct VLC handoff
   const handlePlayMedia = (item: MediaItem) => {
-    launchVlcWithTracking(item);
+    setPlayingMedia(item);
   };
 
   return (
@@ -371,7 +372,7 @@ export const App: React.FC = () => {
         onWatch={(item) => {
           setSelectedMedia(null);
           setSelectedGroup(null);
-          handlePlayMedia(item);
+          setPlayingMedia(item);
         }}
         deviceFreeBytes={deviceFreeBytes}
         onItemUpdated={(updated) => {
@@ -379,6 +380,14 @@ export const App: React.FC = () => {
           setMedia((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
         }}
       />
+
+      {playingMedia && (
+        <VideoPlayerModal
+          item={playingMedia}
+          onClose={() => setPlayingMedia(null)}
+          isOffline={offlineIds.has(playingMedia.id)}
+        />
+      )}
 
 
       {/* Floating Status Notification Toast */}

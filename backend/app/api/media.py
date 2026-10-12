@@ -365,36 +365,43 @@ async def unlock_media_metadata(
 async def stream_media(
     media_id: int,
     request: Request,
+    drive_id: Optional[str] = Query(None, description="Direct Google Drive file ID"),
     db: AsyncSession = Depends(get_db),
 ):
     """Stream media file directly from Google Drive with full HTTP Range (seek) and HEAD probe support."""
     stmt = select(Media).where(Media.id == media_id)
     result = await db.execute(stmt)
     item = result.scalar_one_or_none()
-    if not item:
+
+    drive_file_id = drive_id or (item.drive_file_id if item else None)
+    if not drive_file_id:
         raise HTTPException(status_code=404, detail="Media item not found")
 
-    content_type = resolve_mime_type(item.filename, item.mime_type)
+    filename = item.filename if item else "media.mkv"
+    mime_type = item.mime_type if item else "video/x-matroska"
+    size = item.size if item else None
+
+    content_type = resolve_mime_type(filename, mime_type)
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": content_type,
-        "Content-Disposition": make_content_disposition("inline", item.filename),
+        "Content-Disposition": make_content_disposition("inline", filename),
     }
 
     # Handle HEAD request (used by VLC, Safari, and web video players to probe headers/seeking)
     if request.method == "HEAD":
-        if item.size:
-            headers["Content-Length"] = str(item.size)
+        if size:
+            headers["Content-Length"] = str(size)
         return Response(content=b"", status_code=200, headers=headers)
 
     range_header = request.headers.get("Range")
-    client, res = await drive_service.get_download_stream(item.drive_file_id, range_header)
+    client, res = await drive_service.get_download_stream(drive_file_id, range_header)
 
     if res.status_code not in (200, 206):
         err_text = await res.aread()
         await res.aclose()
         await client.aclose()
-        logger.error(f"Google Drive streaming error HTTP {res.status_code} for file {item.drive_file_id}: {err_text}")
+        logger.error(f"Google Drive streaming error HTTP {res.status_code} for file {drive_file_id}: {err_text}")
         raise HTTPException(status_code=res.status_code, detail=f"Google Drive stream error: {res.status_code}")
 
     async def stream_generator():
@@ -417,11 +424,27 @@ async def stream_media(
     )
 
 
+@router.api_route("/{media_id}/stream/{filename:path}", methods=["GET", "HEAD"])
+async def stream_media_with_filename(
+    media_id: int,
+    filename: str,
+    request: Request,
+    drive_id: Optional[str] = Query(None, description="Direct Google Drive file ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream media with explicit filename in URL path for universal external player recognition."""
+    return await stream_media(media_id=media_id, request=request, drive_id=drive_id, db=db)
+
+
 def find_vlc_executable() -> Optional[str]:
     """Locate VLC Media Player executable on Windows or POSIX."""
     import os
     import shutil
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    bundled_vlc = os.path.join(base_dir, "tools", "vlc-3.0.21", "vlc.exe")
     candidates = [
+        bundled_vlc,
+        r"d:\02_Projects\StreamX\tools\vlc-3.0.21\vlc.exe",
         os.path.expandvars(r"%ProgramFiles%\VideoLAN\VLC\vlc.exe"),
         os.path.expandvars(r"%ProgramFiles(x86)%\VideoLAN\VLC\vlc.exe"),
         r"C:\Program Files\VideoLAN\VLC\vlc.exe",
@@ -613,13 +636,25 @@ async def open_in_vlc(
     if not vlc_bin:
         raise HTTPException(status_code=404, detail="VLC Media Player was not found on this system.")
 
-    # Direct local loopback URL bypasses external cloud tunnel, ensuring instant, buffer-free playback
-    stream_url = f"http://127.0.0.1:8000/media/{media_id}/stream"
+    clean_title = sanitize_filename(item.filename)
+    stream_url = f"http://127.0.0.1:8000/media/{media_id}/stream/{clean_title}"
+
+    # If the detected VLC executable is legacy (e.g. 0.9.8) and cannot decode HEVC, fallback to compatible stream
+    if "tools" not in vlc_bin.lower() and "Program Files (x86)" in vlc_bin:
+        try:
+            creds = await drive_service.get_credentials()
+            codecs = await probe_media_codecs(item.drive_file_id, creds.token)
+            if codecs.get("video") in ("hevc", "h265", "x265"):
+                stream_url = f"http://127.0.0.1:8000/media/{media_id}/stream/compatible"
+        except Exception:
+            pass
 
     try:
         if os.name == "nt":
-            flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            subprocess.Popen([vlc_bin, stream_url], creationflags=flags)
+            # Use CREATE_NEW_PROCESS_GROUP WITHOUT DETACHED_PROCESS so GUI window is rendered interactively
+            # Pass --no-qt-privacy-ask to bypass first-run dialog
+            flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            subprocess.Popen([vlc_bin, "--no-qt-privacy-ask", stream_url], creationflags=flags)
         else:
             subprocess.Popen([vlc_bin, stream_url])
         return {"status": "ok", "message": "VLC Media Player launched", "url": stream_url}
@@ -643,9 +678,13 @@ async def get_m3u_playlist(
         raise HTTPException(status_code=404, detail="Media item not found")
 
     clean_title = sanitize_filename(item.filename)
-    host = request.headers.get("host") or "127.0.0.1:8000"
-    scheme = "https" if ("trycloudflare.com" in host or request.headers.get("x-forwarded-proto") == "https") else request.url.scheme
-    stream_url = f"{scheme}://{host}/media/{media_id}/stream"
+    # Direct to 24/7 Cloudflare Worker edge with direct Google Drive file ID parameter
+    host = request.headers.get("x-forwarded-host") or "streamx-worker.siddiqsiddiq00012.workers.dev"
+    if "127.0.0.1" in host or "localhost" in host or "trycloudflare.com" in host:
+        host = "streamx-worker.siddiqsiddiq00012.workers.dev"
+    scheme = "https"
+    drive_fid = item.drive_file_id or ""
+    stream_url = f"{scheme}://{host}/media/{media_id}/stream/{clean_title}?drive_id={drive_fid}"
 
     m3u_content = f"#EXTM3U\n#EXTINF:-1,{clean_title}\n{stream_url}\n"
 

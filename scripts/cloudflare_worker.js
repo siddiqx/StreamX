@@ -115,8 +115,15 @@ export default {
         const resHeaders = new Headers(driveRes.headers);
         resHeaders.set("Access-Control-Allow-Origin", origin);
         resHeaders.set("Access-Control-Allow-Credentials", "true");
-        resHeaders.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
+        resHeaders.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, Content-Disposition");
         resHeaders.set("Accept-Ranges", "bytes");
+
+        let ctype = resHeaders.get("Content-Type") || "";
+        if (!ctype || ctype.includes("octet-stream") || ctype.includes("x-download")) {
+          ctype = url.pathname.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/x-matroska";
+          resHeaders.set("Content-Type", ctype);
+        }
+        resHeaders.set("Content-Disposition", "inline");
 
         return new Response(request.method === "HEAD" ? null : driveRes.body, {
           status: driveRes.status,
@@ -211,7 +218,7 @@ export default {
 
       // Fallback C: Generate M3U playlist pointing to direct stream
       if (isPlaylist && driveIdParam) {
-        const streamUrl = `https://${url.host}/media/0/stream?drive_id=${encodeURIComponent(driveIdParam)}`;
+        const streamUrl = `https://${url.host}/media/0/stream/stream.mkv?drive_id=${encodeURIComponent(driveIdParam)}`;
         const m3u = `#EXTM3U\n#EXTINF:-1,StreamX Direct Play\n${streamUrl}\n`;
         return new Response(m3u, {
           status: 200,
