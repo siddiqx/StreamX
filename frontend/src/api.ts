@@ -4,10 +4,6 @@ export const CLOUD_BACKEND_URL = 'https://streamx-worker.siddiqsiddiq00012.worke
 
 export const getApiBase = (): string => {
   if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem('streamx_api_url') || localStorage.getItem('streamx_api_base');
-    if (saved && saved.trim()) {
-      return saved.trim().replace(/\/+$/, '');
-    }
     // If running in local development or local network, connect directly to local backend
     if (
       window.location.hostname === 'localhost' ||
@@ -16,9 +12,28 @@ export const getApiBase = (): string => {
     ) {
       return 'http://localhost:8000';
     }
-  }
-  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.trim()) {
-    return import.meta.env.VITE_API_URL.trim().replace(/\/+$/, '');
+
+    const saved = localStorage.getItem('streamx_api_url') || localStorage.getItem('streamx_api_base');
+    if (saved && saved.trim()) {
+      const clean = saved.trim().replace(/\/+$/, '');
+      // Auto-purge any placeholder, example, or stale tunnel domains from localStorage
+      if (
+        clean.includes('yourname') ||
+        clean.includes('example') ||
+        clean.includes('trycloudflare') ||
+        clean.includes('render.com') ||
+        clean.includes('hf.space') ||
+        clean.includes('localhost') ||
+        (clean.includes('workers.dev') && !clean.includes('siddiqsiddiq00012'))
+      ) {
+        try {
+          localStorage.removeItem('streamx_api_url');
+          localStorage.removeItem('streamx_api_base');
+        } catch {}
+      } else {
+        return clean;
+      }
+    }
   }
   return CLOUD_BACKEND_URL;
 };

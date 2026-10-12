@@ -6,6 +6,7 @@ Zero full-disk requirements: streams memory chunks directly to Google Drive.
 """
 
 import asyncio
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from google.auth.transport.requests import Request
@@ -711,13 +712,25 @@ class GoogleDriveService:
 
             for cat_id in cat_ids:
                 q = f"'{cat_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-                res = service.files().list(q=q, fields="files(id, name)", pageSize=1000).execute()
+                res = service.files().list(q=q, fields="files(id, name, createdTime)", pageSize=1000).execute()
                 subfolders = res.get("files", [])
 
                 for sf in subfolders:
                     sf_id = sf["id"]
                     if sf_id in protected_ids:
                         continue
+
+                    # Protect newly created folders (younger than 2 hours) from premature deletion
+                    # while uploads or transfers are actively writing into them
+                    created_raw = sf.get("createdTime")
+                    if created_raw:
+                        try:
+                            c_dt = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+                            if datetime.now(timezone.utc) - c_dt < timedelta(hours=2):
+                                continue
+                        except Exception:
+                            pass
+
                     cq = f"'{sf_id}' in parents and trashed = false"
                     c_res = service.files().list(q=cq, pageSize=1, fields="files(id)").execute()
                     children = c_res.get("files", [])

@@ -166,6 +166,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       localStorage.removeItem('streamx_api_url');
       localStorage.removeItem('streamx_api_base');
     } catch {}
+    setCustomUrl('https://streamx-worker.siddiqsiddiq00012.workers.dev');
     window.location.reload();
   };
 
@@ -249,7 +250,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="text"
                 value={customUrl}
                 onChange={(e) => setCustomUrl(e.target.value)}
-                placeholder="Cloud Backend URL (e.g. https://...hf.space)"
+                placeholder="https://streamx-worker.siddiqsiddiq00012.workers.dev"
                 style={{
                   width: '100%',
                   height: '38px',
@@ -301,6 +302,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Reset
             </button>
           </div>
+          <p style={{ fontSize: '0.70rem', color: '#64748b', margin: '2px 0 0 2px' }}>
+            Default 24/7 Cloud Engine: <code style={{ color: '#818cf8' }}>https://streamx-worker.siddiqsiddiq00012.workers.dev</code>
+          </p>
         </div>
       </SettingCard>
 
