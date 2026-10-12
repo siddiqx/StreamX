@@ -71,7 +71,7 @@ async function getGoogleAccessToken(env) {
 // --- 24/7 Telegram Edge Bot Webhook Engine ---
 async function handleTelegramWebhook(request, env, rawBase) {
   try {
-    const botToken = env?.TELEGRAM_BOT_TOKEN || "";
+    const botToken = env?.TELEGRAM_BOT_TOKEN || "8782685139:AAENyDH7-CoZBSiO6r55YFWjJ_YHJ3Uhdbo";
     if (!botToken) {
       return new Response(JSON.stringify({ error: "TELEGRAM_BOT_TOKEN not configured" }), {
         status: 200,

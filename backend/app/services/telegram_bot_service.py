@@ -978,7 +978,7 @@ class TelegramBotService:
         try:
             client = await mtproto_service.get_client()
             bot_entity = "Stream1_X_bot"
-            messages = await client.get_messages(bot_entity, limit=50)
+            messages = await client.get_messages(bot_entity, limit=200)
             async with AsyncSessionLocal() as session:
                 existing_tids = set((await session.execute(select(TelegramTransfer.telegram_message_id))).scalars().all())
                 existing_fwds = set((await session.execute(select(TelegramTransfer.forwarded_message_id))).scalars().all())
@@ -986,6 +986,7 @@ class TelegramBotService:
                 existing_media = set((await session.execute(select(Media.filename))).scalars().all())
 
                 new_count = 0
+                enqueued_transfers = []
                 for m in messages:
                     file_obj = getattr(m, "file", None)
                     if file_obj and getattr(file_obj, "name", None):
@@ -1000,6 +1001,7 @@ class TelegramBotService:
                             t = TelegramTransfer(
                                 telegram_chat_id=self.owner_user_id or settings.TELEGRAM_OWNER_USER_ID,
                                 telegram_message_id=m.id,
+                                telegram_file_id=f"mtproto_{m.id}",
                                 filename=fname,
                                 size=fsize,
                                 status=TransferStatus.QUEUED,
@@ -1007,14 +1009,29 @@ class TelegramBotService:
                                 forwarded_message_id=m.id,
                             )
                             session.add(t)
+                            enqueued_transfers.append((fname, fsize, m.id))
                             new_count += 1
 
                 if new_count > 0:
                     await session.commit()
                     log_event("MTPROTO_SYNC_ENQUEUED_TRANSFERS", count=new_count)
+                    try:
+                        file_lines = "\n".join([f"• <code>{html.escape(fn)}</code> ({format_bytes(fs)})" for fn, fs, _ in enqueued_transfers[:5]])
+                        more_txt = f"\n<i>...and {len(enqueued_transfers) - 5} more files</i>" if len(enqueued_transfers) > 5 else ""
+                        await self.send_message(
+                            chat_id=self.owner_user_id or settings.TELEGRAM_OWNER_USER_ID,
+                            text=(
+                                f"🎬 <b>StreamX — PC Online: {new_count} Transfers Enqueued</b>\n\n"
+                                f"The following media received while offline have been automatically added to the queue:\n\n"
+                                f"{file_lines}{more_txt}\n\n"
+                                "⚡ <i>Downloads will run sequentially one by one.</i>"
+                            ),
+                        )
+                    except Exception:
+                        pass
                 return new_count
         except Exception as e:
-            logger.debug(f"MTProto message sync check: {e}")
+            logger.warning(f"MTProto message sync check error: {e}", exc_info=True)
             return 0
 
     async def start_polling(self) -> None:
