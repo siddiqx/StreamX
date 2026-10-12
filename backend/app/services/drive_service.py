@@ -784,7 +784,8 @@ class GoogleDriveService:
                         fid = f["id"]
                         fname = f.get("name", "")
                         parsed = parse_filename(fname)
-                        clean_title = parsed.clean_title
+                        if folder_name and folder_name.casefold() in fname.casefold():
+                            continue
                         if clean_title and folder_name and clean_title.casefold() != folder_name.casefold():
                             new_name = update_filename_title(fname, folder_name)
                             if new_name != fname:

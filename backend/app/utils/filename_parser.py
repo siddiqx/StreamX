@@ -306,7 +306,9 @@ def update_filename_title(original_filename: str, new_title: str) -> str:
     if not clean_new:
         return original_filename
 
-    parsed = parse_filename(original_filename)
+    # If the new title is already contained within the filename, do nothing
+    if clean_new.casefold() in original_filename.casefold():
+        return original_filename
     old_title = (parsed.clean_title or "").strip()
 
     # 1. Match old_title with word boundary in original filename
