@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.db.database import AsyncSessionLocal, init_db
-from app.db.models import TelegramTransfer, TransferStatus
+from app.db.models import TelegramTransfer, TransferStatus, Media
 from app.main import app
 from app.services.telegram_bot_service import TelegramBotService
 from app.utils.filenames import sanitize_filename
@@ -15,11 +15,18 @@ from app.utils.filenames import sanitize_filename
 @pytest.fixture
 async def clean_db():
     await init_db()
+    async with AsyncSessionLocal() as session:
+        for model in (TelegramTransfer, Media):
+            rows = (await session.execute(select(model))).scalars().all()
+            for r in rows:
+                await session.delete(r)
+        await session.commit()
     yield
     async with AsyncSessionLocal() as session:
-        transfers = (await session.execute(select(TelegramTransfer))).scalars().all()
-        for t in transfers:
-            await session.delete(t)
+        for model in (TelegramTransfer, Media):
+            rows = (await session.execute(select(model))).scalars().all()
+            for r in rows:
+                await session.delete(r)
         await session.commit()
 
 
@@ -212,3 +219,79 @@ async def test_bot_duplicate_media_ingestion_skipped(clean_db):
     assert len(sent_messages) == 2
     assert "Media Received" in sent_messages[0][1]
     assert "Transfer Already in Progress" in sent_messages[1][1] or "Duplicate" in sent_messages[1][1]
+
+
+@pytest.mark.asyncio
+async def test_bot_rich_commands(clean_db):
+    """Test all new interactive commands: /ping, /queue, /library, /retry, /cancel, and setMyCommands."""
+    from app.db.models import Media
+
+    bot = TelegramBotService(bot_token="test_token", owner_user_id=8142877259)
+
+    # 1. Test register_bot_commands
+    class _FakeResp:
+        def __init__(self, status_code=200):
+            self.status_code = status_code
+            self.text = "ok"
+
+    with patch("app.services.telegram_bot_service.httpx.AsyncClient.post", return_value=_FakeResp(200)):
+        assert await bot.register_bot_commands() is True
+
+    # 2. Add test media and transfers
+    async with AsyncSessionLocal() as session:
+        session.add(Media(
+            drive_file_id="drive_test_123",
+            filename="Show.S01E01.mkv",
+            size=104857600,
+            mime_type="video/x-matroska",
+        ))
+        t1 = TelegramTransfer(
+            telegram_chat_id=8142877259,
+            telegram_message_id=901,
+            telegram_file_id="f_act_1",
+            filename="Show.S01E02.mkv",
+            size=209715200,
+            bytes_transferred=104857600,
+            status=TransferStatus.UPLOADING_DRIVE,
+        )
+        t2 = TelegramTransfer(
+            telegram_chat_id=8142877259,
+            telegram_message_id=902,
+            telegram_file_id="f_fail_1",
+            filename="Show.S01E03.mkv",
+            size=314572800,
+            status=TransferStatus.FAILED,
+            error_message="Network timeout",
+        )
+        session.add_all([t1, t2])
+        await session.commit()
+        t1_id = t1.id
+        t2_id = t2.id
+
+    sent_replies = []
+    async def mock_send(chat_id, text, reply_to_message_id=None):
+        sent_replies.append(text)
+        return True
+
+    with patch.object(bot, "send_message", side_effect=mock_send):
+        # /ping
+        await bot.process_update({"update_id": 20, "message": {"message_id": 1, "chat": {"id": 8142877259}, "from": {"id": 8142877259}, "text": "/ping"}})
+        assert "Pong" in sent_replies[-1]
+
+        # /queue
+        await bot.process_update({"update_id": 21, "message": {"message_id": 2, "chat": {"id": 8142877259}, "from": {"id": 8142877259}, "text": "/queue"}})
+        assert "Show.S01E02.mkv" in sent_replies[-1]
+        assert "50%" in sent_replies[-1]
+
+        # /library
+        await bot.process_update({"update_id": 22, "message": {"message_id": 3, "chat": {"id": 8142877259}, "from": {"id": 8142877259}, "text": "/library"}})
+        assert "Show.S01E01.mkv" in sent_replies[-1]
+        assert "Total Cataloged Media:</b> 1" in sent_replies[-1]
+
+        # /cancel
+        await bot.process_update({"update_id": 23, "message": {"message_id": 4, "chat": {"id": 8142877259}, "from": {"id": 8142877259}, "text": f"/cancel {t1_id}"}})
+        assert f"Transfer #{t1_id} Cancelled" in sent_replies[-1]
+
+        # /retry
+        await bot.process_update({"update_id": 24, "message": {"message_id": 5, "chat": {"id": 8142877259}, "from": {"id": 8142877259}, "text": f"/retry {t2_id}"}})
+        assert "Re-queued" in sent_replies[-1]
