@@ -584,11 +584,12 @@ class GoogleDriveService:
                         await metadata_service.enqueue_media_for_enrichment(existing.id, session=session)
 
                 # Reconcile transfer if exists
-                stmt_t = select(TelegramTransfer).where(TelegramTransfer.filename == name)
-                t = (await session.execute(stmt_t)).scalar_one_or_none()
-                if t and t.status != TransferStatus.COMPLETED:
-                    t.status = TransferStatus.COMPLETED
-                    t.bytes_transferred = size
+                stmt_t = select(TelegramTransfer).where(TelegramTransfer.filename == name).order_by(TelegramTransfer.id.desc())
+                transfers_matched = (await session.execute(stmt_t)).scalars().all()
+                for t in transfers_matched:
+                    if t and t.status != TransferStatus.COMPLETED:
+                        t.status = TransferStatus.COMPLETED
+                        t.bytes_transferred = size
 
             await session.commit()
 
