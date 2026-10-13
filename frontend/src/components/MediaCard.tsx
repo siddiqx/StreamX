@@ -79,7 +79,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     if (overrideProgress !== undefined) return overrideProgress;
     if (group && group.episodes && group.episodes.length > 0) {
       const history = getWatchHistory();
-      const epIds = new Set(group.episodes.map(e => e.item.id));
+      const epIds = new Set(group.episodes.flatMap(e => [e.item.id, ...(e.versions?.map(v => v.item.id) || [])]));
       const matched = history.filter(h => epIds.has(h.mediaId));
       if (matched.length > 0) return matched[0];
     }
@@ -94,7 +94,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     const handleUpdate = () => {
       if (group && group.episodes && group.episodes.length > 0) {
         const history = getWatchHistory();
-        const epIds = new Set(group.episodes.map(e => e.item.id));
+        const epIds = new Set(group.episodes.flatMap(e => [e.item.id, ...(e.versions?.map(v => v.item.id) || [])]));
         const matched = history.filter(h => epIds.has(h.mediaId));
         if (matched.length > 0) {
           setWatchProgress(matched[0]);

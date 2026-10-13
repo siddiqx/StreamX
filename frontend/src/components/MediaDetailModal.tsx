@@ -177,15 +177,14 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     }
 
     const history = getWatchHistory();
-    const epMap = new Map(episodes.map(e => [e.item.id, e]));
-
     // 2. Genuine in-progress episode (progress between 5% and 90%)
-    for (const h of history) {
-      if (!h.completed && h.progressPercentage > 5 && h.progressPercentage < 90 && epMap.has(h.mediaId)) {
-        const ep = epMap.get(h.mediaId)!;
+    for (const ep of episodes) {
+      const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+      const matchHistory = history.find(h => epIds.includes(h.mediaId) && !h.completed && h.progressPercentage > 5 && h.progressPercentage < 90);
+      if (matchHistory) {
         return {
           ep,
-          progress: h,
+          progress: matchHistory,
           label: `Resume Ep ${ep.episodeNumber || 1}`,
         };
       }
@@ -194,7 +193,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     // 3. Otherwise find first uncompleted episode sequentially (Ep 1 -> Ep 2...)
     const completedIds = new Set(history.filter(h => h.completed || h.progressPercentage >= 90).map(h => h.mediaId));
     for (const ep of episodes) {
-      if (!completedIds.has(ep.item.id)) {
+      const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+      if (!epIds.some(id => completedIds.has(id))) {
         return {
           ep,
           progress: null,
@@ -993,10 +993,11 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 {/* Episode Cards Stack */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
                   {episodes.map((ep) => {
-                    const epOffline = offlineIds?.has(ep.item.id) || false;
-                    const epProgress = getWatchProgress(ep.item.id);
+                    const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+                    const epOffline = offlineIds ? epIds.some(id => offlineIds.has(id)) : false;
+                    const epProgress = getWatchProgress(ep.item.id) || (ep.versions?.map(v => getWatchProgress(v.item.id)).find(p => p !== null)) || null;
                     const epNumStr = ep.episodeNumber ? String(ep.episodeNumber).padStart(2, '0') : 'EP';
-                    const isEpActive = activeEpisodeTarget?.ep.item.id === ep.item.id;
+                    const isEpActive = activeEpisodeTarget ? epIds.includes(activeEpisodeTarget.ep.item.id) : false;
 
                     return (
                       <div
@@ -1089,6 +1090,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
                               <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
                                 {ep.quality} · {ep.extension} · {formatBytes(ep.item.size)}
+                                {ep.versions && ep.versions.length > 1 && ` · ${ep.versions.length} versions`}
                               </span>
                               {epProgress?.completed && (
                                 <span style={{ color: '#10b981', fontSize: '0.70rem', fontWeight: 800 }}>

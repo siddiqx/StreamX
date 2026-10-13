@@ -34,6 +34,7 @@ export interface MediaEpisode {
   quality: string;
   extension: string;
   isOffline: boolean;
+  versions?: MediaVersion[];
 }
 
 export interface MediaVersion {
@@ -227,9 +228,87 @@ export function normalizeGroupKey(title: string): string {
   return title
     .toLowerCase()
     .replace(/^(?:the|a|an)\s+/, '')
+    .replace(/[-_.]+/g, ' ')
     .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, '_')
     .trim();
+}
+
+/**
+ * Computes an episode quality/priority score to pick the best primary representation
+ * when multiple files exist for the same season and episode number.
+ */
+export function episodePriorityScore(ep: MediaEpisode): number {
+  let score = 0;
+  if (ep.isOffline) score += 500;
+  const q = (ep.quality || '').toLowerCase();
+  if (q.includes('4k') || q.includes('2160p')) score += 400;
+  else if (q.includes('1080p')) score += 300;
+  else if (q.includes('720p')) score += 200;
+  else if (q.includes('480p')) score += 100;
+
+  if (ep.item.metadata_status === 'MANUAL') score += 100;
+  else if (ep.item.metadata_status === 'MATCHED') score += 50;
+
+  if (ep.item.canonical_metadata) score += 50;
+  if (ep.item.canonical_metadata?.overview) score += 20;
+
+  // Bonus for longer descriptive filename (e.g. full series name vs truncated prefix)
+  score += Math.min(30, Math.floor((ep.item.filename || '').length / 5));
+
+  // File size bonus (prefer higher bitrate / full encode)
+  if (ep.item.size > 0) {
+    score += Math.min(30, Math.floor(ep.item.size / (100 * 1024 * 1024)));
+  }
+
+  // Tie breaker: prefer higher id
+  score += (ep.item.id || 0) * 0.001;
+
+  return score;
+}
+
+/**
+ * Merges an episode into an episode list, deduplicating by canonical (seasonNumber, episodeNumber)
+ * while preserving all encodes/files inside ep.versions.
+ */
+export function mergeEpisodeIntoList(list: MediaEpisode[], newEp: MediaEpisode): void {
+  const matchIdx = list.findIndex(
+    e => e.seasonNumber === newEp.seasonNumber && e.episodeNumber === newEp.episodeNumber
+  );
+
+  const newVersion: MediaVersion = {
+    item: newEp.item,
+    quality: newEp.quality || '1080p',
+    size: newEp.item.size,
+    extension: newEp.extension,
+    isOffline: newEp.isOffline,
+  };
+
+  if (matchIdx < 0) {
+    newEp.versions = newEp.versions && newEp.versions.length > 0 ? newEp.versions : [newVersion];
+    list.push(newEp);
+    return;
+  }
+
+  const existingEp = list[matchIdx];
+  const combinedVersions: MediaVersion[] = [
+    ...(existingEp.versions && existingEp.versions.length > 0 ? existingEp.versions : [{
+      item: existingEp.item,
+      quality: existingEp.quality,
+      size: existingEp.item.size,
+      extension: existingEp.extension,
+      isOffline: existingEp.isOffline,
+    }]),
+    ...(newEp.versions && newEp.versions.length > 0 ? newEp.versions : [newVersion]),
+  ];
+  const uniqueVersions = combinedVersions.filter((v, idx, arr) => arr.findIndex(x => x.item.id === v.item.id) === idx);
+
+  if (episodePriorityScore(newEp) > episodePriorityScore(existingEp)) {
+    newEp.versions = uniqueVersions;
+    list[matchIdx] = newEp;
+  } else {
+    existingEp.versions = uniqueVersions;
+  }
 }
 
 /**
@@ -433,8 +512,14 @@ export function organizeMediaLibrary(
 
     if (groupsMap.has(groupKey)) {
       const existing = groupsMap.get(groupKey)!;
-      existing.episodes.push(episodeObj);
-      existing.versions.push(versionObj);
+      if (isSeries) {
+        mergeEpisodeIntoList(existing.episodes, episodeObj);
+      } else {
+        existing.episodes.push(episodeObj);
+      }
+      if (!existing.versions.some(v => v.item.id === item.id)) {
+        existing.versions.push(versionObj);
+      }
       existing.totalSize += item.size;
       if (isItemOffline) existing.offlineCount += 1;
       existing.isOffline = existing.offlineCount > 0;
@@ -554,9 +639,15 @@ export function organizeMediaLibrary(
         existingMatch.displayCategory = 'Anime';
       }
 
-      for (const ep of current.episodes) {
-        if (!existingMatch.episodes.some(e => e.item.id === ep.item.id)) {
-          existingMatch.episodes.push(ep);
+      if (current.type === 'series' || existingMatch.type === 'series') {
+        for (const ep of current.episodes) {
+          mergeEpisodeIntoList(existingMatch.episodes, ep);
+        }
+      } else {
+        for (const ep of current.episodes) {
+          if (!existingMatch.episodes.some(e => e.item.id === ep.item.id)) {
+            existingMatch.episodes.push(ep);
+          }
         }
       }
       for (const ver of current.versions) {
@@ -572,9 +663,14 @@ export function organizeMediaLibrary(
     }
   }
 
-  // Sort episodes in each series group
+  // Sort episodes in each series group and enforce unique (seasonNumber, episodeNumber) invariant
   for (const group of unifiedGroups) {
     if (group.type === 'series') {
+      const deduped: MediaEpisode[] = [];
+      for (const ep of group.episodes) {
+        mergeEpisodeIntoList(deduped, ep);
+      }
+      group.episodes = deduped;
       group.episodes.sort((a, b) => {
         if (a.seasonNumber !== b.seasonNumber) return a.seasonNumber - b.seasonNumber;
         return a.episodeNumber - b.episodeNumber;
@@ -731,19 +827,21 @@ export function getSmartSeriesEpisode(group: MediaGroup): MediaEpisode {
   }
 
   const history = getWatchHistory();
-  const epMap = new Map(group.episodes.map(e => [e.item.id, e]));
 
-  // 1. Is there an episode actively in progress?
-  for (const h of history) {
-    if (!h.completed && h.progressPercentage > 5 && h.progressPercentage < 90 && epMap.has(h.mediaId)) {
-      return epMap.get(h.mediaId)!;
+  // 1. Is there an episode actively in progress (any version)?
+  for (const ep of group.episodes) {
+    const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+    const inProgress = history.find(h => epIds.includes(h.mediaId) && !h.completed && h.progressPercentage > 5 && h.progressPercentage < 90);
+    if (inProgress) {
+      return ep;
     }
   }
 
-  // 2. Otherwise find the first uncompleted episode sequentially
+  // 2. Otherwise find the first uncompleted episode sequentially (accounting for all versions)
   const completedIds = new Set(history.filter(h => h.completed || h.progressPercentage >= 90).map(h => h.mediaId));
   for (const ep of group.episodes) {
-    if (!completedIds.has(ep.item.id)) {
+    const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+    if (!epIds.some(id => completedIds.has(id))) {
       return ep;
     }
   }
