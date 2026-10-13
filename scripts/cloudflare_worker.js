@@ -18,6 +18,34 @@ const FALLBACK_CATALOG = [{"id": 61, "drive_file_id": "1Ecn63gFJ-bgLosayDMGeOqFr
 // Your backend tunnel URL (when PC is running)
 const BACKEND_URL = "https://solo-beaver-asia-search.trycloudflare.com";
 
+let dynamicBackendUrl = null;
+let lastTunnelFetch = 0;
+
+async function getLiveBackendUrl(env) {
+  const now = Date.now();
+  if (dynamicBackendUrl && (now - lastTunnelFetch < 30000)) {
+    return dynamicBackendUrl;
+  }
+  if (env?.BACKEND_URL && env.BACKEND_URL.trim()) {
+    return env.BACKEND_URL.trim().replace(/\/+$/, "");
+  }
+  try {
+    const res = await fetch("https://raw.githubusercontent.com/siddiqx/StreamX/main/active_tunnel.txt", {
+      headers: { "Cache-Control": "no-cache" },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.ok) {
+      const txt = (await res.text()).trim();
+      if (txt && txt.startsWith("http")) {
+        dynamicBackendUrl = txt.replace(/\/+$/, "");
+        lastTunnelFetch = now;
+        return dynamicBackendUrl;
+      }
+    }
+  } catch (_) {}
+  return (BACKEND_URL || "").trim().replace(/\/+$/, "");
+}
+
 // In-memory token cache for Google OAuth
 let cachedGoogleToken = null;
 let googleTokenExpiry = 0;
@@ -285,7 +313,7 @@ export default {
       });
     }
 
-    const rawBase = (env?.BACKEND_URL || BACKEND_URL || "").trim().replace(/\/+$/, "");
+    const rawBase = await getLiveBackendUrl(env);
 
     // 24/7 Telegram Webhook handler
     if ((url.pathname === "/telegram/webhook" || url.pathname === "/api/telegram/webhook") && request.method === "POST") {

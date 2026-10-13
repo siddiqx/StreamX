@@ -991,7 +991,11 @@ class TelegramBotService:
             async with AsyncSessionLocal() as session:
                 existing_tids = set((await session.execute(select(TelegramTransfer.telegram_message_id))).scalars().all())
                 existing_fwds = set((await session.execute(select(TelegramTransfer.forwarded_message_id))).scalars().all())
-                existing_filenames = set((await session.execute(select(TelegramTransfer.filename))).scalars().all())
+                existing_filenames = set((await session.execute(
+                    select(TelegramTransfer.filename).where(
+                        TelegramTransfer.status.notin_([TransferStatus.FAILED, TransferStatus.CANCELLED])
+                    )
+                )).scalars().all())
                 existing_media = set((await session.execute(select(Media.filename))).scalars().all())
 
                 new_count = 0

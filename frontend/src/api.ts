@@ -16,14 +16,11 @@ export const getApiBase = (): string => {
     const saved = localStorage.getItem('streamx_api_url') || localStorage.getItem('streamx_api_base');
     if (saved && saved.trim()) {
       const clean = saved.trim().replace(/\/+$/, '');
-      // Auto-purge any placeholder, example, or stale tunnel domains from localStorage
+      // Auto-purge obvious placeholder or example domains from localStorage
       if (
         clean.includes('yourname') ||
-        clean.includes('example') ||
-        clean.includes('trycloudflare') ||
+        clean.includes('example.com') ||
         clean.includes('render.com') ||
-        clean.includes('hf.space') ||
-        clean.includes('localhost') ||
         (clean.includes('workers.dev') && !clean.includes('siddiqsiddiq00012'))
       ) {
         try {
