@@ -7,7 +7,7 @@ import {
 
 import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
-import { organizeMediaLibrary } from '../utils/mediaOrganizer';
+import { organizeMediaLibrary, getSmartSeriesEpisode } from '../utils/mediaOrganizer';
 import { MediaCard } from '../components/MediaCard';
 import {
   formatRuntime,
@@ -174,8 +174,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const featuredOverview = featuredGroup?.overview || featured?.canonical_metadata?.overview;
 
   const handleHeroStream = () => {
-    if (!featured) return;
-    launchVlcWithTracking(featured);
+    if (featuredGroup && featuredGroup.type === 'series') {
+      const smartEp = getSmartSeriesEpisode(featuredGroup);
+      launchVlcWithTracking(smartEp.item);
+    } else if (featured) {
+      launchVlcWithTracking(featured);
+    }
   };
 
   const handleHeroClick = () => {
@@ -560,13 +564,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', margin: 0 }}>
               {apiHealth.statusCode === 503
-                ? 'Backend Service Suspended on Render (HTTP 503)'
-                : 'Unable to Reach StreamX Backend Server'}
+                ? 'StreamX Cloud Edge Active (Local PC Sleeping)'
+                : 'Connecting to StreamX Backend Server'}
             </h3>
             <p
               style={{
                 fontSize: '0.78rem',
-                color: '#fda4af',
+                color: '#cbd5e1',
                 marginTop: '4px',
                 fontFamily: 'monospace',
                 wordBreak: 'break-all',
@@ -585,8 +589,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             }}
           >
             {apiHealth.statusCode === 503
-              ? 'The cloud backend is currently suspended by its owner on Render. To stream videos and view metadata, resume the service on your Render dashboard or configure your active server in Settings.'
-              : 'The frontend could not connect to the backend server. Please check your internet connection or enter your active backend URL in Settings.'}
+              ? 'Your local PC is offline. 24/7 Cloudflare Edge streaming directly from Google Drive is ready. Turn on your PC only when queuing new downloads from Telegram.'
+              : 'Checking server connection. You can stream media directly from Google Drive 24/7.'}
           </p>
 
           <div
@@ -619,28 +623,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <Settings size={14} />
                 Configure Server in Settings
               </button>
-            )}
-            {apiHealth.statusCode === 503 && (
-              <a
-                href="https://dashboard.render.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  padding: '9px 16px',
-                  borderRadius: '10px',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  background: 'rgba(255, 255, 255, 0.08)',
-                  color: '#fff',
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                  textDecoration: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                Render Dashboard
-              </a>
             )}
             {onRetry && (
               <button

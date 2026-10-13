@@ -128,8 +128,8 @@ export function reportApiStatus(status: ApiHealthStatus): void {
 export async function fetchMedia(category?: string): Promise<MediaItem[]> {
   const currentBase = getApiBase();
   const url = category
-    ? `${currentBase}/media?category=${encodeURIComponent(category)}`
-    : `${currentBase}/media`;
+    ? `${currentBase}/media?category=${encodeURIComponent(category)}&limit=1000`
+    : `${currentBase}/media?limit=1000`;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -144,7 +144,7 @@ export async function fetchMedia(category?: string): Promise<MediaItem[]> {
       reportApiStatus({
         ok: false,
         statusCode: res.status,
-        error: res.status === 503 ? 'Service Suspended on Render (503)' : `HTTP Error ${res.status}`,
+        error: res.status === 503 ? 'StreamX Cloud Edge Active (PC Offline)' : `HTTP Error ${res.status}`,
         url: currentBase,
       });
       throw new Error(`HTTP ${res.status}`);
@@ -174,7 +174,7 @@ export async function fetchMedia(category?: string): Promise<MediaItem[]> {
     // If custom API_BASE failed and wasn't the cloud backend, try fallback to cloud
     if (currentBase !== CLOUD_BACKEND_URL) {
       try {
-        const fallbackRes = await fetch(`${CLOUD_BACKEND_URL}/media`);
+        const fallbackRes = await fetch(`${CLOUD_BACKEND_URL}/media?limit=1000`);
         if (fallbackRes.ok) {
           const fallbackData = await fallbackRes.json();
           if (Array.isArray(fallbackData) && fallbackData.length > 0) {

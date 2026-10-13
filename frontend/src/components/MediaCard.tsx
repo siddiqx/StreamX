@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle, Layers } from 'lucide-react';
 import type { MediaItem } from '../types';
-import type { MediaGroup } from '../utils/mediaOrganizer';
+import { getSmartSeriesEpisode, type MediaGroup } from '../utils/mediaOrganizer';
 import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl, API_BASE } from '../api';
 import { getWatchProgress, getWatchHistory } from '../utils/watchHistory';
 import type { WatchHistoryItem } from '../utils/watchHistory';
@@ -35,6 +35,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   overrideProgress,
   onSelect,
   onSelectGroup,
+  onPlay,
   width,
 }) => {
   const [imageError, setImageError] = useState(false);
@@ -119,7 +120,14 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   const handlePlayClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    launchVlcWithTracking(resolvedItem);
+    const targetItem = (group && group.type === 'series')
+      ? getSmartSeriesEpisode(group).item
+      : (item || resolvedItem);
+    if (onPlay) {
+      onPlay(targetItem);
+    } else {
+      launchVlcWithTracking(targetItem);
+    }
   };
 
   return (

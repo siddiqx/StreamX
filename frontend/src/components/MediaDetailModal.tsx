@@ -143,42 +143,73 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     }
   };
 
+  const [selectedEpisodeId, setSelectedEpisodeId] = useState<number | null>(() => {
+    if (rawItem && isSeriesGroup && episodes.some(e => e.item.id === rawItem.id)) {
+      return rawItem.id;
+    }
+    return null;
+  });
+
+  React.useEffect(() => {
+    if (rawItem && isSeriesGroup && episodes.some(e => e.item.id === rawItem.id)) {
+      setSelectedEpisodeId(rawItem.id);
+    } else {
+      setSelectedEpisodeId(null);
+    }
+  }, [rawItem?.id, isSeriesGroup]);
+
   // Determine smart resume/next episode for series
   const activeEpisodeTarget = useMemo(() => {
     if (!isSeriesGroup || episodes.length === 0) return null;
-    const history = getWatchHistory();
-    const epMap = new Map(episodes.map(e => [e.item.id, e]));
 
-    // 1. Is any episode currently in-progress?
-    for (const h of history) {
-      if (!h.completed && h.progressPercentage > 0 && epMap.has(h.mediaId)) {
+    // 1. Explicit user selection takes absolute priority
+    if (selectedEpisodeId) {
+      const explicit = episodes.find(e => e.item.id === selectedEpisodeId);
+      if (explicit) {
+        const epProgress = getWatchProgress(explicit.item.id);
+        const isResume = epProgress && !epProgress.completed && epProgress.progressPercentage > 5 && epProgress.progressPercentage < 90;
         return {
-          ep: epMap.get(h.mediaId)!,
-          progress: h,
-          label: `Resume Ep ${epMap.get(h.mediaId)!.episodeNumber}`,
+          ep: explicit,
+          progress: epProgress,
+          label: isResume ? `Resume Ep ${explicit.episodeNumber || 1}` : `Play Ep ${explicit.episodeNumber || 1}`,
         };
       }
     }
 
-    // 2. Otherwise find first uncompleted episode
-    const completedIds = new Set(history.filter(h => h.completed).map(h => h.mediaId));
+    const history = getWatchHistory();
+    const epMap = new Map(episodes.map(e => [e.item.id, e]));
+
+    // 2. Genuine in-progress episode (progress between 5% and 90%)
+    for (const h of history) {
+      if (!h.completed && h.progressPercentage > 5 && h.progressPercentage < 90 && epMap.has(h.mediaId)) {
+        const ep = epMap.get(h.mediaId)!;
+        return {
+          ep,
+          progress: h,
+          label: `Resume Ep ${ep.episodeNumber || 1}`,
+        };
+      }
+    }
+
+    // 3. Otherwise find first uncompleted episode sequentially (Ep 1 -> Ep 2...)
+    const completedIds = new Set(history.filter(h => h.completed || h.progressPercentage >= 90).map(h => h.mediaId));
     for (const ep of episodes) {
       if (!completedIds.has(ep.item.id)) {
         return {
           ep,
           progress: null,
-          label: `Play Ep ${ep.episodeNumber}`,
+          label: `Play Ep ${ep.episodeNumber || 1}`,
         };
       }
     }
 
-    // 3. Fallback to first episode
+    // 4. Default: Always Episode 1 (the first episode in the sorted list)
     return {
       ep: episodes[0],
       progress: null,
       label: `Play Ep ${episodes[0].episodeNumber || 1}`,
     };
-  }, [isSeriesGroup, episodes]);
+  }, [isSeriesGroup, episodes, selectedEpisodeId]);
 
   if (!item) return null;
 
@@ -238,6 +269,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   const hasEnoughStorage = deviceFreeBytes >= requiredWithSafetyMargin;
 
   const handleOpenVlcForEpisode = async (epItem: MediaItem) => {
+    setSelectedEpisodeId(epItem.id);
     setIsLaunchingVlc(true);
     await launchVlcWithTracking(epItem, (msg) => setVlcStatus(msg));
     setIsLaunchingVlc(false);
@@ -245,7 +277,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   };
 
   const handlePrimaryPlayAction = async () => {
-    const targetItem = activeEpisodeTarget ? activeEpisodeTarget.ep.item : item;
+    const targetItem = activeEpisodeTarget ? activeEpisodeTarget.ep.item : (group?.episodes?.[0]?.item || item);
+    if (!targetItem) return;
     setIsLaunchingVlc(true);
     await launchVlcWithTracking(targetItem, (msg) => setVlcStatus(msg));
     setIsLaunchingVlc(false);
@@ -963,6 +996,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     const epOffline = offlineIds?.has(ep.item.id) || false;
                     const epProgress = getWatchProgress(ep.item.id);
                     const epNumStr = ep.episodeNumber ? String(ep.episodeNumber).padStart(2, '0') : 'EP';
+                    const isEpActive = activeEpisodeTarget?.ep.item.id === ep.item.id;
 
                     return (
                       <div
@@ -970,10 +1004,11 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                         className="episode-interactive-card"
                         onClick={() => handleOpenVlcForEpisode(ep.item)}
                         style={{
-                          background: 'rgba(255, 255, 255, 0.04)',
+                          background: isEpActive ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255, 255, 255, 0.04)',
                           backdropFilter: 'blur(10px)',
                           WebkitBackdropFilter: 'blur(10px)',
-                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          border: isEpActive ? '1px solid rgba(129, 140, 248, 0.65)' : '1px solid rgba(255, 255, 255, 0.08)',
+                          boxShadow: isEpActive ? '0 0 16px rgba(99, 102, 241, 0.22)' : 'none',
                           borderRadius: '16px',
                           padding: '13px 16px',
                           display: 'flex',

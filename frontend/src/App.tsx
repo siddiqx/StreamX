@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { MediaItem, TelegramTransfer, DeviceDownload } from './types';
-import type { MediaGroup } from './utils/mediaOrganizer';
+import { organizeMediaLibrary, type MediaGroup } from './utils/mediaOrganizer';
 import {
   fetchMedia,
   fetchTransfers,
@@ -228,6 +228,29 @@ export const App: React.FC = () => {
     [offlineItems]
   );
 
+  const organizedLibrary = useMemo(
+    () => organizeMediaLibrary(media, offlineIds),
+    [media, offlineIds]
+  );
+
+  const handleSelectMedia = (item: MediaItem) => {
+    const parentGroup = organizedLibrary.allGroups.find(
+      (g) => g.type === 'series' && g.episodes.some((ep) => ep.item.id === item.id)
+    );
+    if (parentGroup) {
+      setSelectedGroup(parentGroup);
+      setSelectedMedia(item);
+    } else {
+      setSelectedGroup(null);
+      setSelectedMedia(item);
+    }
+  };
+
+  const handleSelectGroup = (grp: MediaGroup) => {
+    setSelectedGroup(grp);
+    setSelectedMedia(null);
+  };
+
   // Real browser download action
   const handleStartDownload = (item: MediaItem) => {
     // 1. Trigger actual direct Google Drive download stream
@@ -300,14 +323,8 @@ export const App: React.FC = () => {
           <HomeView
             media={media}
             offlineIds={offlineIds}
-            onSelectMedia={(item) => {
-              setSelectedMedia(item);
-              setSelectedGroup(null);
-            }}
-            onSelectGroup={(grp) => {
-              setSelectedGroup(grp);
-              setSelectedMedia(grp.featuredItem);
-            }}
+            onSelectMedia={handleSelectMedia}
+            onSelectGroup={handleSelectGroup}
             onPlayMedia={(item) => handlePlayMedia(item)}
             onViewAllLibrary={(cat) => {
               setSelectedCategoryFilter(cat || 'All');
@@ -323,14 +340,8 @@ export const App: React.FC = () => {
           <SearchView
             allMedia={media}
             offlineIds={offlineIds}
-            onSelectMedia={(item) => {
-              setSelectedMedia(item);
-              setSelectedGroup(null);
-            }}
-            onSelectGroup={(grp) => {
-              setSelectedGroup(grp);
-              setSelectedMedia(grp.featuredItem);
-            }}
+            onSelectMedia={handleSelectMedia}
+            onSelectGroup={handleSelectGroup}
             onPlayMedia={(item) => handlePlayMedia(item)}
           />
         )}
@@ -339,14 +350,8 @@ export const App: React.FC = () => {
           <LibraryView
             media={media}
             offlineIds={offlineIds}
-            onSelectMedia={(item) => {
-              setSelectedMedia(item);
-              setSelectedGroup(null);
-            }}
-            onSelectGroup={(grp) => {
-              setSelectedGroup(grp);
-              setSelectedMedia(grp.featuredItem);
-            }}
+            onSelectMedia={handleSelectMedia}
+            onSelectGroup={handleSelectGroup}
             onPlayMedia={(item) => handlePlayMedia(item)}
             initialCategory={selectedCategoryFilter}
           />

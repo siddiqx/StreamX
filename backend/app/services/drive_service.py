@@ -502,7 +502,11 @@ class GoogleDriveService:
         from app.workers.transfer_worker import detect_category
         from sqlalchemy import select
 
-        files = await self.list_library_files()
+        try:
+            files = await self.list_library_files()
+        except Exception as e:
+            logger.warning(f"Skipping Drive library sync because Drive credentials need re-auth: {e}")
+            return 0
         synced_count = 0
 
         async with AsyncSessionLocal() as session:

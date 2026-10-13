@@ -101,7 +101,7 @@ def format_media_item(item: Media) -> MediaResponse:
 @router.get("", response_model=List[MediaResponse])
 async def list_media(
     category: Optional[str] = Query(None, description="Filter by category (e.g. Movies, TV Shows, Anime)"),
-    limit: int = 50,
+    limit: int = 1000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ) -> List[MediaResponse]:

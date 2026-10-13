@@ -21,6 +21,7 @@ import {
   getMediaBackdropUrl,
   parseMediaMetadata,
 } from '../api';
+import { getWatchHistory } from './watchHistory';
 
 export type MediaTaxonomyCategory = 'Anime' | 'Anime Movies' | 'TV Shows' | 'Movies' | 'Other';
 
@@ -699,4 +700,46 @@ export function organizeMediaLibrary(
     liveActionMovies,
     genreShelves,
   };
+}
+
+/**
+ * Resolves the precise episode to play for a series:
+ * 1. Checks if an episode is actively in-progress in watch history (progress > 5% and < 90%).
+ * 2. Otherwise finds the first uncompleted episode in sequential order (Season 1 Ep 1, Season 1 Ep 2...).
+ * 3. Defaults to Episode 1 (the first episode in the canonically sorted list).
+ */
+export function getSmartSeriesEpisode(group: MediaGroup): MediaEpisode {
+  if (!group.episodes || group.episodes.length === 0) {
+    return {
+      item: group.featuredItem,
+      seasonNumber: 1,
+      episodeNumber: 1,
+      episodeLabel: 'Ep 1',
+      cleanTitle: 'Episode 1',
+      quality: '1080p',
+      extension: 'MKV',
+      isOffline: false,
+    };
+  }
+
+  const history = getWatchHistory();
+  const epMap = new Map(group.episodes.map(e => [e.item.id, e]));
+
+  // 1. Is there an episode actively in progress?
+  for (const h of history) {
+    if (!h.completed && h.progressPercentage > 5 && h.progressPercentage < 90 && epMap.has(h.mediaId)) {
+      return epMap.get(h.mediaId)!;
+    }
+  }
+
+  // 2. Otherwise find the first uncompleted episode sequentially
+  const completedIds = new Set(history.filter(h => h.completed || h.progressPercentage >= 90).map(h => h.mediaId));
+  for (const ep of group.episodes) {
+    if (!completedIds.has(ep.item.id)) {
+      return ep;
+    }
+  }
+
+  // 3. Default to Episode 1
+  return group.episodes[0];
 }
