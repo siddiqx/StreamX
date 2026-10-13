@@ -188,7 +188,7 @@ export async function fetchMedia(category?: string): Promise<MediaItem[]> {
 
 export async function fetchMediaById(mediaId: number): Promise<MediaItem | null> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}`, {
+    const res = await fetch(`${getApiBase()}/media/${mediaId}`, {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache' },
     });
@@ -203,7 +203,7 @@ export async function fetchMediaById(mediaId: number): Promise<MediaItem | null>
 export async function searchMedia(query: string): Promise<MediaItem[]> {
   if (!query.trim()) return [];
   try {
-    const res = await fetch(`${API_BASE}/media/search?q=${encodeURIComponent(query.trim())}`);
+    const res = await fetch(`${getApiBase()}/media/search?q=${encodeURIComponent(query.trim())}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -214,7 +214,7 @@ export async function searchMedia(query: string): Promise<MediaItem[]> {
 
 export async function fetchCategories(): Promise<CategorySummary[]> {
   try {
-    const res = await fetch(`${API_BASE}/media/categories`);
+    const res = await fetch(`${getApiBase()}/media/categories`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch {
@@ -224,7 +224,7 @@ export async function fetchCategories(): Promise<CategorySummary[]> {
 
 export async function fetchTransfers(): Promise<TelegramTransfer[]> {
   try {
-    const res = await fetch(`${API_BASE}/transfers?limit=20`);
+    const res = await fetch(`${getApiBase()}/transfers?limit=20`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch {
@@ -267,7 +267,7 @@ export interface SystemStatus {
 
 export async function fetchSystemStatus(): Promise<SystemStatus | null> {
   try {
-    const res = await fetch(`${API_BASE}/system/status`);
+    const res = await fetch(`${getApiBase()}/system/status`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -278,7 +278,7 @@ export async function fetchSystemStatus(): Promise<SystemStatus | null> {
 
 export function getStreamUrl(mediaId: number, driveFileId?: string): string {
   const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
-  return `${API_BASE}/media/${mediaId}/stream${qs}`;
+  return `${getApiBase()}/media/${mediaId}/stream${qs}`;
 }
 
 export function getCompatibleStreamUrl(mediaId: number, start?: number, mode?: string, driveFileId?: string): string {
@@ -287,17 +287,17 @@ export function getCompatibleStreamUrl(mediaId: number, start?: number, mode?: s
   if (mode) params.set('mode', mode);
   if (driveFileId) params.set('drive_id', driveFileId);
   const qs = params.toString();
-  return `${API_BASE}/media/${mediaId}/stream/compatible${qs ? `?${qs}` : ''}`;
+  return `${getApiBase()}/media/${mediaId}/stream/compatible${qs ? `?${qs}` : ''}`;
 }
 
 export function getDownloadUrl(mediaId: number, driveFileId?: string): string {
   const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
-  return `${API_BASE}/media/${mediaId}/download${qs}`;
+  return `${getApiBase()}/media/${mediaId}/download${qs}`;
 }
 
 export function getPlaylistUrl(mediaId: number, driveFileId?: string): string {
   const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
-  return `${API_BASE}/media/${mediaId}/playlist.m3u${qs}`;
+  return `${getApiBase()}/media/${mediaId}/playlist.m3u${qs}`;
 }
 
 export function getVlcProtocolUrl(mediaId: number): string {
@@ -313,7 +313,7 @@ export function getVlcIntentUrl(mediaId: number, title?: string): string {
 
 export async function openVlcOnHost(mediaId: number): Promise<{ success: boolean; message: string }> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}/open-vlc`, { method: 'POST' });
+    const res = await fetch(`${getApiBase()}/media/${mediaId}/open-vlc`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Failed to open VLC');
     return { success: true, message: data.message || 'VLC launched on device' };
@@ -476,8 +476,8 @@ export function formatRuntime(minutes?: number): string | undefined {
 export async function searchMetadataCandidates(mediaId: number, query?: string): Promise<any[]> {
   try {
     const url = query
-      ? `${API_BASE}/media/${mediaId}/metadata/search?query=${encodeURIComponent(query.trim())}`
-      : `${API_BASE}/media/${mediaId}/metadata/search`;
+      ? `${getApiBase()}/media/${mediaId}/metadata/search?query=${encodeURIComponent(query.trim())}`
+      : `${getApiBase()}/media/${mediaId}/metadata/search`;
     const res = await fetch(url, { method: 'POST' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
@@ -489,7 +489,7 @@ export async function searchMetadataCandidates(mediaId: number, query?: string):
 
 export async function selectMetadata(mediaId: number, providerId: string, mediaType = 'movie', applyToSeries = true): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/select`, {
+    const res = await fetch(`${getApiBase()}/media/${mediaId}/metadata/select`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider_id: providerId, media_type: mediaType, apply_to_series: applyToSeries }),
@@ -516,7 +516,7 @@ export async function patchMediaMetadata(
   }
 ): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata`, {
+    const res = await fetch(`${getApiBase()}/media/${mediaId}/metadata`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
@@ -533,7 +533,7 @@ export async function patchMediaMetadata(
 
 export async function setPosterOverride(mediaId: number, posterUrl: string | null): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/poster`, {
+    const res = await fetch(`${getApiBase()}/media/${mediaId}/metadata/poster`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ poster_url: posterUrl }),
@@ -550,7 +550,7 @@ export async function setPosterOverride(mediaId: number, posterUrl: string | nul
 
 export async function setBackdropOverride(mediaId: number, backdropUrl: string | null): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/backdrop`, {
+    const res = await fetch(`${getApiBase()}/media/${mediaId}/metadata/backdrop`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ backdrop_url: backdropUrl }),
@@ -567,7 +567,7 @@ export async function setBackdropOverride(mediaId: number, backdropUrl: string |
 
 export async function reprocessMetadata(mediaId: number, force = false): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/reprocess?force=${force}`, {
+    const res = await fetch(`${getApiBase()}/media/${mediaId}/metadata/reprocess?force=${force}`, {
       method: 'POST',
     });
     if (res.ok) {
@@ -582,7 +582,7 @@ export async function reprocessMetadata(mediaId: number, force = false): Promise
 
 export async function unlockMetadata(mediaId: number): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/unlock`, {
+    const res = await fetch(`${getApiBase()}/media/${mediaId}/metadata/unlock`, {
       method: 'POST',
     });
     if (res.ok) {
@@ -597,7 +597,7 @@ export async function unlockMetadata(mediaId: number): Promise<boolean> {
 
 export async function fetchMetadataStats(): Promise<any | null> {
   try {
-    const res = await fetch(`${API_BASE}/metadata/stats`);
+    const res = await fetch(`${getApiBase()}/metadata/stats`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -608,7 +608,7 @@ export async function fetchMetadataStats(): Promise<any | null> {
 
 export async function fetchMediaDiagnostics(mediaId: number): Promise<any | null> {
   try {
-    const res = await fetch(`${API_BASE}/media/${mediaId}/metadata/diagnostics`);
+    const res = await fetch(`${getApiBase()}/media/${mediaId}/metadata/diagnostics`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -628,7 +628,7 @@ export async function triggerMetadataBackfill(
       dry_run: String(dryRun),
       preserve_manual: String(preserveManual),
     });
-    const res = await fetch(`${API_BASE}/metadata/backfill?${params.toString()}`, {
+    const res = await fetch(`${getApiBase()}/metadata/backfill?${params.toString()}`, {
       method: 'POST',
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

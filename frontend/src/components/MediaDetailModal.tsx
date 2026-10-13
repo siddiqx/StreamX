@@ -731,7 +731,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                     {isLaunchingVlc
                       ? 'Opening in VLC...'
                       : activeEpisodeTarget
-                      ? `Play ${activeEpisodeTarget.label}`
+                      ? activeEpisodeTarget.label
                       : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
                       ? `Resume Play (${watchProgress.progressPercentage}%)`
                       : 'Play'}

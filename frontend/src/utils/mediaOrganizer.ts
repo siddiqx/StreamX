@@ -141,9 +141,16 @@ export function extractEpisodeInfo(filename: string): {
     working = seriesTitle;
   }
 
-  // Telegram names often place the episode marker before the series name.
+  // Telegram names often place the episode marker before the series name (e.g. S01-06 Series, S01 EP06 Series).
+  const leadingHyphenEpisode = working.match(/^\s*S\s*0*(\d{1,2})\s*[-_ ]\s*(?:EP|Episode|Ep|E)?\s*0*(\d{1,4})(?:v\d+)?\s*[-:–— _]+\s*/i);
   const leadingEpisode = working.match(/^\s*(?:S\s*(\d{1,2})\s*[._ -]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*/i);
-  if (leadingEpisode) {
+  if (leadingHyphenEpisode) {
+    season = Number(leadingHyphenEpisode[1]);
+    episode = Number(leadingHyphenEpisode[2]);
+    isSeries = true;
+    working = working.slice(leadingHyphenEpisode[0].length);
+    seriesTitle = working;
+  } else if (leadingEpisode) {
     season = Number(leadingEpisode[1] || 1);
     episode = Number(leadingEpisode[2]);
     isSeries = true;
@@ -154,6 +161,7 @@ export function extractEpisodeInfo(filename: string): {
     const patterns = [
       /\bS\s*[._ -]?\s*(\d{1,2})\s*[._ -]*E\s*(\d{1,4})(?:v\d+)?\b/i,
       /\bSeason\s*[._ -]?\s*(\d{1,2})\s*[._ -]*(?:Episode|Ep)\s*(\d{1,4})\b/i,
+      /\bS\s*0*(\d{1,2})\s*[-_]\s*0*(\d{1,4})(?:v\d+)?\b/i,
       /\b(\d{1,2})\s*x\s*(\d{1,4})\b/i,
     ];
     let marker: RegExpMatchArray | null = null;
