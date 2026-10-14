@@ -224,11 +224,16 @@ export async function fetchCategories(): Promise<CategorySummary[]> {
 
 export async function fetchTransfers(): Promise<TelegramTransfer[]> {
   try {
-    const res = await fetch(`${getApiBase()}/transfers?limit=20`);
+    const res = await fetch(`${getApiBase()}/transfers?limit=50`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      setCachedTransfers(data);
+      return data;
+    }
+    return getCachedTransfers();
   } catch {
-    return [];
+    return getCachedTransfers();
   }
 }
 

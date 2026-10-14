@@ -18,6 +18,7 @@ import httpx
 from app.services.drive_service import drive_service
 from app.services.telegram_bot_service import bot_service
 from app.services.telegram_mtproto_service import mtproto_service
+from app.services.tunnel_service import tunnel_service
 from app.utils.logging import log_event, logger
 from app.workers.transfer_worker import transfer_worker
 from app.workers.metadata_worker import metadata_worker
@@ -178,9 +179,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Metadata auto-healing schedule warning: {e}")
 
+    # Start Cloudflare Tunnel supervisor if cloudflared is installed
+    tunnel_task = None
+    if tunnel_service.is_available():
+        tunnel_task = asyncio.create_task(tunnel_service.start())
+
     yield
 
     # Graceful shutdown
+    if tunnel_task:
+        tunnel_service.stop()
+        tunnel_task.cancel()
+        try:
+            await tunnel_task
+        except asyncio.CancelledError:
+            pass
+
     if drive_sync_task:
         drive_sync_task.cancel()
         try:

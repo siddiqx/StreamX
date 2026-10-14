@@ -277,15 +277,11 @@ class TransferWorker:
                                 t.completed_at = utc_now()
                             await session.commit()
 
-                    # User-facing: actionable, secret-free. Only send if not cancelled/deleted
-                    if t and t.status not in (TransferStatus.CANCELLED, TransferStatus.COMPLETED) and not getattr(t, "is_deleted", False):
-                        status_label = (
-                            TransferStatus.RETRYING
-                            if t.status == TransferStatus.RETRYING
-                            else TransferStatus.FAILED
-                        )
+                    # Only send failure notification on terminal failure (not on retries) and never in tests
+                    is_test = settings.STREAMX_ENV == "testing" or bool(os.getenv("PYTEST_CURRENT_TEST"))
+                    if not is_test and t and t.status == TransferStatus.FAILED and not getattr(t, "is_deleted", False):
                         user_text = self._build_error_notification(
-                            transfer_id, filename, category, status_label
+                            transfer_id, filename, category, TransferStatus.FAILED
                         )
                         await bot_service.send_message(chat_id=chat_id, text=user_text)
         finally:
