@@ -8,13 +8,23 @@ ILLEGAL_CHARS = re.compile(r'[\/\\:\*\?"<>\|]')
 MULTIPLE_DOTS = re.compile(r"\.{2,}")
 
 
-def sanitize_filename(filename: str, default_name: str = "streamx_file.bin") -> str:
-    """Sanitize user-provided filename to prevent path traversal and illegal characters."""
+MAX_SAFE_FILENAME_LENGTH = 255
+
+
+def sanitize_filename(
+    filename: str, default_name: str = "streamx_file.bin", max_length: int = MAX_SAFE_FILENAME_LENGTH
+) -> str:
+    """Sanitize user-provided filename to prevent path traversal, illegal characters, and oversized inputs."""
     if not filename or not filename.strip():
         return default_name
 
+    # Prevent memory bloat on excessively long inputs before basename parsing
+    clean_input = filename.strip()
+    if len(clean_input) > max_length * 2:
+        clean_input = clean_input[: max_length * 2]
+
     # Normalize backslashes to forward slashes before os.path.basename for cross-platform safety
-    clean_path = filename.strip().replace("\\", "/")
+    clean_path = clean_input.replace("\\", "/")
     name = os.path.basename(clean_path)
 
     # Replace illegal filesystem characters with underscores
@@ -28,6 +38,15 @@ def sanitize_filename(filename: str, default_name: str = "streamx_file.bin") -> 
 
     if not name:
         return default_name
+
+    # Truncate to maximum filesystem length while preserving file extension
+    if len(name) > max_length:
+        base, ext = os.path.splitext(name)
+        if ext and len(ext) < 15:
+            allowed_base = max(1, max_length - len(ext))
+            name = base[:allowed_base] + ext
+        else:
+            name = name[:max_length]
 
     return name
 

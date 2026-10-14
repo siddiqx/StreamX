@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import require_auth
 from app.db.database import get_db
 from app.db.models import TelegramTransfer
 from app.schemas.transfers import TransferResponse
@@ -46,6 +47,7 @@ async def get_transfer(
 async def retry_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
+    _authorized: bool = Depends(require_auth),
 ) -> TransferResponse:
     """Retry or resume a queued, failed, or cancelled transfer."""
     stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
@@ -70,6 +72,7 @@ async def retry_transfer(
 async def delete_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
+    _authorized: bool = Depends(require_auth),
 ):
     """Cancel and delete a transfer record from the transfer queue."""
     stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
@@ -94,7 +97,9 @@ async def delete_transfer(
 
 
 @router.post("/sync")
-async def sync_transfers():
+async def sync_transfers(
+    _authorized: bool = Depends(require_auth),
+):
     """Trigger on-demand sync for queued Telegram media messages."""
     from app.services.telegram_bot_service import bot_service
     count = await bot_service.sync_forwarded_messages()

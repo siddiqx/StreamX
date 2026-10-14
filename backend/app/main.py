@@ -238,12 +238,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration - allow all origins without credential conflict
+# CORS configuration - restricted to whitelisted origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
+    allow_origins=settings.allowed_origins_list,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
 

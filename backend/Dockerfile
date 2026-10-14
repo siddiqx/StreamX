@@ -20,11 +20,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend application source
 COPY . .
 
-# Set dynamic permissions for database persistence
-RUN chmod -R 777 /app
+# Create unprivileged streamx user and secure runtime data directory
+RUN useradd -m -u 1000 -s /bin/bash streamx \
+    && mkdir -p /data /app \
+    && chown -R streamx:streamx /app /data
+
+USER streamx
 
 EXPOSE 7860
 EXPOSE 8000
 
 # Run uvicorn with dynamic $PORT support (defaults to 7860 for HF Spaces, or 8000)
 CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"
+

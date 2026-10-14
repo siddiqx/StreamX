@@ -38,4 +38,8 @@ services:
         sync: false
       - key: TMDB_API_KEY
         sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: STREAMX_API_KEY
+        sync: false
 

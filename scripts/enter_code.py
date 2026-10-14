@@ -65,7 +65,7 @@ if not refresh_token:
         print("Note: Access token is valid temporarily.")
     sys.exit(1)
 
-# 1. Update .env
+# 1. Update .env securely
 env_content = ENV_PATH.read_text(encoding="utf-8")
 lines = env_content.splitlines()
 new_lines = []
@@ -75,19 +75,6 @@ for line in lines:
     else:
         new_lines.append(line)
 ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-print(f"SUCCESS: Updated .env with GOOGLE_REFRESH_TOKEN={refresh_token[:15]}...")
+print("SUCCESS: Updated .env with GOOGLE_REFRESH_TOKEN")
+print("NOTE: For Cloudflare Worker, configure GOOGLE_REFRESH_TOKEN via Cloudflare dashboard or wrangler secret put.")
 
-# 2. Update cloudflare_worker.js
-worker_path = ROOT_DIR / "scripts" / "cloudflare_worker.js"
-if worker_path.exists():
-    w_text = worker_path.read_text(encoding="utf-8")
-    import re
-    w_text = re.sub(
-        r'const refreshToken = env\?\.GOOGLE_REFRESH_TOKEN \|\| ".*?";',
-        f'const refreshToken = env?.GOOGLE_REFRESH_TOKEN || "{refresh_token}";',
-        w_text
-    )
-    worker_path.write_text(w_text, encoding="utf-8")
-    print("SUCCESS: Updated scripts/cloudflare_worker.js")
-
-print("ALL_CREDENTIALS_UPDATED_SUCCESSFULLY")

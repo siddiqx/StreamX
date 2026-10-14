@@ -93,7 +93,7 @@ def start_worker_patches(mock_client):
     """Start all MTProto/Drive/notification patches for a full worker execution."""
     upload_counter = {"n": 0}
 
-    async def fake_upload(upload_url, chunk, start_byte, total_size):
+    async def fake_upload(upload_url, chunk, start_byte, total_size, *args, **kwargs):
         upload_counter["n"] += 1
         return (True, f"drive_file_id_{upload_counter['n']}")
 
@@ -531,7 +531,7 @@ async def test_one_failure_does_not_block_others(clean_db):
     worker = TransferWorker(max_concurrent_transfers=4)
     call_count = {"n": 0}
 
-    async def mock_exec(transfer_id, chat_id, message_id, filename, expected_size):
+    async def mock_exec(transfer_id, chat_id, message_id, filename, expected_size, *args, **kwargs):
         call_count["n"] += 1
         if "Movie_1" in filename:
             raise DriveAuthError("HTTP 401 bad token")

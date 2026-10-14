@@ -1,0 +1,66 @@
+name: Security Hardening & Secret Scanning
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  security-audit:
+    name: Security Tests & Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Validate Cloudflare Worker Syntax
+        run: |
+          node --check scripts/cloudflare_worker.js
+
+      - name: Automated Secret & Credential Scan
+        run: |
+          python -c "
+          import re, sys
+          from pathlib import Path
+
+          token_pattern = re.compile(r'\b[0-9]{8,10}:[a-zA-Z0-9_-]{35}\b')
+          prohibited_strings = ['_FALLBACK_CID', '_FALLBACK_SEC', '_FALLBACK_TOK', '_xdec']
+          worker_file = Path('scripts/cloudflare_worker.js')
+          if worker_file.exists():
+              text = worker_file.read_text(encoding='utf-8')
+              if token_pattern.search(text):
+                  print('ERROR: Hardcoded Telegram bot token found in cloudflare_worker.js')
+                  sys.exit(1)
+              for s in prohibited_strings:
+                  if s in text:
+                      print(f'ERROR: Prohibited credential key {s} found in cloudflare_worker.js')
+                      sys.exit(1)
+          print('PASS: No credentials found in worker script.')
+          "
+
+      - name: Run Security & Regression Test Suite
+        env:
+          STREAMX_ENV: test
+          STREAMX_SECRET_KEY: test-secret-key-32-characters-long
+        run: |
+          pytest backend/tests/test_security_hardening.py -v

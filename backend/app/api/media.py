@@ -21,6 +21,7 @@ from app.services.drive_service import drive_service
 from app.services.metadata_service import metadata_service
 from app.utils.filenames import make_content_disposition, resolve_mime_type, sanitize_filename
 from app.utils.image_resolver import get_media_backdrop_url, get_media_poster_url
+from app.api.auth import require_auth
 from app.utils.logging import logger
 
 router = APIRouter(prefix="/media", tags=["Media Library"])
@@ -158,7 +159,9 @@ async def list_categories(
 
 
 @router.post("/sync")
-async def sync_media_library() -> Dict[str, Any]:
+async def sync_media_library(
+    _authorized: bool = Depends(require_auth),
+) -> Dict[str, Any]:
     """Trigger synchronization of Google Drive library media files into database."""
     if not drive_service.is_configured():
         raise HTTPException(status_code=503, detail="Google Drive service not configured")
@@ -167,10 +170,14 @@ async def sync_media_library() -> Dict[str, Any]:
         return {"status": "ok", "synced_count": synced_count}
     except Exception as e:
         logger.error(f"Manual library sync failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/rename-series")
 async def rename_series_endpoint(
     current_name: str = Query(..., description="Current folder name or ID in Google Drive"),
     new_name: str = Query(..., description="New show title (e.g. Alya Sometimes Hides Her Feelings in Russian)"),
+    _authorized: bool = Depends(require_auth),
 ) -> Dict[str, Any]:
     """Rename a series folder, propagate title to all files, re-classify category, and refresh metadata."""
     if not drive_service.is_configured():
@@ -225,6 +232,7 @@ async def get_metadata_stats():
 @router.post("/metadata/backfill")
 async def trigger_metadata_backfill(
     force: bool = Query(False, description="Force reprocess even already matched items"),
+    _authorized: bool = Depends(require_auth),
 ):
     """Enqueue metadata backfill for library media items."""
     return await metadata_service.backfill_library(force=force)
@@ -283,6 +291,7 @@ async def search_candidates_for_media(
 async def select_metadata_for_media(
     media_id: int,
     req: MetadataSelectRequest,
+    _authorized: bool = Depends(require_auth),
 ):
     """Manually link media item to a specific TMDB entity and lock it (applies across series if requested)."""
     success = await metadata_service.manually_select_metadata(
@@ -297,6 +306,7 @@ async def select_metadata_for_media(
 async def patch_media_metadata(
     media_id: int,
     req: MediaPatchRequest,
+    _authorized: bool = Depends(require_auth),
 ):
     """Explicitly patch title, year, category, overview, poster override, or backdrop override."""
     success = await metadata_service.manual_update_metadata(
@@ -317,6 +327,7 @@ async def patch_media_metadata(
 async def override_media_poster(
     media_id: int,
     req: PosterOverrideRequest,
+    _authorized: bool = Depends(require_auth),
 ):
     """Manually set or clear custom poster override."""
     success = await metadata_service.set_poster_override(media_id, req.poster_url)
@@ -329,6 +340,7 @@ async def override_media_poster(
 async def override_media_backdrop(
     media_id: int,
     req: BackdropOverrideRequest,
+    _authorized: bool = Depends(require_auth),
 ):
     """Manually set or clear custom backdrop override."""
     success = await metadata_service.set_backdrop_override(media_id, req.backdrop_url)
@@ -341,6 +353,7 @@ async def override_media_backdrop(
 async def reprocess_media_metadata(
     media_id: int,
     force: bool = Query(False, description="Reprocess even if locked"),
+    _authorized: bool = Depends(require_auth),
 ):
     """Reprocess metadata for a specific media item."""
     success = await metadata_service.reprocess_media(media_id, force=force)
@@ -352,6 +365,7 @@ async def reprocess_media_metadata(
 @router.post("/{media_id}/metadata/unlock")
 async def unlock_media_metadata(
     media_id: int,
+    _authorized: bool = Depends(require_auth),
 ):
     """Unlock media metadata so it can be automatically enriched."""
     success = await metadata_service.unlock_metadata(media_id)
@@ -621,6 +635,7 @@ async def open_in_vlc(
     media_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    _authorized: bool = Depends(require_auth),
 ):
     """Launch VLC Media Player directly on the host system to play the media stream with zero network latency."""
     import subprocess

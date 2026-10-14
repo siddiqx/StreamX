@@ -15,11 +15,42 @@ const FALLBACK_CATALOG = [{"id": 66, "drive_file_id": "19JwKXhyw3LwuG-YVuQk-mH-f
  *    - Zero bandwidth limit: 100% free streaming powered by Google Drive & Cloudflare Edge.
  */
 
-// Your backend tunnel URL (when PC is running)
-const BACKEND_URL = "https://sounds-sense-segments-crown.trycloudflare.com";
-
+// Upstream backend tunnel configuration
 let dynamicBackendUrl = null;
 let lastTunnelFetch = 0;
+
+// Update deduplication set (in-memory ring buffer)
+const PROCESSED_UPDATE_IDS = new Set();
+const MAX_PROCESSED_UPDATE_HISTORY = 1000;
+
+function isDuplicateUpdate(updateId) {
+  if (!updateId) return false;
+  if (PROCESSED_UPDATE_IDS.has(updateId)) return true;
+  if (PROCESSED_UPDATE_IDS.size >= MAX_PROCESSED_UPDATE_HISTORY) {
+    const oldest = PROCESSED_UPDATE_IDS.values().next().value;
+    PROCESSED_UPDATE_IDS.delete(oldest);
+  }
+  PROCESSED_UPDATE_IDS.add(updateId);
+  return false;
+}
+
+function isValidBackendUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") return false;
+  try {
+    const u = new URL(rawUrl.trim());
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    const host = u.hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host.endsWith(".trycloudflare.com") ||
+      host.endsWith(".onrender.com") ||
+      host.endsWith(".workers.dev")
+    );
+  } catch {
+    return false;
+  }
+}
 
 async function getLiveBackendUrl(env) {
   const now = Date.now();
@@ -27,7 +58,12 @@ async function getLiveBackendUrl(env) {
     return dynamicBackendUrl;
   }
   if (env?.BACKEND_URL && env.BACKEND_URL.trim()) {
-    return env.BACKEND_URL.trim().replace(/\/+$/, "");
+    const candidate = env.BACKEND_URL.trim().replace(/\/+$/, "");
+    if (isValidBackendUrl(candidate)) {
+      dynamicBackendUrl = candidate;
+      lastTunnelFetch = now;
+      return dynamicBackendUrl;
+    }
   }
   try {
     const res = await fetch("https://raw.githubusercontent.com/siddiqx/StreamX/main/active_tunnel.txt", {
@@ -36,14 +72,14 @@ async function getLiveBackendUrl(env) {
     });
     if (res.ok) {
       const txt = (await res.text()).trim();
-      if (txt && txt.startsWith("http")) {
+      if (txt && isValidBackendUrl(txt)) {
         dynamicBackendUrl = txt.replace(/\/+$/, "");
         lastTunnelFetch = now;
         return dynamicBackendUrl;
       }
     }
   } catch (_) {}
-  return (BACKEND_URL || "").trim().replace(/\/+$/, "");
+  return "";
 }
 
 // In-memory token cache for Google OAuth
@@ -54,25 +90,21 @@ let googleTokenExpiry = 0;
 let cachedCatalog = null;
 let cachedCatalogTime = 0;
 
-const _xdec = (arr, k = 53) => arr.map(c => String.fromCharCode(c ^ k)).join("");
-const _FALLBACK_CID = [13, 4, 4, 2, 7, 0, 4, 0, 7, 2, 1, 7, 24, 94, 90, 80, 7, 87, 84, 67, 70, 89, 3, 91, 81, 65, 67, 1, 87, 2, 82, 88, 84, 86, 71, 88, 80, 84, 1, 67, 7, 4, 90, 91, 94, 27, 84, 69, 69, 70, 27, 82, 90, 90, 82, 89, 80, 64, 70, 80, 71, 86, 90, 91, 65, 80, 91, 65, 27, 86, 90, 88];
-const _FALLBACK_SEC = [114, 122, 118, 102, 101, 109, 24, 76, 122, 106, 94, 103, 125, 0, 3, 99, 92, 90, 93, 88, 79, 115, 126, 109, 83, 88, 102, 96, 95, 102, 0, 106, 120, 12, 125];
-const _FALLBACK_TOK = [4, 26, 26, 5, 82, 118, 125, 113, 2, 123, 77, 97, 96, 66, 79, 65, 118, 82, 108, 124, 116, 103, 116, 116, 114, 119, 116, 102, 123, 66, 115, 24, 121, 12, 124, 71, 24, 100, 13, 65, 122, 7, 115, 92, 70, 24, 66, 4, 125, 0, 70, 69, 69, 95, 69, 98, 13, 13, 120, 97, 113, 98, 119, 90, 69, 4, 7, 93, 106, 84, 122, 83, 90, 70, 122, 97, 103, 92, 64, 89, 2, 113, 77, 90, 13, 4, 69, 6, 13, 66, 121, 89, 2, 13, 101, 95, 92, 103, 96, 5, 125, 94, 1];
-
 async function getGoogleAccessToken(env, forceRefresh = false) {
   const now = Date.now();
   if (!forceRefresh && cachedGoogleToken && googleTokenExpiry > now + 60000) {
     return cachedGoogleToken;
   }
 
-  const clientId = (env?.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_ID.trim()) || _xdec(_FALLBACK_CID);
-  const clientSecret = (env?.GOOGLE_CLIENT_SECRET && env.GOOGLE_CLIENT_SECRET.trim()) || _xdec(_FALLBACK_SEC);
-  const refreshToken = (env?.GOOGLE_REFRESH_TOKEN && env.GOOGLE_REFRESH_TOKEN.trim()) || _xdec(_FALLBACK_TOK);
+  const clientId = env?.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = env?.GOOGLE_CLIENT_SECRET?.trim();
+  const refreshToken = env?.GOOGLE_REFRESH_TOKEN?.trim();
 
   if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error("Google Drive credentials not available.");
+    throw new Error(
+      "Google Drive OAuth credentials are not configured. Please configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Cloudflare Worker secrets."
+    );
   }
-
 
   const params = new URLSearchParams({
     client_id: clientId,
@@ -105,10 +137,31 @@ async function getGoogleAccessToken(env, forceRefresh = false) {
 // --- 24/7 Telegram Edge Bot Webhook Engine ---
 async function handleTelegramWebhook(request, env, rawBase) {
   try {
-    const botToken = env?.TELEGRAM_BOT_TOKEN || "8782685139:AAENyDH7-CoZBSiO6r55YFWjJ_YHJ3Uhdbo";
+    // 1. Enforce payload size boundary (max 512KB for Telegram update JSON)
+    const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
+    if (contentLength > 1024 * 512) {
+      return new Response(JSON.stringify({ error: "Payload too large" }), {
+        status: 413,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // 2. Validate Telegram webhook secret token header
+    if (env?.TELEGRAM_WEBHOOK_SECRET) {
+      const secretToken = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+      if (!secretToken || secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response(JSON.stringify({ error: "Invalid webhook secret token" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // 3. Retrieve bot token securely from environment secrets only
+    const botToken = env?.TELEGRAM_BOT_TOKEN?.trim();
     if (!botToken) {
       return new Response(JSON.stringify({ error: "TELEGRAM_BOT_TOKEN not configured" }), {
-        status: 200,
+        status: 503,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -150,6 +203,12 @@ async function handleTelegramWebhook(request, env, rawBase) {
     };
 
     const update = await request.json();
+
+    // 4. Prevent duplicate replay attacks
+    if (update.update_id && isDuplicateUpdate(update.update_id)) {
+      return new Response("OK", { status: 200 });
+    }
+
     const msg = update.message || update.channel_post || update.edited_message;
     if (!msg) return new Response("OK", { status: 200 });
 
@@ -165,21 +224,26 @@ async function handleTelegramWebhook(request, env, rawBase) {
       return new Response("OK", { status: 200 });
     }
 
-    // 1. When your PC is running, proxy directly to the local backend.
-    // The backend has full SQLite access, live progress bars, speed, library stats, and command handlers.
+    // 5. When your PC is running and backend is valid, proxy directly to the local backend.
     let handledByBackend = false;
-    try {
-      const backendRes = await fetch(`${rawBase}/telegram/webhook`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(update),
-        signal: AbortSignal.timeout(6000),
-      });
-      if (backendRes.ok) {
-        handledByBackend = true;
+    if (rawBase) {
+      try {
+        const fwdHeaders = { "Content-Type": "application/json" };
+        if (env?.TELEGRAM_WEBHOOK_SECRET) {
+          fwdHeaders["X-Telegram-Bot-Api-Secret-Token"] = env.TELEGRAM_WEBHOOK_SECRET;
+        }
+        const backendRes = await fetch(`${rawBase}/telegram/webhook`, {
+          method: "POST",
+          headers: fwdHeaders,
+          body: JSON.stringify(update),
+          signal: AbortSignal.timeout(6000),
+        });
+        if (backendRes.ok) {
+          handledByBackend = true;
+        }
+      } catch (_) {
+        handledByBackend = false;
       }
-    } catch (_) {
-      handledByBackend = false;
     }
 
     if (handledByBackend) {
@@ -323,6 +387,13 @@ export default {
     // 24/7 Telegram Webhook handler
     if ((url.pathname === "/telegram/webhook" || url.pathname === "/api/telegram/webhook") && request.method === "POST") {
       return await handleTelegramWebhook(request, env, rawBase);
+    }
+
+    if (!rawBase && !isStream && !isPlaylist && !isCatalog && url.pathname !== "/health" && url.pathname !== "/system/status" && !url.pathname.startsWith("/media/image-proxy")) {
+      return new Response(JSON.stringify({ status: "edge_mode", message: "Backend is currently offline or unreachable." }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+      });
     }
 
     const targetUrl = new URL(rawBase + url.pathname + url.search);
@@ -573,20 +644,34 @@ export default {
         );
       }
 
-      // Fallback F: Image Proxy for TMDB posters when PC is offline
+      // Fallback F: Image Proxy for TMDB posters when PC is offline (with SSRF protection)
       if (url.pathname.startsWith("/media/image-proxy") || url.pathname.startsWith("/api/media/image-proxy")) {
         const targetImg = url.searchParams.get("url");
         if (targetImg) {
           try {
-            const imgRes = await fetch(targetImg);
-            const imgHeaders = new Headers(imgRes.headers);
-            imgHeaders.set("Access-Control-Allow-Origin", origin);
-            imgHeaders.set("Cache-Control", "public, max-age=604800, immutable");
-            return new Response(imgRes.body, {
-              status: imgRes.status,
-              headers: imgHeaders,
+            const parsedImg = new URL(targetImg);
+            const allowedHosts = ["image.tmdb.org", "s4.anilist.co", "anilist.co"];
+            if (parsedImg.protocol === "https:" && allowedHosts.includes(parsedImg.hostname.toLowerCase())) {
+              const imgRes = await fetch(targetImg);
+              const imgHeaders = new Headers(imgRes.headers);
+              imgHeaders.set("Access-Control-Allow-Origin", origin);
+              imgHeaders.set("Cache-Control", "public, max-age=604800, immutable");
+              return new Response(imgRes.body, {
+                status: imgRes.status,
+                headers: imgHeaders,
+              });
+            } else {
+              return new Response(JSON.stringify({ error: "Only official TMDB or AniList image hosts are permitted." }), {
+                status: 400,
+                headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+              });
+            }
+          } catch (_) {
+            return new Response(JSON.stringify({ error: "Invalid image URL." }), {
+              status: 400,
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
             });
-          } catch (_) {}
+          }
         }
       }
 

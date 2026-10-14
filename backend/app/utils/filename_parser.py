@@ -80,7 +80,19 @@ def _strip_channel_tags(value: str) -> str:
     return value
 
 
-def _strip_bracket_noise(value: str) -> str:
+MAX_PARSED_FILENAME_LENGTH = 512
+_BRACKET_CONTENT_RE = re.compile(r"[\[({]([^\[({\]\)}]*)[\])}]")
+_CLEAN_BRACKETS_RE = re.compile(r"\[[^\[\]]*\]|\([^()]*\)|\{[^{}]*\}")
+
+
+def _strip_bracket_noise(value: str, max_depth: int = 3) -> str:
+    """Strips technical tags, checksums, and release-group brackets in linear time
+
+    without catastrophic backtracking on unmatched brackets (CWE-1333 mitigation).
+    """
+    if not value or not any(c in value for c in "[({") or not any(c in value for c in "])}"):
+        return value
+
     def replace_bracket(match: re.Match) -> str:
         inner = match.group(1).strip()
         if not inner:
@@ -101,12 +113,21 @@ def _strip_bracket_noise(value: str) -> str:
         ):
             return " "
         return " " + inner + " "
-    return re.sub(r"[\[({]([^\]\)}]*)[\])}]", replace_bracket, value)
+
+    current = value
+    for _ in range(max_depth):
+        new_val, count = _BRACKET_CONTENT_RE.subn(replace_bracket, current)
+        if count == 0:
+            break
+        current = new_val
+    return current
 
 
 def parse_filename(filename: str) -> ParsedMedia:
     """Return a cleaned title and structured release metadata from a filename."""
     raw = (filename or "").strip()
+    if len(raw) > MAX_PARSED_FILENAME_LENGTH:
+        raw = raw[:MAX_PARSED_FILENAME_LENGTH]
     working = _remove_extension(raw)
     working = _strip_channel_tags(working)
 
@@ -250,7 +271,10 @@ def parse_filename(filename: str) -> ParsedMedia:
         year = int(year_match.group(1))
         working = working[:year_match.start()] + " " + working[year_match.end():]
 
-    working = re.sub(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}", " ", working)
+    for _ in range(3):
+        working, count = _CLEAN_BRACKETS_RE.subn(" ", working)
+        if count == 0:
+            break
     working = re.sub(r"(?i)\b(?:EP|Episode|Season)\b", " ", working)
     # Remove common leading/trailing separators left after stripping tags.
     working = re.sub(r"^[\s._\-–—:|,]+|[\s._\-–—:|,]+$", " ", working)

@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     # App
     STREAMX_ENV: str = Field(default="development", description="Environment mode")
     STREAMX_SECRET_KEY: str = Field(default="insecure-dev-secret-replace-in-prod", description="App secret key")
+    STREAMX_API_KEY: Optional[str] = Field(default=None, description="Optional API key to protect sensitive endpoints")
+    ALLOWED_ORIGINS: Optional[str] = Field(
+        default="https://streamx7.vercel.app,http://localhost:5173,http://localhost:8000,http://127.0.0.1:5173,http://127.0.0.1:8000,capacitor://localhost,http://localhost",
+        description="Comma-separated allowed CORS origins",
+    )
     DATABASE_URL: str = Field(default=f"sqlite+aiosqlite:///{(_REPO_ROOT / 'streamx.db').as_posix()}", description="Database connection URL")
     LOG_LEVEL: str = Field(default="INFO", description="Logging verbosity")
 
@@ -39,6 +44,9 @@ class Settings(BaseSettings):
     )
     TELEGRAM_OWNER_USER_ID: Optional[int] = Field(
         default=8142877259, description="Owner Telegram user ID (MTProto session owner). Forward fallback target."
+    )
+    TELEGRAM_WEBHOOK_SECRET: Optional[str] = Field(
+        default=None, description="Secret token to authenticate incoming Telegram webhook requests"
     )
 
     # Google Drive
@@ -91,6 +99,13 @@ class Settings(BaseSettings):
                     if uid not in users:
                         users.append(uid)
         return users
+
+
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        if not self.ALLOWED_ORIGINS:
+            return ["*"] if self.STREAMX_ENV == "development" else ["https://streamx7.vercel.app"]
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
 
 settings = Settings()

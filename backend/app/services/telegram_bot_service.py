@@ -61,6 +61,8 @@ class TelegramBotService:
             owner_user_id = settings.TELEGRAM_OWNER_USER_ID
         self.service_channel = service_channel
         self.owner_user_id = owner_user_id
+        self.processed_update_ids = set()
+        self._max_processed_ids = 1000
 
     def is_configured(self) -> bool:
         return bool(self.bot_token and self.bot_token.strip())
@@ -349,6 +351,15 @@ class TelegramBotService:
 
     async def process_update(self, update: Dict[str, Any]) -> None:
         """Process an individual Telegram update (message, channel_post, or edited)."""
+        update_id = update.get("update_id")
+        if update_id is not None:
+            if update_id in self.processed_update_ids:
+                logger.debug(f"Skipping duplicate Telegram update {update_id}")
+                return
+            if len(self.processed_update_ids) >= self._max_processed_ids:
+                self.processed_update_ids.pop()
+            self.processed_update_ids.add(update_id)
+
         message = (
             update.get("message")
             or update.get("channel_post")
