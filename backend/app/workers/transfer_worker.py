@@ -711,6 +711,9 @@ class TransferWorker:
             await session.refresh(media)
             media_id = media.id
 
+        # Auto-export updated catalog snapshot for 24/7 cloud edge availability
+        asyncio.create_task(self._auto_export_catalog_snapshot())
+
         # Automatically enqueue metadata enrichment job ONLY for video media
         if media_id and is_media:
             try:
@@ -734,6 +737,37 @@ class TransferWorker:
                 "<i>Master library copy is permanently secured. Ready to sync with StreamX app!</i>"
             ),
         )
+
+    async def _auto_export_catalog_snapshot(self) -> None:
+        """Automatically dumps updated library to scripts/catalog_snapshot.json and commits/pushes to GitHub."""
+        try:
+            import json, subprocess
+            from app.api.media import format_media_item
+            from sqlalchemy.orm import selectinload
+
+            async with AsyncSessionLocal() as session:
+                stmt = select(Media).options(selectinload(Media.metadata_entity)).order_by(Media.id.desc())
+                items = (await session.execute(stmt)).scalars().all()
+                data = [format_media_item(i).model_dump(mode="json") for i in items]
+
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            snapshot_path = os.path.join(base_dir, "scripts", "catalog_snapshot.json")
+            with open(snapshot_path, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            logger.info(f"Auto-exported catalog snapshot: {len(data)} items")
+
+            # Non-blocking quiet background git push
+            def _quiet_push():
+                try:
+                    subprocess.run(["git", "add", "scripts/catalog_snapshot.json"], cwd=base_dir, capture_output=True, timeout=10)
+                    subprocess.run(["git", "commit", "-m", "chore: auto-sync catalog snapshot with Google Drive"], cwd=base_dir, capture_output=True, timeout=10)
+                    subprocess.run(["git", "push", "origin", "main"], cwd=base_dir, capture_output=True, timeout=15)
+                except Exception:
+                    pass
+
+            asyncio.get_event_loop().run_in_executor(None, _quiet_push)
+        except Exception as e:
+            logger.debug(f"Catalog auto-export note: {e}")
 
 
 transfer_worker = TransferWorker()
