@@ -112,6 +112,11 @@ class MetadataWorker:
                             j.status = MetadataJobStatus.COMPLETED
                             j.completed_at = utc_now()
                             j.last_error = None
+                            try:
+                                from app.workers.transfer_worker import transfer_worker
+                                asyncio.create_task(transfer_worker._auto_export_catalog_snapshot())
+                            except Exception:
+                                pass
                         else:
                             # Non-fatal issue (e.g. key missing or temporary)
                             j.attempt_count += 1

@@ -369,26 +369,41 @@ export function determineTaxonomy(
   const originCountry = (meta?.origin_country || '').toLowerCase();
   const origLang = (meta?.original_language || '').toLowerCase();
 
-  // Canonical provider evidence should correct stale generic-TV classifications.
-  // Japanese animation episodes belong on the Anime shelf even if an earlier
-  // enrichment pass stored TV_EPISODE.
-  const providerSaysAnime = genres.some(g => g.includes('animation') || g.includes('anime')) &&
-    (origLang === 'ja' || originCountry.includes('jp') || originCountry.includes('japan'));
-  if (providerSaysAnime && (epInfo.isSeries || meta?.media_type === 'tv')) {
-    return { category: 'Anime', isAnime: true, isSeries: true, isMovie: false, displayCategory: 'Anime' };
+  // Check anime signals
+  const isAnimation = genres.some(g => g.includes('animation') || g.includes('anime'));
+  const isJapaneseOrigin = origLang === 'ja' || originCountry.includes('jp') || originCountry.includes('japan');
+  const hasAnimeFansubTag = [
+    'subsplease', 'erai-raws', 'horriblesubs', 'animedynasty', 'animestation', 'aniwatch', 'anime_maniaac', 'crunchyroll', 'xanime'
+  ].some(tag => rawLower.includes(tag));
+  const isAnimeSignal =
+    (isAnimation && isJapaneseOrigin) ||
+    hasAnimeFansubTag ||
+    rawLower.includes('anime') ||
+    item.category === 'Anime' ||
+    item.category === 'Anime Movies' ||
+    (item.media_type || '').toUpperCase().includes('ANIME');
+
+  // Strict Rule: Episodic items (s1, ep1, season, episode) are NEVER Movies or Anime Movies
+  const isDefinitiveSeries =
+    epInfo.isSeries ||
+    item.season != null ||
+    item.episode != null ||
+    meta?.media_type === 'tv' ||
+    (item.media_type || '').toUpperCase().includes('EPISODE') ||
+    (item.media_type || '').toUpperCase().includes('SERIES');
+
+  if (isDefinitiveSeries) {
+    if (isAnimeSignal) {
+      return { category: 'Anime', isAnime: true, isSeries: true, isMovie: false, displayCategory: 'Anime' };
+    }
+    return { category: 'TV Shows', isAnime: false, isSeries: true, isMovie: false, displayCategory: 'TV Show' };
   }
 
-  // 1. Direct server taxonomy if available
+  // 1. Direct server taxonomy if available (for feature films)
   if (item.media_type) {
     const t = item.media_type.toUpperCase();
     if (t === 'ANIME_MOVIE') {
       return { category: 'Anime Movies', isAnime: true, isSeries: false, isMovie: true, displayCategory: 'Anime Movie' };
-    }
-    if (t === 'ANIME_SERIES' || t === 'ANIME_EPISODE') {
-      return { category: 'Anime', isAnime: true, isSeries: true, isMovie: false, displayCategory: 'Anime' };
-    }
-    if (t === 'TV_SERIES' || t === 'TV_EPISODE' || t === 'DOCUMENTARY_SERIES') {
-      return { category: 'TV Shows', isAnime: false, isSeries: true, isMovie: false, displayCategory: 'TV Show' };
     }
     if (t === 'MOVIE' || t === 'DOCUMENTARY') {
       return { category: 'Movies', isAnime: false, isSeries: false, isMovie: true, displayCategory: 'Movie' };
@@ -400,9 +415,6 @@ export function determineTaxonomy(
     return { category: 'Anime Movies', isAnime: true, isSeries: false, isMovie: true, displayCategory: 'Anime Movie' };
   }
   if (item.category === 'Anime') {
-    if (meta?.media_type === 'movie') {
-      return { category: 'Anime Movies', isAnime: true, isSeries: false, isMovie: true, displayCategory: 'Anime Movie' };
-    }
     return { category: 'Anime', isAnime: true, isSeries: true, isMovie: false, displayCategory: 'Anime' };
   }
   if (item.category === 'TV Shows') {
@@ -413,23 +425,8 @@ export function determineTaxonomy(
   }
 
   // 3. Fallback: Provider metadata evidence
-  const isAnimation = genres.some(g => g.includes('animation') || g.includes('anime'));
-  const isJapaneseOrigin = origLang === 'ja' || originCountry.includes('jp') || originCountry.includes('japan');
-  const hasAnimeFansubTag = [
-    'subsplease', 'erai-raws', 'horriblesubs', 'animedynasty', 'animestation', 'aniwatch', 'anime_maniaac', 'crunchyroll'
-  ].some(tag => rawLower.includes(tag));
-
-  const isAnime = (isAnimation && isJapaneseOrigin) || (isAnimation && hasAnimeFansubTag) || hasAnimeFansubTag;
-
-  if (isAnime) {
-    if (meta?.media_type === 'movie' || (!epInfo.isSeries && !rawLower.includes('season') && !rawLower.includes('episode'))) {
-      return { category: 'Anime Movies', isAnime: true, isSeries: false, isMovie: true, displayCategory: 'Anime Movie' };
-    }
-    return { category: 'Anime', isAnime: true, isSeries: true, isMovie: false, displayCategory: 'Anime' };
-  }
-
-  if (epInfo.isSeries || meta?.media_type === 'tv') {
-    return { category: 'TV Shows', isAnime: false, isSeries: true, isMovie: false, displayCategory: 'TV Show' };
+  if (isAnimeSignal) {
+    return { category: 'Anime Movies', isAnime: true, isSeries: false, isMovie: true, displayCategory: 'Anime Movie' };
   }
 
   return { category: 'Movies', isAnime: false, isSeries: false, isMovie: true, displayCategory: 'Movie' };

@@ -47,8 +47,13 @@ _NOISE_TERMS = (
 _NOISE_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + _NOISE_TERMS + r")(?![A-Za-z0-9])", re.I)
 _YEAR_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 _EP_PATTERNS = (
-    re.compile(r"(?<![A-Za-z0-9])(?:Season|S)\s*[._ ,-]?\s*(\d{1,2})\s*[._ ,-]*(?:Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
+    # Explicit S01E03, Season 3 Episode 9, S1-E07, S-01 EP-03
+    re.compile(r"(?<![A-Za-z0-9])(?:Season|S)\s*[._ ,-]?\s*0*(\d{1,2})\s*[._ ,-]*(?:Episode|Ep|E)\s*0*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
+    # S01_01, S01-01, S01 01, S1 01, S01.01 (Season + Episode with separator, no 'E')
+    re.compile(r"(?<![A-Za-z0-9])(?:Season|S)\s*0*(\d{1,2})\s*[._ ,-]+\s*0*(\d{1,4})(?:v\d+)?(?!\d)", re.I),
+    # 1x03 format
     re.compile(r"(?<!\d)(\d{1,2})\s*x\s*(\d{1,4})(?!\d)", re.I),
+    # Japanese notation 第03話
     re.compile(r"第\s*(\d{1,4})\s*話", re.I),
 )
 
@@ -182,7 +187,7 @@ def parse_filename(filename: str) -> ParsedMedia:
         media_type = "tv"
         working = working[:jp_match.start()] + " " + working[jp_match.end():]
 
-    # Explicit combined season and episode formats: S01E03, Season 3 Episode 9, S1-E07, S-01 EP-03, 1x03
+    # Explicit combined season and episode formats: S01E03, Season 3 Episode 9, S1-E07, S-01 EP-03, S01_01, 1x03
     if episode is None:
         for pattern in _EP_PATTERNS:
             match = pattern.search(working)
@@ -194,29 +199,32 @@ def parse_filename(filename: str) -> ParsedMedia:
                     season = 1
                     episode = int(match.group(1))
                 media_type = "tv"
-                prefix = working[:match.start()]
-                if re.search(r"[A-Za-z0-9]", prefix):
+                prefix = working[:match.start()].strip(" -._|:,")
+                suffix = working[match.end():].strip(" -._|:,")
+                if prefix and re.search(r"[A-Za-z0-9]", prefix):
                     working = prefix
+                elif suffix and re.search(r"[A-Za-z0-9]", suffix):
+                    working = suffix
                 else:
-                    working = working[match.end():]
+                    working = prefix or suffix
                 break
 
     # Separate season / episode parsing for noisy formats like "S1 - 10", "S01 ... EP03", etc.
     if episode is None:
-        sep_s = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*(\d{1,2})(?!\d)", working, re.I)
-        sep_ep = re.search(r"(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
+        sep_s = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*0*(\d{1,2})(?!\d)", working, re.I)
+        sep_ep = re.search(r"(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*0*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
         if sep_ep:
-            season = int(sep_s.group(1)) if sep_s else 1
+            season = int(sep_s.group(1)) if sep_s else (season or 1)
             episode = int(sep_ep.group(1))
             media_type = "tv"
             if sep_s:
-                working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*\d{1,2}(?!\d)", " ", working)
-            working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*\d{1,4}(?:v\d+)?(?!\d)", " ", working)
+                working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*0*\d{1,2}(?!\d)", " ", working)
+            working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*0*\d{1,4}(?:v\d+)?(?!\d)", " ", working)
 
     if episode is None:
         # Some Telegram channels put the episode marker before the series title.
         leading_episode = re.match(
-            r"^\s*(?:(?:Season|S)\s*(\d{1,2})\s*[ ._-]*)?(?:EP|Episode|Ep|E)\s*(\d{1,4})(?:v\d+)?\s*[-:–— ]+\s*",
+            r"^\s*(?:(?:Season|S)\s*0*(\d{1,2})\s*[ ._-]*)?(?:EP|Episode|Ep|E)\s*0*(\d{1,4})(?:v\d+)?\s*[-:–— ]*\s*",
             working, re.I
         )
         if leading_episode:
@@ -225,40 +233,62 @@ def parse_filename(filename: str) -> ParsedMedia:
             media_type = "tv"
             working = working[leading_episode.end():]
 
+    if season is None and episode is None:
+        leading_season = re.match(
+            r"^\s*(?:Season|S)\s*0*(\d{1,2})\s*[-:–—._ ]+\s*",
+            working, re.I
+        )
+        if leading_season:
+            suffix = working[leading_season.end():].strip(" -._|:,")
+            if re.search(r"[A-Za-z0-9]", suffix):
+                season = int(leading_season.group(1))
+                media_type = "tv"
+                working = suffix
+
     if episode is None:
         # Season with bare hyphenated episode: "S1 - 10", "S01 - 05"
-        hyphen_ep = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*(\d{1,2})\s*-\s*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
+        hyphen_ep = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*0*(\d{1,2})\s*-\s*0*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
         if hyphen_ep:
             season = int(hyphen_ep.group(1))
             episode = int(hyphen_ep.group(2))
             media_type = "tv"
-            working = working[:hyphen_ep.start()] if working[:hyphen_ep.start()].strip() else working[hyphen_ep.end():]
+            prefix = working[:hyphen_ep.start()].strip(" -._|:,")
+            suffix = working[hyphen_ep.end():].strip(" -._|:,")
+            working = prefix if (prefix and re.search(r"[A-Za-z0-9]", prefix)) else suffix
 
     if episode is None:
         # Fansub absolute numbering: "Series - 01", "Series - 001v2".
-        match = re.search(r"\s+-\s+(\d{1,4})(?:v\d+)?(?=\s|$)", working, re.I)
+        match = re.search(r"\s+-\s+0*(\d{1,4})(?:v\d+)?(?=\s|$)", working, re.I)
         if match:
             number = int(match.group(1))
             if 1 <= number <= 9999 and not 1900 <= number <= 2099:
-                season, episode, media_type = 1, number, "tv"
-                working = working[:match.start()] if working[:match.start()].strip() else working[match.end():]
+                season = season or 1
+                episode = number
+                media_type = "tv"
+                prefix = working[:match.start()].strip(" -._|:,")
+                suffix = working[match.end():].strip(" -._|:,")
+                working = prefix if (prefix and re.search(r"[A-Za-z0-9]", prefix)) else suffix
 
         # Long-running anime also uses a bare trailing absolute episode number.
         if episode is None:
-            trailing = re.search(r"\s+(\d{2,4})(?:v\d+)?\s*$", working, re.I)
+            trailing = re.search(r"\s+0*(\d{2,4})(?:v\d+)?\s*$", working, re.I)
             if trailing:
                 number = int(trailing.group(1))
                 if 1 <= number <= 9999 and not 1900 <= number <= 2099:
-                    season, episode, media_type = 1, number, "tv"
+                    season = season or 1
+                    episode = number
+                    media_type = "tv"
                     working = working[:trailing.start()]
 
-    # Bare season marker with no episode (e.g. "... S01 Episode.mkv" or "... Season 2.mkv")
-    if episode is None:
+    # Bare season marker with no episode (e.g. "... S01 Episode.mkv" or "... Season 2.mkv" or "Series S1")
+    if episode is None and season is None:
         bare_s = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*0*(\d{1,2})(?!\d)", working, re.I)
-        if bare_s and (re.search(r"(?i)\b(?:Episode|Ep|Series|TV)\b", working) or bare_s.start() > 3):
-            season = int(bare_s.group(1))
-            media_type = "tv"
-            working = working[:bare_s.start()] + " " + working[bare_s.end():]
+        if bare_s:
+            rem = (working[:bare_s.start()] + " " + working[bare_s.end():]).strip(" -._|:,")
+            if re.search(r"[A-Za-z0-9]", rem):
+                season = int(bare_s.group(1))
+                media_type = "tv"
+                working = rem
 
     # Remove episode title/release annotations after the first technical marker.
     noise_boundary = _NOISE_RE.search(working)
@@ -276,6 +306,8 @@ def parse_filename(filename: str) -> ParsedMedia:
         if count == 0:
             break
     working = re.sub(r"(?i)\b(?:EP|Episode|Season)\b", " ", working)
+    working = re.sub(r"(?i)\b(?:Season|S)\s*0*\d{1,2}\b", " ", working)
+    working = re.sub(r"(?i)\b(?:Episode|Ep|E)\s*0*\d{1,4}\b", " ", working)
     # Remove common leading/trailing separators left after stripping tags.
     working = re.sub(r"^[\s._\-–—:|,]+|[\s._\-–—:|,]+$", " ", working)
     working = re.sub(r"\s+", " ", working).strip(" -._|:,")

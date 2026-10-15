@@ -31,7 +31,7 @@ from app.services.thumbnail_service import thumbnail_service
 from app.utils.filename_parser import ParsedMedia, parse_filename
 from app.utils.image_resolver import get_media_backdrop_url, get_media_poster_url
 from app.utils.logging import log_event, logger
-from app.utils.media_classifier import classify_media, has_anime_signals, is_media_file
+from app.utils.media_classifier import classify_media, has_anime_signals, has_episodic_signals, is_media_file
 
 
 
@@ -207,10 +207,17 @@ class MetadataService:
         )
 
         anime_hint = has_anime_signals(parsed, raw_filename=media.filename)
-        # Episodic filenames also get an AniList pass: this catches anime whose
-        # Telegram filename has no fansub tag, while confidence scoring prevents
-        # a weak anime-title collision from being accepted.
-        providers = [self.anilist_provider, self.provider] if (anime_hint or parsed.episode is not None or parsed.season is not None) else [self.provider]
+        episodic_hint = (
+            parsed.episode is not None
+            or parsed.season is not None
+            or parsed.media_type == "tv"
+            or has_episodic_signals(parsed, raw_filename=media.filename)
+        )
+        if episodic_hint:
+            parsed.media_type = "tv"
+
+        # Whenever something has text like s1 or ep1, or anime signals, query both AniList and TMDB TV
+        providers = [self.anilist_provider, self.provider] if (anime_hint or episodic_hint) else [self.provider]
         providers = [provider for provider in providers if provider.is_configured()]
         if not providers:
             logger.info("Metadata providers are not configured. Marking media as RETRYING.")
