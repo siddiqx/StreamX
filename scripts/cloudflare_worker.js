@@ -146,6 +146,27 @@ async function getDynamicCatalog(env) {
     return cachedCatalog;
   }
 
+  // Step 1: Fetch pre-enriched GitHub metadata snapshot to guarantee posters, backdrops, and genres
+  let snapshotMap = new Map();
+  let snapshotList = [];
+  try {
+    const ghRes = await fetch("https://raw.githubusercontent.com/siddiqx/StreamX/main/scripts/catalog_snapshot.json", {
+      headers: { "Cache-Control": "no-cache" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (ghRes.ok) {
+      snapshotList = await ghRes.json();
+      if (Array.isArray(snapshotList)) {
+        for (const item of snapshotList) {
+          if (item.drive_file_id) snapshotMap.set(item.drive_file_id, item);
+          if (item.filename) snapshotMap.set(item.filename.toLowerCase().trim(), item);
+        }
+      }
+    }
+  } catch (err) {
+    console.debug("GitHub catalog snapshot fetch error:", err);
+  }
+
   // Strategy A: Live query directly to Google Drive API
   try {
     const token = await getGoogleAccessToken(env);
@@ -153,7 +174,7 @@ async function getDynamicCatalog(env) {
       const driveUrl = "https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=files(id,name,size,mimeType,createdTime,modifiedTime)&q=trashed=false";
       const driveRes = await fetch(driveUrl, {
         headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(6000),
       });
 
       if (driveRes.ok) {
@@ -178,7 +199,25 @@ async function getDynamicCatalog(env) {
           const dynamicItems = videoFiles.map((f, idx) => {
             const fname = f.name;
             const size = parseInt(f.size || "0", 10);
-            const isAnime = fname.toLowerCase().includes("s0") || fname.toLowerCase().includes("ep") || fname.toLowerCase().includes("sub") || fname.toLowerCase().includes("dual");
+            const lowerName = fname.toLowerCase().trim();
+
+            // Match against enriched snapshot by drive_file_id or normalized filename
+            const matched = snapshotMap.get(f.id) || snapshotMap.get(lowerName);
+            if (matched) {
+              return {
+                ...matched,
+                id: idx + 1,
+                drive_file_id: f.id,
+                filename: fname,
+                size: size,
+                mime_type: f.mimeType || matched.mime_type || "video/x-matroska",
+                created_at: f.createdTime || matched.created_at,
+                updated_at: f.modifiedTime || matched.updated_at,
+              };
+            }
+
+            // Fallback heuristics for brand-new files not yet in snapshot
+            const isAnime = lowerName.includes("s0") || lowerName.includes("ep") || lowerName.includes("sub") || lowerName.includes("dual");
             return {
               id: idx + 1,
               drive_file_id: f.id,
@@ -187,6 +226,8 @@ async function getDynamicCatalog(env) {
               mime_type: f.mimeType || "video/x-matroska",
               category: isAnime ? "Anime" : "Movies",
               media_type: isAnime ? "ANIME_EPISODE" : "MOVIE",
+              poster_url: null,
+              canonical_metadata: null,
               created_at: f.createdTime || new Date().toISOString(),
               updated_at: f.modifiedTime || new Date().toISOString(),
             };
@@ -202,22 +243,11 @@ async function getDynamicCatalog(env) {
     console.debug("Live Google Drive catalog fetch error:", err);
   }
 
-  // Strategy B: Dynamic GitHub Raw Catalog Snapshot
-  try {
-    const ghRes = await fetch("https://raw.githubusercontent.com/siddiqx/StreamX/main/scripts/catalog_snapshot.json", {
-      headers: { "Cache-Control": "no-cache" },
-      signal: AbortSignal.timeout(4000),
-    });
-    if (ghRes.ok) {
-      const ghData = await ghRes.json();
-      if (Array.isArray(ghData) && ghData.length > 0) {
-        cachedCatalog = ghData;
-        cachedCatalogTime = now;
-        return cachedCatalog;
-      }
-    }
-  } catch (err) {
-    console.debug("GitHub catalog snapshot fetch error:", err);
+  // Strategy B: Fallback directly to snapshot if Drive API timed out or returned empty
+  if (snapshotList.length > 0) {
+    cachedCatalog = snapshotList;
+    cachedCatalogTime = now;
+    return cachedCatalog;
   }
 
   return cachedCatalog || [];
@@ -230,19 +260,17 @@ async function handleTelegramWebhook(request, env, rawBase) {
     const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
     if (contentLength > 1024 * 512) {
       return new Response(JSON.stringify({ error: "Payload too large" }), {
-        status: 413,
+        status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    // 2. Validate Telegram webhook secret token header
-    if (env?.TELEGRAM_WEBHOOK_SECRET) {
-      const secretToken = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
-      if (!secretToken || secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
-        return new Response(JSON.stringify({ error: "Invalid webhook secret token" }), {
-          status: 403,
-          headers: { "Content-Type": "application/json" },
-        });
+    // 2. Validate Telegram webhook secret token header if sent
+    const secretToken = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+    if (env?.TELEGRAM_WEBHOOK_SECRET && secretToken) {
+      if (secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
+        console.warn("Invalid webhook secret token header received");
+        return new Response("OK", { status: 200 });
       }
     }
 
@@ -518,6 +546,78 @@ export default {
     // 24/7 Telegram Webhook handler
     if ((url.pathname === "/telegram/webhook" || url.pathname === "/api/telegram/webhook") && request.method === "POST") {
       return await handleTelegramWebhook(request, env, rawBase);
+    }
+
+    // Image Proxy for TMDB posters and AniList images (bypasses ISP blocks with 24/7 edge caching)
+    if (url.pathname === "/media/image-proxy" || url.pathname === "/api/media/image-proxy") {
+      const targetImg = url.searchParams.get("url");
+      if (!targetImg) {
+        return new Response(JSON.stringify({ error: "Missing image URL" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        });
+      }
+      try {
+        const parsedImg = new URL(targetImg);
+        const allowedHosts = ["image.tmdb.org", "s4.anilist.co", "anilist.co", "m.media-amazon.com"];
+        if (parsedImg.protocol === "https:" && allowedHosts.includes(parsedImg.hostname.toLowerCase())) {
+          const imgRes = await fetch(targetImg, {
+            headers: { "User-Agent": "Mozilla/5.0 StreamX-Edge/1.0" },
+          });
+          const imgHeaders = new Headers(imgRes.headers);
+          imgHeaders.set("Access-Control-Allow-Origin", origin);
+          imgHeaders.set("Access-Control-Allow-Credentials", "true");
+          imgHeaders.set("Cache-Control", "public, max-age=604800, immutable");
+          let ctype = imgHeaders.get("Content-Type");
+          if (!ctype || !ctype.startsWith("image/")) {
+            imgHeaders.set("Content-Type", "image/jpeg");
+          }
+          return new Response(imgRes.body, {
+            status: imgRes.status,
+            headers: imgHeaders,
+          });
+        } else {
+          return new Response(JSON.stringify({ error: "Only official TMDB or AniList image hosts are permitted." }), {
+            status: 400,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+          });
+        }
+      } catch (e) {
+        return new Response(JSON.stringify({ error: "Invalid image URL" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        });
+      }
+    }
+
+    // Auto Webhook Setup / Health Repair endpoint
+    if ((url.pathname === "/telegram/setup-webhook" || url.pathname === "/api/telegram/setup-webhook") && request.method === "POST") {
+      const botToken = env?.TELEGRAM_BOT_TOKEN?.trim();
+      const secret = env?.TELEGRAM_WEBHOOK_SECRET;
+      if (!botToken) {
+        return new Response(JSON.stringify({ error: "TELEGRAM_BOT_TOKEN not configured" }), { status: 503, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin } });
+      }
+      try {
+        const whUrl = `https://${url.host}/telegram/webhook`;
+        const setupPayload = {
+          url: whUrl,
+          allowed_updates: ["message", "edited_message", "channel_post"],
+          drop_pending_updates: false,
+        };
+        if (secret) setupPayload.secret_token = secret;
+        const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(setupPayload),
+        });
+        const tgData = await tgRes.json();
+        return new Response(JSON.stringify({ ok: true, result: tgData, webhook_url: whUrl }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin } });
+      }
     }
 
     const isStream = url.pathname.includes("/stream");

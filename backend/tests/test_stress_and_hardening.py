@@ -77,7 +77,7 @@ async def test_stress_queue_batch_processing(clean_db, job_count):
     worker = TransferWorker(max_concurrent_transfers=10)
 
     # Mock _execute_transfer to simulate rapid execution
-    async def mock_execute(transfer_id, chat_id, message_id, filename, expected_size):
+    async def mock_execute(transfer_id, chat_id, message_id, filename, expected_size, *args, **kwargs):
         await asyncio.sleep(0.001)
         async with AsyncSessionLocal() as session:
             stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
@@ -133,7 +133,7 @@ async def test_failure_injection_does_not_poison_batch(clean_db):
 
     worker = TransferWorker(max_concurrent_transfers=5)
 
-    async def mock_execute(transfer_id, chat_id, message_id, filename, expected_size):
+    async def mock_execute(transfer_id, chat_id, message_id, filename, expected_size, *args, **kwargs):
         if f"Batch_File_{failing_index}.mkv" in filename:
             raise RuntimeError("Injected Telegram network error")
         async with AsyncSessionLocal() as session:

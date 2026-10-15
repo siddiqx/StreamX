@@ -1,9 +1,11 @@
 """Tests for StreamX Media Library API."""
 
 import pytest
+from unittest.mock import AsyncMock, patch
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app.config.settings import settings
 from app.db.database import AsyncSessionLocal, init_db
 from app.db.models import Media
 from app.main import app
@@ -82,7 +84,11 @@ async def test_media_catalog_and_search_api(clean_media_db):
         assert res_single.status_code == 200
         assert res_single.json()["drive_file_id"] == "test_drive_file_interstellar"
 
-        # Test sync endpoint
-        res_sync = await client.post("/media/sync")
-        assert res_sync.status_code in (200, 503)
+        # Test sync endpoint with mock
+        auth_key = settings.STREAMX_API_KEY or settings.STREAMX_SECRET_KEY
+        headers = {"Authorization": f"Bearer {auth_key}"} if auth_key else {}
+        with patch("app.api.media.drive_service.sync_library_to_db", new_callable=AsyncMock) as mock_sync:
+            mock_sync.return_value = 2
+            res_sync = await client.post("/media/sync", headers=headers)
+            assert res_sync.status_code == 200
 

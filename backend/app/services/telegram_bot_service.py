@@ -13,6 +13,7 @@ the MTProto account can read. The worker then downloads the forwarded copy.
 import asyncio
 from datetime import datetime, timezone
 import html
+import os
 import re
 from typing import Any, Dict, Optional, Tuple
 import httpx
@@ -69,9 +70,6 @@ class TelegramBotService:
 
     async def send_message(self, chat_id: int, text: str, reply_to_message_id: Optional[int] = None) -> bool:
         """Send a message to a Telegram chat with automatic HTML parse fallback."""
-        if os.getenv("PYTEST_CURRENT_TEST") or settings.STREAMX_ENV == "testing":
-            return True
-
         if not self.is_configured():
             return False
 
@@ -85,6 +83,9 @@ class TelegramBotService:
 
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
+                # Skip live network calls during tests only when using unmocked httpx client
+                if (os.getenv("PYTEST_CURRENT_TEST") or settings.STREAMX_ENV == "testing") and type(client).__module__.startswith("httpx"):
+                    return True
                 res = await client.post(f"{self.base_url}/sendMessage", json=payload)
                 if res.status_code == 200:
                     return True
@@ -1082,7 +1083,23 @@ class TelegramBotService:
                     wh_url = wh_data.get("url", "")
                     if wh_url:
                         webhook_active = True
-                        log_event("TELEGRAM_WEBHOOK_ACTIVE_MODE", url=wh_url)
+                        last_err = wh_data.get("last_error_message", "")
+                        log_event("TELEGRAM_WEBHOOK_ACTIVE_MODE", url=wh_url, last_error=last_err)
+                        # Auto-heal: If webhook had an error or secret_token needs refreshing, re-register with secret
+                        if last_err or settings.TELEGRAM_WEBHOOK_SECRET:
+                            try:
+                                payload: Dict[str, Any] = {
+                                    "url": wh_url,
+                                    "allowed_updates": ["message", "edited_message", "channel_post"],
+                                    "drop_pending_updates": False,
+                                }
+                                if settings.TELEGRAM_WEBHOOK_SECRET:
+                                    payload["secret_token"] = settings.TELEGRAM_WEBHOOK_SECRET
+                                fix_res = await init_client.post(f"{self.base_url}/setWebhook", json=payload)
+                                if fix_res.status_code == 200:
+                                    logger.info("StreamX Webhook Auto-Heal: Verified and updated secret token with Telegram.")
+                            except Exception as heal_err:
+                                logger.debug(f"Webhook auto-heal attempt: {heal_err}")
         except Exception as e:
             logger.debug(f"Webhook check at startup: {e}")
 
