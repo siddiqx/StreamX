@@ -117,13 +117,14 @@ export async function launchVlcWithTracking(
   // Cloud production (Vercel) & remote stream launcher:
   const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
 
-  // 1. Generate instant client-side M3U playlist file with 3000ms caching & reconnect options
-  const cleanTitle = title.replace(/[\r\n]+/g, ' ').trim();
+  // 1. Generate instant client-side M3U playlist file with 5000ms caching & reconnect options
+  const cleanTitle = (title || item.filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim();
+  const m3uTitle = cleanTitle.replace(/,/g, ' -');
   const m3uContent = (
     `#EXTM3U\n` +
-    `#EXTINF:-1,${cleanTitle}\n` +
-    `#EXTVLCOPT:network-caching=3000\n` +
-    `#EXTVLCOPT:sout-mux-caching=3000\n` +
+    `#EXTINF:-1,${m3uTitle}\n` +
+    `#EXTVLCOPT:network-caching=5000\n` +
+    `#EXTVLCOPT:sout-mux-caching=5000\n` +
     `#EXTVLCOPT:http-reconnect=true\n` +
     `${streamUrl}\n`
   );

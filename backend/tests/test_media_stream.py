@@ -141,3 +141,70 @@ async def test_unicode_filename_stream_and_m3u():
             if item:
                 await session.delete(item)
                 await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_apostrophe_and_special_char_m3u_stream():
+    """Verify that filenames containing apostrophes (e.g. Komi can't communicate) generate valid M3Us and stream headers."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        m = Media(
+            drive_file_id="test_komi_drive_id",
+            filename="S01_01_komi_can't_communicate_Dual_1080p_@XANIME_UNIVERSE.mkv",
+            size=276617088,
+            mime_type="video/x-matroska",
+            category="Anime",
+        )
+        session.add(m)
+        await session.commit()
+        await session.refresh(m)
+        media_id = m.id
+
+    try:
+        mock_client = AsyncMock()
+        mock_res = AsyncMock()
+        mock_res.status_code = 206
+        mock_res.headers = {
+            "Content-Range": "bytes 0-1023/276617088",
+            "Content-Length": "1024",
+        }
+
+        async def fake_aiter(chunk_size=65536):
+            yield b"K" * 1024
+
+        mock_res.aiter_bytes = fake_aiter
+        mock_res.aclose = AsyncMock()
+        mock_client.aclose = AsyncMock()
+
+        with patch(
+            "app.api.media.drive_service.get_download_stream",
+            return_value=(mock_client, mock_res),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                # 1. Stream endpoint
+                res_stream = await client.get(
+                    f"/media/{media_id}/stream",
+                    headers={"Range": "bytes=0-1023"},
+                )
+                assert res_stream.status_code == 206
+                # Header must strictly percent-encode apostrophes as %27 to prevent RFC 5987 triple-quote corruption
+                cd = res_stream.headers["Content-Disposition"]
+                assert "%27" in cd
+
+                # 2. M3U playlist endpoint
+                res_m3u = await client.get(f"/media/{media_id}/playlist.m3u")
+                assert res_m3u.status_code == 200
+                m3u_text = res_m3u.text
+                # M3U stream URL must have %27 for apostrophe
+                assert "%27" in m3u_text
+                # Must contain 5000ms caching hints for VLC
+                assert "network-caching=5000" in m3u_text
+                assert "http-reconnect=true" in m3u_text
+    finally:
+        async with AsyncSessionLocal() as session:
+            item = await session.get(Media, media_id)
+            if item:
+                await session.delete(item)
+                await session.commit()
+

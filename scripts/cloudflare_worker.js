@@ -65,6 +65,11 @@ function isValidBackendUrl(rawUrl) {
   }
 }
 
+function rfc3986Encode(str) {
+  if (!str) return "";
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
 async function getLiveBackendUrl(env) {
   const now = Date.now();
   if (dynamicBackendUrl && (now - lastTunnelFetch < 30000)) {
@@ -640,11 +645,18 @@ export default {
           const h = new Headers();
           if (tok) h.set("Authorization", `Bearer ${tok}`);
           if (range) h.set("Range", range);
+          h.set("Accept-Encoding", "identity");
           return h;
         };
 
         const formatMediaResponse = (res) => {
           const resHeaders = new Headers(res.headers);
+          resHeaders.delete("connection");
+          resHeaders.delete("keep-alive");
+          resHeaders.delete("transfer-encoding");
+          resHeaders.delete("content-encoding");
+          resHeaders.delete("alt-svc");
+
           resHeaders.set("Access-Control-Allow-Origin", origin);
           resHeaders.set("Access-Control-Allow-Credentials", "true");
           resHeaders.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, Content-Disposition");
@@ -656,7 +668,7 @@ export default {
             resHeaders.set("Content-Type", ctype);
           }
           const safeAsciiName = targetFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
-          resHeaders.set("Content-Disposition", `inline; filename="${safeAsciiName}"; filename*=UTF-8''${encodeURIComponent(targetFilename)}`);
+          resHeaders.set("Content-Disposition", `inline; filename="${safeAsciiName}"; filename*=UTF-8''${rfc3986Encode(targetFilename)}`);
 
           return new Response(request.method === "HEAD" ? null : res.body, {
             status: res.status,
@@ -681,7 +693,7 @@ export default {
               h.set("Access-Control-Allow-Credentials", "true");
               h.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, Content-Disposition");
               const safeAsciiName = targetFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
-              h.set("Content-Disposition", `inline; filename="${safeAsciiName}"; filename*=UTF-8''${encodeURIComponent(targetFilename)}`);
+              h.set("Content-Disposition", `inline; filename="${safeAsciiName}"; filename*=UTF-8''${rfc3986Encode(targetFilename)}`);
               return new Response(null, { status: 200, headers: h });
             }
           } catch (_) {}
@@ -843,9 +855,11 @@ export default {
       if (isPlaylist) {
         const { driveId, filename } = await resolveMediaItem();
         if (driveId) {
-          const cleanEncoded = encodeURIComponent(filename);
-          const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${encodeURIComponent(driveId)}`;
-          const m3u = `#EXTM3U\n#EXTINF:-1,${filename}\n${streamUrl}\n`;
+          const cleanEncoded = rfc3986Encode(filename);
+          const cleanDriveId = rfc3986Encode(driveId);
+          const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
+          const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
+          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:network-caching=5000\n#EXTVLCOPT:sout-mux-caching=5000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
           return new Response(m3u, {
             status: 200,
             headers: {
@@ -875,10 +889,11 @@ export default {
     if (isPlaylist) {
       const { driveId, filename } = await resolveMediaItem();
       if (driveId) {
-        const cleanEncoded = encodeURIComponent(filename);
-        const cleanDriveId = encodeURIComponent(driveId);
+        const cleanEncoded = rfc3986Encode(filename);
+        const cleanDriveId = rfc3986Encode(driveId);
         const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
-        const m3u = `#EXTM3U\n#EXTINF:-1,${filename}\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+        const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
+        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:network-caching=5000\n#EXTVLCOPT:sout-mux-caching=5000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
         return new Response(m3u, {
           status: 200,
           headers: {
@@ -902,6 +917,8 @@ export default {
         }
       }
     }
+
+    const targetUrl = new URL(rawBase + url.pathname + url.search);
 
     // Forward original headers to backend
     const newHeaders = new Headers(request.headers);
@@ -943,6 +960,10 @@ export default {
       }
 
       const resHeaders = new Headers(response.headers);
+      resHeaders.delete("connection");
+      resHeaders.delete("keep-alive");
+      resHeaders.delete("transfer-encoding");
+      resHeaders.delete("alt-svc");
       resHeaders.set("Access-Control-Allow-Origin", origin);
       resHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD");
       resHeaders.set("Access-Control-Allow-Headers", "*");

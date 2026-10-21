@@ -281,9 +281,14 @@ export async function fetchSystemStatus(): Promise<SystemStatus | null> {
   }
 }
 
+export function rfc3986Encode(str: string): string {
+  if (!str) return '';
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
 export function getStreamUrl(mediaId: number, driveFileId?: string, filename?: string): string {
-  const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
-  const fileSegment = filename ? `/${encodeURIComponent(filename)}` : '';
+  const qs = driveFileId ? `?drive_id=${rfc3986Encode(driveFileId)}` : '';
+  const fileSegment = filename ? `/${rfc3986Encode(filename)}` : '';
   return `${getApiBase()}/media/${mediaId}/stream${fileSegment}${qs}`;
 }
 
@@ -297,8 +302,8 @@ export function getCompatibleStreamUrl(mediaId: number, start?: number, mode?: s
 }
 
 export function getDownloadUrl(mediaId: number, driveFileId?: string, filename?: string): string {
-  const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
-  const fileSegment = filename ? `/${encodeURIComponent(filename)}` : '';
+  const qs = driveFileId ? `?drive_id=${rfc3986Encode(driveFileId)}` : '';
+  const fileSegment = filename ? `/${rfc3986Encode(filename)}` : '';
   return `${getApiBase()}/media/${mediaId}/download${fileSegment}${qs}`;
 }
 
@@ -318,7 +323,7 @@ export function getVlcIntentUrl(mediaId: number, title?: string, driveFileId?: s
   const streamUrl = getStreamUrl(mediaId, driveFileId, filename);
   const rawUrl = streamUrl.replace(/^https?:\/\//, '');
   const scheme = streamUrl.startsWith('https') ? 'https' : 'http';
-  return `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};${title ? `S.title=${encodeURIComponent(title)};` : ''}end`;
+  return `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};${title ? `S.title=${rfc3986Encode(title)};` : ''}end`;
 }
 
 export async function openVlcOnHost(mediaId: number): Promise<{ success: boolean; message: string }> {

@@ -834,15 +834,16 @@ async def get_m3u_playlist(
     scheme = "https"
     drive_fid = item.drive_file_id or ""
     import urllib.parse
-    encoded_title = urllib.parse.quote(clean_title)
-    encoded_drive_fid = urllib.parse.quote(drive_fid)
+    encoded_title = urllib.parse.quote(clean_title, safe="")
+    encoded_drive_fid = urllib.parse.quote(drive_fid, safe="")
     stream_url = f"{scheme}://{host}/media/{media_id}/stream/{encoded_title}?drive_id={encoded_drive_fid}"
 
+    safe_m3u_title = clean_title.replace(",", " -").replace("\r", " ").replace("\n", " ").strip()
     m3u_content = (
         f"#EXTM3U\n"
-        f"#EXTINF:-1,{clean_title}\n"
-        f"#EXTVLCOPT:network-caching=3000\n"
-        f"#EXTVLCOPT:sout-mux-caching=3000\n"
+        f"#EXTINF:-1,{safe_m3u_title}\n"
+        f"#EXTVLCOPT:network-caching=5000\n"
+        f"#EXTVLCOPT:sout-mux-caching=5000\n"
         f"#EXTVLCOPT:http-reconnect=true\n"
         f"{stream_url}\n"
     )
