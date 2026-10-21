@@ -545,7 +545,7 @@ async def stream_media(
 
     async def stream_generator():
         try:
-            async for chunk in res.aiter_bytes(chunk_size=65536):
+            async for chunk in res.aiter_bytes(chunk_size=262144):
                 yield chunk
         finally:
             await res.aclose()
@@ -833,9 +833,19 @@ async def get_m3u_playlist(
         host = "streamx-worker.siddiqsiddiq00012.workers.dev"
     scheme = "https"
     drive_fid = item.drive_file_id or ""
-    stream_url = f"{scheme}://{host}/media/{media_id}/stream/{clean_title}?drive_id={drive_fid}"
+    import urllib.parse
+    encoded_title = urllib.parse.quote(clean_title)
+    encoded_drive_fid = urllib.parse.quote(drive_fid)
+    stream_url = f"{scheme}://{host}/media/{media_id}/stream/{encoded_title}?drive_id={encoded_drive_fid}"
 
-    m3u_content = f"#EXTM3U\n#EXTINF:-1,{clean_title}\n{stream_url}\n"
+    m3u_content = (
+        f"#EXTM3U\n"
+        f"#EXTINF:-1,{clean_title}\n"
+        f"#EXTVLCOPT:network-caching=3000\n"
+        f"#EXTVLCOPT:sout-mux-caching=3000\n"
+        f"#EXTVLCOPT:http-reconnect=true\n"
+        f"{stream_url}\n"
+    )
 
     return Response(
         content=m3u_content.encode("utf-8"),

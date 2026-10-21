@@ -86,13 +86,20 @@ async def test_stress_queue_batch_processing(clean_db, job_count):
     # Mock _execute_transfer to simulate rapid execution
     async def mock_execute(transfer_id, chat_id, message_id, filename, expected_size, *args, **kwargs):
         await asyncio.sleep(0.001)
-        async with AsyncSessionLocal() as session:
-            stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
-            t = (await session.execute(stmt)).scalar_one_or_none()
-            if t:
-                t.status = TransferStatus.COMPLETED
-                t.bytes_transferred = expected_size
-                await session.commit()
+        for attempt in range(6):
+            try:
+                async with AsyncSessionLocal() as session:
+                    stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                    t = (await session.execute(stmt)).scalar_one_or_none()
+                    if t:
+                        t.status = TransferStatus.COMPLETED
+                        t.bytes_transferred = expected_size
+                        await session.commit()
+                break
+            except Exception:
+                if attempt == 5:
+                    raise
+                await asyncio.sleep(0.02 * (attempt + 1))
 
     with patch.object(worker, "_execute_transfer", side_effect=mock_execute):
         # Trigger processing until all items are claimed/completed

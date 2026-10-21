@@ -6,7 +6,6 @@ import type { MediaItem } from '../types';
 import {
   getMediaDisplayName,
   getStreamUrl,
-  getPlaylistUrl,
   openVlcOnHost
 } from '../api';
 import { startWatchSession } from './watchHistory';
@@ -117,25 +116,50 @@ export async function launchVlcWithTracking(
 
   // Cloud production (Vercel) & remote stream launcher:
   const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
-  const playlistUrl = getPlaylistUrl(item.id, item.drive_file_id, item.filename);
 
-  // Attempt VLC protocol handler first
+  // 1. Generate instant client-side M3U playlist file with 3000ms caching & reconnect options
+  const cleanTitle = title.replace(/[\r\n]+/g, ' ').trim();
+  const m3uContent = (
+    `#EXTM3U\n` +
+    `#EXTINF:-1,${cleanTitle}\n` +
+    `#EXTVLCOPT:network-caching=3000\n` +
+    `#EXTVLCOPT:sout-mux-caching=3000\n` +
+    `#EXTVLCOPT:http-reconnect=true\n` +
+    `${streamUrl}\n`
+  );
+
   try {
-    const vlcProto = `vlc://${streamUrl}`;
-    window.location.href = vlcProto;
+    const blob = new Blob([m3uContent], { type: 'application/x-mpegurl;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const safeFilename = cleanTitle.replace(/[/\\?%*:|"<>]/g, '_') || 'stream';
+
+    const m3uLink = document.createElement('a');
+    m3uLink.href = blobUrl;
+    m3uLink.download = `${safeFilename}.m3u`;
+    document.body.appendChild(m3uLink);
+    m3uLink.click();
+
+    setTimeout(() => {
+      try {
+        document.body.removeChild(m3uLink);
+        URL.revokeObjectURL(blobUrl);
+      } catch {}
+    }, 1500);
   } catch {}
 
-  // Trigger instant M3U stream file download (associated with VLC by default on PC)
-  setTimeout(() => {
-    try {
-      const m3uLink = document.createElement('a');
-      m3uLink.href = playlistUrl;
-      m3uLink.download = `${title}.m3u`;
-      document.body.appendChild(m3uLink);
-      m3uLink.click();
-      document.body.removeChild(m3uLink);
-    } catch {}
-  }, 200);
+  // 2. Safe protocol launch via hidden iframe (avoids cancelling page navigation or downloads)
+  try {
+    const vlcProto = `vlc://${streamUrl}`;
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = vlcProto;
+    document.body.appendChild(iframe);
+    setTimeout(() => {
+      try {
+        document.body.removeChild(iframe);
+      } catch {}
+    }, 2000);
+  } catch {}
 
   if (onStatusUpdate) onStatusUpdate('✓ VLC Stream Ready');
   return { success: true, message: 'Opening in VLC...' };

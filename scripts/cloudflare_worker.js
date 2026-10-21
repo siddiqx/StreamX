@@ -655,7 +655,8 @@ export default {
             ctype = targetFilename.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/x-matroska";
             resHeaders.set("Content-Type", ctype);
           }
-          resHeaders.set("Content-Disposition", `inline; filename="${targetFilename}"`);
+          const safeAsciiName = targetFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
+          resHeaders.set("Content-Disposition", `inline; filename="${safeAsciiName}"; filename*=UTF-8''${encodeURIComponent(targetFilename)}`);
 
           return new Response(request.method === "HEAD" ? null : res.body, {
             status: res.status,
@@ -663,6 +664,28 @@ export default {
             headers: resHeaders,
           });
         };
+
+        // Fast HEAD probe: VLC and video players probe headers before fetching bytes.
+        // If catalog has the item size, reply in 0ms without waiting for Google Drive roundtrip.
+        if (request.method === "HEAD") {
+          try {
+            const catalog = await getDynamicCatalog(env);
+            const item = catalog.find((x) => x.drive_file_id === driveFileId || (mediaId > 0 && x.id === mediaId));
+            if (item && item.size) {
+              const h = new Headers();
+              const ctype = targetFilename.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/x-matroska";
+              h.set("Content-Type", ctype);
+              h.set("Content-Length", String(item.size));
+              h.set("Accept-Ranges", "bytes");
+              h.set("Access-Control-Allow-Origin", origin);
+              h.set("Access-Control-Allow-Credentials", "true");
+              h.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, Content-Disposition");
+              const safeAsciiName = targetFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
+              h.set("Content-Disposition", `inline; filename="${safeAsciiName}"; filename*=UTF-8''${encodeURIComponent(targetFilename)}`);
+              return new Response(null, { status: 200, headers: h });
+            }
+          } catch (_) {}
+        }
 
         // 1. Try streaming via Google OAuth API
         let token = await getGoogleAccessToken(env);
@@ -848,7 +871,26 @@ export default {
       );
     }
 
-    const targetUrl = new URL(rawBase + url.pathname + url.search);
+    // Fast-path: Edge M3U Playlists (0ms latency, guaranteed encoded URLs & VLC caching hints)
+    if (isPlaylist) {
+      const { driveId, filename } = await resolveMediaItem();
+      if (driveId) {
+        const cleanEncoded = encodeURIComponent(filename);
+        const cleanDriveId = encodeURIComponent(driveId);
+        const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
+        const m3u = `#EXTM3U\n#EXTINF:-1,${filename}\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+        return new Response(m3u, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/x-mpegurl; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${cleanEncoded}.m3u"`,
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Cache-Control": "no-cache",
+          },
+        });
+      }
+    }
 
     // Fast-path: video streams stream directly from Google Drive if worker token is active, otherwise forward to live backend
     if (isStream) {
@@ -879,11 +921,13 @@ export default {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), isStream ? 5000 : 3500);
-      fetchInit.signal = controller.signal;
+      const timeoutId = !isStream ? setTimeout(() => controller.abort(), 4000) : null;
+      if (timeoutId) {
+        fetchInit.signal = controller.signal;
+      }
 
       const response = await fetch(targetUrl.toString(), fetchInit);
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (response.status >= 500) {
         throw new Error(`Backend tunnel returned HTTP ${response.status}`);
