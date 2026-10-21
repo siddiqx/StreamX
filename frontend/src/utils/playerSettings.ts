@@ -71,7 +71,7 @@ export async function launchVlcWithTracking(
 
   // 2. Android Launch (Intent directly launches VLC app with native hardware decode)
   if (isAndroid) {
-    const streamUrl = getStreamUrl(item.id, item.drive_file_id);
+    const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
     const rawUrl = streamUrl.replace(/^https?:\/\//, '');
     const scheme = streamUrl.startsWith('https') ? 'https' : 'http';
     const intentUrl = `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};S.title=${encodeURIComponent(title)};end`;
@@ -85,7 +85,7 @@ export async function launchVlcWithTracking(
 
   // 3. iOS Launch (VLC for iOS callback handler)
   if (isIos) {
-    const streamUrl = getStreamUrl(item.id, item.drive_file_id);
+    const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
     const vlcCallback = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(streamUrl)}`;
     const vlcProto = `vlc://${streamUrl}`;
     window.location.href = vlcCallback;
@@ -98,20 +98,38 @@ export async function launchVlcWithTracking(
   }
 
   // 4. Desktop (Windows / Mac / Linux)
-  // Try launching VLC directly on host machine via backend API (works over HTTPS & localhost)
+  const isLocalHost = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '0.0.0.0'
+  );
+
+  // If connected to local backend machine, launch VLC directly on the OS
+  if (isLocalHost) {
+    try {
+      const hostRes = await openVlcOnHost(item.id);
+      if (hostRes.success) {
+        if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
+        return hostRes;
+      }
+    } catch {}
+  }
+
+  // Cloud production (Vercel) & remote stream launcher:
+  const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
+  const playlistUrl = getPlaylistUrl(item.id, item.drive_file_id, item.filename);
+
+  // Attempt VLC protocol handler first
   try {
-    const hostRes = await openVlcOnHost(item.id);
-    if (hostRes.success) {
-      if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
-      return hostRes;
-    }
+    const vlcProto = `vlc://${streamUrl}`;
+    window.location.href = vlcProto;
   } catch {}
 
-  // Desktop remote stream fallback: Trigger instant M3U stream file
+  // Trigger instant M3U stream file download (associated with VLC by default on PC)
   setTimeout(() => {
     try {
       const m3uLink = document.createElement('a');
-      m3uLink.href = getPlaylistUrl(item.id, item.drive_file_id);
+      m3uLink.href = playlistUrl;
       m3uLink.download = `${title}.m3u`;
       document.body.appendChild(m3uLink);
       m3uLink.click();

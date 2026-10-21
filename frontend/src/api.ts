@@ -281,9 +281,10 @@ export async function fetchSystemStatus(): Promise<SystemStatus | null> {
   }
 }
 
-export function getStreamUrl(mediaId: number, driveFileId?: string): string {
+export function getStreamUrl(mediaId: number, driveFileId?: string, filename?: string): string {
   const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
-  return `${getApiBase()}/media/${mediaId}/stream${qs}`;
+  const fileSegment = filename ? `/${encodeURIComponent(filename)}` : '';
+  return `${getApiBase()}/media/${mediaId}/stream${fileSegment}${qs}`;
 }
 
 export function getCompatibleStreamUrl(mediaId: number, start?: number, mode?: string, driveFileId?: string): string {
@@ -295,22 +296,26 @@ export function getCompatibleStreamUrl(mediaId: number, start?: number, mode?: s
   return `${getApiBase()}/media/${mediaId}/stream/compatible${qs ? `?${qs}` : ''}`;
 }
 
-export function getDownloadUrl(mediaId: number, driveFileId?: string): string {
+export function getDownloadUrl(mediaId: number, driveFileId?: string, filename?: string): string {
   const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
-  return `${getApiBase()}/media/${mediaId}/download${qs}`;
+  const fileSegment = filename ? `/${encodeURIComponent(filename)}` : '';
+  return `${getApiBase()}/media/${mediaId}/download${fileSegment}${qs}`;
 }
 
-export function getPlaylistUrl(mediaId: number, driveFileId?: string): string {
-  const qs = driveFileId ? `?drive_id=${encodeURIComponent(driveFileId)}` : '';
-  return `${getApiBase()}/media/${mediaId}/playlist.m3u${qs}`;
+export function getPlaylistUrl(mediaId: number, driveFileId?: string, filename?: string): string {
+  const params = new URLSearchParams();
+  if (driveFileId) params.set('drive_id', driveFileId);
+  if (filename) params.set('filename', filename);
+  const qs = params.toString();
+  return `${getApiBase()}/media/${mediaId}/playlist.m3u${qs ? `?${qs}` : ''}`;
 }
 
-export function getVlcProtocolUrl(mediaId: number): string {
-  return `vlc://${getStreamUrl(mediaId)}`;
+export function getVlcProtocolUrl(mediaId: number, driveFileId?: string, filename?: string): string {
+  return `vlc://${getStreamUrl(mediaId, driveFileId, filename)}`;
 }
 
-export function getVlcIntentUrl(mediaId: number, title?: string): string {
-  const streamUrl = getStreamUrl(mediaId);
+export function getVlcIntentUrl(mediaId: number, title?: string, driveFileId?: string, filename?: string): string {
+  const streamUrl = getStreamUrl(mediaId, driveFileId, filename);
   const rawUrl = streamUrl.replace(/^https?:\/\//, '');
   const scheme = streamUrl.startsWith('https') ? 'https' : 'http';
   return `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};${title ? `S.title=${encodeURIComponent(title)};` : ''}end`;

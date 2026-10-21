@@ -625,62 +625,102 @@ export default {
     const isCatalog = url.pathname === "/media" || url.pathname === "/api/media";
     const isTransfers = url.pathname === "/transfers" || url.pathname === "/api/transfers";
     const isHealth = url.pathname === "/health" || url.pathname === "/system/status" || url.pathname === "/api/health";
+    const isOpenVlc = url.pathname.includes("/open-vlc");
     const driveIdParam = url.searchParams.get("drive_id");
 
-    // Helper: Stream directly from Google Drive
-    const streamDirectFromDrive = async (driveFileId) => {
-      try {
-        let token = await getGoogleAccessToken(env);
-        if (!token) {
-          return new Response(JSON.stringify({ error: "Google Drive OAuth token not configured in worker." }), {
-            status: 503,
-            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
-          });
-        }
-        const driveUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`;
+    // Extract media ID from path if present
+    const mediaIdMatch = url.pathname.match(/\/media\/(\d+)/);
+    const mediaId = mediaIdMatch ? parseInt(mediaIdMatch[1], 10) : 0;
 
-        const getHeaders = (tok) => {
+    // Helper: Stream directly from Google Drive with OAuth + Public CDN fallback
+    const streamDirectFromDrive = async (driveFileId, targetFilename = "stream.mkv") => {
+      try {
+        const range = request.headers.get("Range");
+        const getStreamHeaders = (tok) => {
           const h = new Headers();
-          h.set("Authorization", `Bearer ${tok}`);
-          const range = request.headers.get("Range");
+          if (tok) h.set("Authorization", `Bearer ${tok}`);
           if (range) h.set("Range", range);
           return h;
         };
 
-        let driveRes = await fetch(driveUrl, {
-          method: request.method,
-          headers: getHeaders(token),
-        });
+        const formatMediaResponse = (res) => {
+          const resHeaders = new Headers(res.headers);
+          resHeaders.set("Access-Control-Allow-Origin", origin);
+          resHeaders.set("Access-Control-Allow-Credentials", "true");
+          resHeaders.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, Content-Disposition");
+          resHeaders.set("Accept-Ranges", "bytes");
 
-        if (driveRes.status === 401) {
-          cachedGoogleToken = null;
-          token = await getGoogleAccessToken(env, true);
-          if (token) {
-            driveRes = await fetch(driveUrl, {
-              method: request.method,
-              headers: getHeaders(token),
-            });
+          let ctype = resHeaders.get("Content-Type") || "";
+          if (!ctype || ctype.includes("octet-stream") || ctype.includes("x-download") || ctype.includes("text/html")) {
+            ctype = targetFilename.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/x-matroska";
+            resHeaders.set("Content-Type", ctype);
+          }
+          resHeaders.set("Content-Disposition", `inline; filename="${targetFilename}"`);
+
+          return new Response(request.method === "HEAD" ? null : res.body, {
+            status: res.status,
+            statusText: res.statusText,
+            headers: resHeaders,
+          });
+        };
+
+        // 1. Try streaming via Google OAuth API
+        let token = await getGoogleAccessToken(env);
+        if (token) {
+          const driveUrl = `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`;
+          let driveRes = await fetch(driveUrl, {
+            method: request.method,
+            headers: getStreamHeaders(token),
+          });
+
+          if (driveRes.status === 401) {
+            cachedGoogleToken = null;
+            token = await getGoogleAccessToken(env, true);
+            if (token) {
+              driveRes = await fetch(driveUrl, {
+                method: request.method,
+                headers: getStreamHeaders(token),
+              });
+            }
+          }
+
+          if (driveRes.ok || driveRes.status === 206) {
+            return formatMediaResponse(driveRes);
           }
         }
 
-        const resHeaders = new Headers(driveRes.headers);
-        resHeaders.set("Access-Control-Allow-Origin", origin);
-        resHeaders.set("Access-Control-Allow-Credentials", "true");
-        resHeaders.set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, Content-Disposition");
-        resHeaders.set("Accept-Ranges", "bytes");
+        // 2. Fallback: Resilient streaming via Google Drive CDN (works if file or folder is link-shared)
+        const cdnUrls = [
+          `https://drive.usercontent.google.com/download?id=${driveFileId}&export=download&confirm=t`,
+          `https://drive.google.com/uc?id=${driveFileId}&export=download`,
+        ];
 
-        let ctype = resHeaders.get("Content-Type") || "";
-        if (!ctype || ctype.includes("octet-stream") || ctype.includes("x-download")) {
-          ctype = url.pathname.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/x-matroska";
-          resHeaders.set("Content-Type", ctype);
+        for (const cdnUrl of cdnUrls) {
+          try {
+            const pubRes = await fetch(cdnUrl, {
+              method: request.method,
+              headers: getStreamHeaders(null),
+              redirect: "follow",
+            });
+            const pubCtype = pubRes.headers.get("Content-Type") || "";
+            // Ensure response is actual media and not a Google login page
+            if ((pubRes.ok || pubRes.status === 206) && !pubCtype.includes("text/html")) {
+              return formatMediaResponse(pubRes);
+            }
+          } catch (_) {}
         }
-        resHeaders.set("Content-Disposition", "inline");
 
-        return new Response(request.method === "HEAD" ? null : driveRes.body, {
-          status: driveRes.status,
-          statusText: driveRes.statusText,
-          headers: resHeaders,
-        });
+        return new Response(
+          JSON.stringify({
+            error: "Google Drive media access failed or expired.",
+            detail: "OAuth token is expired or not configured, and public Drive access is restricted. Please re-authorize Google Drive in StreamX.",
+            drive_file_id: driveFileId,
+          }),
+          {
+            status: 503,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+          }
+        );
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), {
           status: 502,
@@ -689,8 +729,46 @@ export default {
       }
     };
 
+    // Helper to resolve drive ID and filename from media catalog if drive_id not explicitly given
+    const resolveMediaItem = async () => {
+      let resolvedDriveId = driveIdParam;
+      let resolvedFilename = url.searchParams.get("filename") || "stream.mkv";
+      const pathFileMatch = url.pathname.match(/\/stream\/(.+)$/);
+      if (pathFileMatch && pathFileMatch[1]) {
+        try {
+          resolvedFilename = decodeURIComponent(pathFileMatch[1]);
+        } catch (_) {
+          resolvedFilename = pathFileMatch[1];
+        }
+      }
+      if (!resolvedDriveId && mediaId > 0) {
+        try {
+          const catalogData = await getDynamicCatalog(env);
+          const item = catalogData.find((x) => x.id === mediaId);
+          if (item) {
+            resolvedDriveId = item.drive_file_id;
+            if (item.filename && resolvedFilename === "stream.mkv") resolvedFilename = item.filename;
+          }
+        } catch (_) {}
+      }
+      return { driveId: resolvedDriveId, filename: resolvedFilename };
+    };
+
     // If backend is not available, execute 24/7 edge handlers immediately
     if (!rawBase) {
+      if (isOpenVlc) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            detail: "Desktop backend is offline. Launching stream via M3U playlist / VLC protocol handler.",
+          }),
+          {
+            status: 404,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+          }
+        );
+      }
+
       if (isTransfers) {
         return new Response(JSON.stringify(edgeTransfersQueue), {
           status: 200,
@@ -732,21 +810,29 @@ export default {
         );
       }
 
-      if (isStream && driveIdParam) {
-        return await streamDirectFromDrive(driveIdParam);
+      if (isStream) {
+        const { driveId, filename } = await resolveMediaItem();
+        if (driveId) {
+          return await streamDirectFromDrive(driveId, filename);
+        }
       }
 
-      if (isPlaylist && driveIdParam) {
-        const streamUrl = `https://${url.host}/media/0/stream/stream.mkv?drive_id=${encodeURIComponent(driveIdParam)}`;
-        const m3u = `#EXTM3U\n#EXTINF:-1,StreamX Direct Play\n${streamUrl}\n`;
-        return new Response(m3u, {
-          status: 200,
-          headers: {
-            "Content-Type": "application/x-mpegurl; charset=utf-8",
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-          },
-        });
+      if (isPlaylist) {
+        const { driveId, filename } = await resolveMediaItem();
+        if (driveId) {
+          const cleanEncoded = encodeURIComponent(filename);
+          const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${encodeURIComponent(driveId)}`;
+          const m3u = `#EXTM3U\n#EXTINF:-1,${filename}\n${streamUrl}\n`;
+          return new Response(m3u, {
+            status: 200,
+            headers: {
+              "Content-Type": "application/x-mpegurl; charset=utf-8",
+              "Content-Disposition": `attachment; filename="${cleanEncoded}.m3u"`,
+              "Access-Control-Allow-Origin": origin,
+              "Access-Control-Allow-Credentials": "true",
+            },
+          });
+        }
       }
 
       return new Response(
@@ -764,9 +850,15 @@ export default {
 
     const targetUrl = new URL(rawBase + url.pathname + url.search);
 
-    // Fast-path: video streams stream directly from Google Drive even when backend is on
-    if (isStream && driveIdParam) {
-      return await streamDirectFromDrive(driveIdParam);
+    // Fast-path: video streams stream directly from Google Drive if worker token is active, otherwise forward to live backend
+    if (isStream) {
+      const { driveId, filename } = await resolveMediaItem();
+      if (driveId) {
+        const directRes = await streamDirectFromDrive(driveId, filename);
+        if (directRes.status < 400) {
+          return directRes;
+        }
+      }
     }
 
     // Forward original headers to backend
@@ -867,21 +959,42 @@ export default {
         );
       }
 
-      if (isStream && driveIdParam) {
-        return await streamDirectFromDrive(driveIdParam);
+      if (isOpenVlc) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            detail: "Desktop backend is offline. Launching stream via M3U playlist / VLC protocol handler.",
+          }),
+          {
+            status: 404,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+          }
+        );
       }
 
-      if (isPlaylist && driveIdParam) {
-        const streamUrl = `https://${url.host}/media/0/stream/stream.mkv?drive_id=${encodeURIComponent(driveIdParam)}`;
-        const m3u = `#EXTM3U\n#EXTINF:-1,StreamX Direct Play\n${streamUrl}\n`;
-        return new Response(m3u, {
-          status: 200,
-          headers: {
-            "Content-Type": "application/x-mpegurl; charset=utf-8",
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-          },
-        });
+      if (isStream) {
+        const { driveId, filename } = await resolveMediaItem();
+        if (driveId) {
+          return await streamDirectFromDrive(driveId, filename);
+        }
+      }
+
+      if (isPlaylist) {
+        const { driveId, filename } = await resolveMediaItem();
+        if (driveId) {
+          const cleanEncoded = encodeURIComponent(filename);
+          const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${encodeURIComponent(driveId)}`;
+          const m3u = `#EXTM3U\n#EXTINF:-1,${filename}\n${streamUrl}\n`;
+          return new Response(m3u, {
+            status: 200,
+            headers: {
+              "Content-Type": "application/x-mpegurl; charset=utf-8",
+              "Content-Disposition": `attachment; filename="${cleanEncoded}.m3u"`,
+              "Access-Control-Allow-Origin": origin,
+              "Access-Control-Allow-Credentials": "true",
+            },
+          });
+        }
       }
 
       const catalogData = await getDynamicCatalog(env);

@@ -64,7 +64,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   const streamUrl = item
     ? (streamMode === 'universal'
         ? getCompatibleStreamUrl(item.id, seekOffset > 0 ? seekOffset : undefined, transcodeForced ? 'transcode' : 'auto', item.drive_file_id)
-        : getStreamUrl(item.id, item.drive_file_id))
+        : getStreamUrl(item.id, item.drive_file_id, item.filename))
     : '';
 
   // Resume position from watch history if available
@@ -175,7 +175,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
     setCurrentTime(0);
     setIsLoading(true);
     if (videoRef.current) {
-      const nextUrl = nextMode === 'universal' ? getCompatibleStreamUrl(item.id, undefined, undefined, item.drive_file_id) : getStreamUrl(item.id, item.drive_file_id);
+      const nextUrl = nextMode === 'universal' ? getCompatibleStreamUrl(item.id, undefined, undefined, item.drive_file_id) : getStreamUrl(item.id, item.drive_file_id, item.filename);
       videoRef.current.src = nextUrl;
       videoRef.current.play().catch(() => {});
     }
