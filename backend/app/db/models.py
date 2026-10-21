@@ -222,3 +222,21 @@ class Setting(Base):
     value = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class WatchProgress(Base):
+    """Authoritative server-side playback progress and watch history record."""
+    __tablename__ = "watch_progress"
+
+    id = Column(Integer, primary_key=True, index=True)
+    media_id = Column(Integer, ForeignKey("media.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    progress_seconds = Column(Integer, default=0, nullable=False)
+    duration_seconds = Column(Integer, default=0, nullable=False)
+    progress_percentage = Column(Integer, default=0, nullable=False)
+    completed = Column(Boolean, default=False, nullable=False, index=True)
+    last_watched_at = Column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    media = relationship("Media")
+

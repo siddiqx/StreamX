@@ -67,6 +67,22 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         : getStreamUrl(item.id, item.drive_file_id, item.filename))
     : '';
 
+  // Centralized watch progress flush (handles direct and universal transcoded streams)
+  const flushProgress = () => {
+    if (!item) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const currentProgress = streamMode === 'universal' && seekOffset > 0
+      ? (seekOffset + v.currentTime)
+      : v.currentTime;
+    const effectiveDuration = (totalDuration && Number.isFinite(totalDuration) && totalDuration > 0)
+      ? totalDuration
+      : (v.duration && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0);
+    if (Number.isFinite(currentProgress) && currentProgress > 0) {
+      updateWatchProgress(item.id, currentProgress, effectiveDuration, item);
+    }
+  };
+
   // Resume position from watch history if available
   useEffect(() => {
     if (!item) return;
@@ -79,6 +95,11 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       }
     }
     recordWatchStart(item);
+
+    return () => {
+      // Flush progress on unmount / modal close
+      flushProgress();
+    };
   }, [item?.id]);
 
   // Periodic progress tracking (every 2.5 seconds while playing)
@@ -87,11 +108,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
     progressSaveIntervalRef.current = setInterval(() => {
       const v = videoRef.current;
       if (v && !v.paused) {
-        const currentProgress = streamMode === 'universal' && seekOffset > 0 ? seekOffset + v.currentTime : v.currentTime;
-        const currentDur = totalDuration || v.duration;
-        if (currentProgress > 0 && currentDur > 0) {
-          updateWatchProgress(item.id, currentProgress, currentDur, item);
-        }
+        flushProgress();
       }
     }, 2500);
 
@@ -99,6 +116,25 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       if (progressSaveIntervalRef.current) clearInterval(progressSaveIntervalRef.current);
     };
   }, [item?.id, streamMode, seekOffset, totalDuration]);
+
+  // Keyboard shortcut listener (Escape to close, Space to play/pause, Left/Right to seek)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        flushProgress();
+        onClose();
+      } else if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === 'ArrowRight') {
+        seekRelative(10);
+      } else if (e.key === 'ArrowLeft') {
+        seekRelative(-10);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [totalDuration, displayTime, streamMode, isPlaying]);
 
   // Controls auto-hide
   const resetControlsTimer = () => {
@@ -645,9 +681,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
           <button
             onClick={() => {
-              if (videoRef.current && item) {
-                updateWatchProgress(item.id, videoRef.current.currentTime, videoRef.current.duration, item);
-              }
+              flushProgress();
               onClose();
             }}
             aria-label="Close Player"

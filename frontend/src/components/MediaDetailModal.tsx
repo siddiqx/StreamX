@@ -97,11 +97,15 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   const handleToggleWatched = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!item) return;
-    if (watchProgress?.completed) {
-      markWatchUnwatched(item.id);
+    const targetItem = (isSeriesGroup && selectedEpisodeId)
+      ? episodes.find(e => e.item.id === selectedEpisodeId)?.item || item
+      : (isSeriesGroup && activeEpisodeTarget ? activeEpisodeTarget.ep.item : item);
+    if (!targetItem) return;
+    const progress = getWatchProgress(targetItem.id);
+    if (progress?.completed) {
+      markWatchUnwatched(targetItem.id, targetItem);
     } else {
-      markWatchCompleted(item.id, item);
+      markWatchCompleted(targetItem.id, targetItem);
     }
   };
 
@@ -167,7 +171,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
       const explicit = episodes.find(e => e.item.id === selectedEpisodeId);
       if (explicit) {
         const epProgress = getWatchProgress(explicit.item.id);
-        const isResume = epProgress && !epProgress.completed && epProgress.progressPercentage > 5 && epProgress.progressPercentage < 90;
+        const isResume = epProgress && !epProgress.completed && (epProgress.progressSeconds >= 15 || epProgress.progressPercentage >= 2) && epProgress.progressPercentage < 90;
         return {
           ep: explicit,
           progress: epProgress,
@@ -177,10 +181,15 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     }
 
     const history = getWatchHistory();
-    // 2. Genuine in-progress episode (progress between 5% and 90%)
+    // 2. Genuine in-progress episode (progress between 2% and 90% or >=15s)
     for (const ep of episodes) {
       const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
-      const matchHistory = history.find(h => epIds.includes(h.mediaId) && !h.completed && h.progressPercentage > 5 && h.progressPercentage < 90);
+      const matchHistory = history.find(h =>
+        epIds.includes(h.mediaId) &&
+        !h.completed &&
+        (h.progressSeconds >= 15 || h.progressPercentage >= 2) &&
+        h.progressPercentage < 90
+      );
       if (matchHistory) {
         return {
           ep,

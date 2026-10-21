@@ -4,6 +4,7 @@ import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
 import { organizeMediaLibrary } from '../utils/mediaOrganizer';
 import { MediaCard } from '../components/MediaCard';
+import { getWatchHistory, type WatchHistoryItem } from '../utils/watchHistory';
 
 interface LibraryViewProps {
   media: MediaItem[];
@@ -14,7 +15,7 @@ interface LibraryViewProps {
   initialCategory?: string;
 }
 
-const CATS = ['All', 'Anime', 'Anime Movies', 'TV Shows', 'Movies', 'Action', 'Sci-Fi', 'Romance', 'Comedy'];
+const CATS = ['All', 'Recently Watched', 'Anime', 'Anime Movies', 'TV Shows', 'Movies', 'Action', 'Sci-Fi', 'Romance', 'Comedy'];
 type SortKey = 'newest' | 'rating' | 'size' | 'name';
 
 export const LibraryView: React.FC<LibraryViewProps> = ({
@@ -28,11 +29,58 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [selectedCat, setSelectedCat] = useState(initialCategory);
   const [sortBy, setSortBy] = useState<SortKey>('newest');
   const [viewMode, setViewMode] = useState<'grouped' | 'files'>('grouped');
+  const [historyItems, setHistoryItems] = useState<WatchHistoryItem[]>(getWatchHistory);
+
+  React.useEffect(() => {
+    const handleUpdate = () => setHistoryItems(getWatchHistory());
+    window.addEventListener('streamx_watch_history_updated', handleUpdate);
+    return () => window.removeEventListener('streamx_watch_history_updated', handleUpdate);
+  }, []);
 
   const library = useMemo(() => organizeMediaLibrary(media, offlineIds), [media, offlineIds]);
 
+  // Fast map of mediaId -> WatchHistoryItem
+  const historyMap = useMemo(() => {
+    const map = new Map<number, WatchHistoryItem>();
+    for (const h of historyItems) {
+      if (!map.has(h.mediaId)) {
+        map.set(h.mediaId, h);
+      }
+    }
+    return map;
+  }, [historyItems]);
+
   // Filter & Sort Grouped Series Catalogue
   const filteredGroups = useMemo(() => {
+    if (selectedCat === 'Recently Watched') {
+      // Find all groups that contain at least one watched episode / item
+      const matched: { group: MediaGroup; latestTime: number }[] = [];
+      for (const group of library.allGroups) {
+        let maxTime = 0;
+        if (group.type === 'series') {
+          for (const ep of group.episodes) {
+            const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+            for (const id of epIds) {
+              const h = historyMap.get(id);
+              if (h) {
+                const t = new Date(h.lastWatchedAt).getTime();
+                if (t > maxTime) maxTime = t;
+              }
+            }
+          }
+        } else {
+          const h = historyMap.get(group.featuredItem.id);
+          if (h) {
+            maxTime = new Date(h.lastWatchedAt).getTime();
+          }
+        }
+        if (maxTime > 0) {
+          matched.push({ group, latestTime: maxTime });
+        }
+      }
+      return matched.sort((a, b) => b.latestTime - a.latestTime).map(m => m.group);
+    }
+
     return library.allGroups
       .filter(group => {
         if (selectedCat === 'All') return true;
@@ -64,11 +112,21 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         }
         return a.title.localeCompare(b.title);
       });
-  }, [library, selectedCat, sortBy]);
+  }, [library, selectedCat, sortBy, historyMap]);
 
   // Filter & Sort Raw Files using the server's authoritative taxonomy.
-  // Runtime and filename guesses must never decide Anime vs Anime Movies.
   const filteredFiles = useMemo(() => {
+    if (selectedCat === 'Recently Watched') {
+      const matched: { item: MediaItem; time: number }[] = [];
+      for (const item of media) {
+        const h = historyMap.get(item.id);
+        if (h) {
+          matched.push({ item, time: new Date(h.lastWatchedAt).getTime() });
+        }
+      }
+      return matched.sort((a, b) => b.time - a.time).map(m => m.item);
+    }
+
     return media
       .filter(item => {
         if (selectedCat === 'All') return true;
@@ -84,7 +142,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         if (sortBy === 'size') return b.size - a.size;
         return a.filename.localeCompare(b.filename);
       });
-  }, [media, selectedCat, sortBy]);
+  }, [media, selectedCat, sortBy, historyMap]);
 
   const totalCount = viewMode === 'grouped' ? filteredGroups.length : filteredFiles.length;
 

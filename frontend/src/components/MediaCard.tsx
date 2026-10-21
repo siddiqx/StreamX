@@ -458,6 +458,30 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           }} />
         </div>
       )}
+
+      {/* Completed indicator badge */}
+      {watchProgress && watchProgress.completed && (
+        <div
+          title="Watched"
+          style={{
+            position: 'absolute',
+            bottom: '7px',
+            right: '7px',
+            width: '18px',
+            height: '18px',
+            borderRadius: '50%',
+            background: 'rgba(16,185,129,0.92)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+            zIndex: 15,
+          }}
+        >
+          <Check size={11} strokeWidth={3} />
+        </div>
+      )}
     </div>
   );
 };

@@ -1,6 +1,9 @@
 import asyncio
+from datetime import datetime, timezone
 import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, or_, select
@@ -8,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.database import get_db
-from app.db.models import Media, MetadataEntity
+from app.db.models import Media, MetadataEntity, WatchProgress
 from app.schemas.media import (
     BackdropOverrideRequest,
     MediaPatchRequest,
@@ -16,6 +19,8 @@ from app.schemas.media import (
     MetadataEntityResponse,
     MetadataSelectRequest,
     PosterOverrideRequest,
+    WatchProgressRequest,
+    WatchProgressResponse,
 )
 from app.services.drive_service import drive_service
 from app.services.metadata_service import metadata_service
@@ -195,31 +200,151 @@ async def rename_series_endpoint(
 @router.get("/image-proxy")
 async def proxy_image(url: str = Query(..., description="The TMDB or CDN image URL to proxy")):
     """Safely proxy metadata/poster images (TMDB and AniList) to bypass ISP/client CORS or domain blocks."""
-    allowed_prefixes = (
-        "https://image.tmdb.org/",
-        "http://image.tmdb.org/",
-        "https://s4.anilist.co/",
-        "https://anilist.co/",
-    )
-    if not any(url.startswith(prefix) for prefix in allowed_prefixes):
+    parsed = urlsplit(url)
+    if parsed.scheme not in ("https", "http"):
+        raise HTTPException(status_code=400, detail="Invalid URL scheme")
+
+    allowed_hosts = {"image.tmdb.org", "s4.anilist.co", "anilist.co"}
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in allowed_hosts:
         raise HTTPException(status_code=400, detail="Only official TMDB or AniList images can be proxied")
 
-    import httpx
+    if parsed.port and parsed.port not in (80, 443):
+        raise HTTPException(status_code=400, detail="Invalid port")
+
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        # follow_redirects=False prevents open redirect SSRF attacks
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=False) as client:
             resp = await client.get(url)
             if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch image")
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch image from upstream")
+
+            content_type = resp.headers.get("content-type", "image/jpeg").lower()
+            if not content_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail="Proxied resource is not an image")
+
+            # Enforce 10MB maximum image size to prevent memory exhaustion
+            if len(resp.content) > 10 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Image size exceeds allowable limit")
+
             return Response(
                 content=resp.content,
-                media_type=resp.headers.get("content-type", "image/jpeg"),
+                media_type=content_type,
                 headers={
                     "Cache-Control": "public, max-age=604800, stale-while-revalidate=2592000",
                     "Access-Control-Allow-Origin": "*",
                 },
             )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Image proxy error: {str(e)}")
+
+
+@router.get("/watch-progress", response_model=List[WatchProgressResponse])
+async def get_all_watch_progress(
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve all stored watch progress records across the library."""
+    stmt = select(WatchProgress).order_by(WatchProgress.last_watched_at.desc())
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post("/watch-progress", response_model=WatchProgressResponse)
+async def save_watch_progress(
+    req: WatchProgressRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Upsert individual watch progress position for a media item."""
+    stmt = select(WatchProgress).where(WatchProgress.media_id == req.media_id)
+    result = await db.execute(stmt)
+    record = result.scalar_one_or_none()
+
+    watched_time = req.last_watched_at or datetime.now(timezone.utc)
+    if record:
+        record.progress_seconds = req.progress_seconds
+        record.duration_seconds = req.duration_seconds
+        record.progress_percentage = req.progress_percentage
+        record.completed = req.completed
+        record.last_watched_at = watched_time
+    else:
+        record = WatchProgress(
+            media_id=req.media_id,
+            progress_seconds=req.progress_seconds,
+            duration_seconds=req.duration_seconds,
+            progress_percentage=req.progress_percentage,
+            completed=req.completed,
+            last_watched_at=watched_time,
+        )
+        db.add(record)
+
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+@router.post("/watch-progress/sync", response_model=List[WatchProgressResponse])
+async def sync_watch_progress_bulk(
+    items: List[WatchProgressRequest],
+    db: AsyncSession = Depends(get_db),
+):
+    """Bidirectional bulk merge of client and server watch progress history."""
+    stmt = select(WatchProgress)
+    result = await db.execute(stmt)
+    existing_records = {r.media_id: r for r in result.scalars().all()}
+
+    for item in items:
+        client_time = ensure_utc(item.last_watched_at) or datetime.now(timezone.utc)
+        record = existing_records.get(item.media_id)
+        if record:
+            server_time = ensure_utc(record.last_watched_at)
+            if not server_time or client_time >= server_time:
+                record.progress_seconds = item.progress_seconds
+                record.duration_seconds = item.duration_seconds
+                record.progress_percentage = item.progress_percentage
+                record.completed = item.completed
+                record.last_watched_at = client_time
+        else:
+            new_record = WatchProgress(
+                media_id=item.media_id,
+                progress_seconds=item.progress_seconds,
+                duration_seconds=item.duration_seconds,
+                progress_percentage=item.progress_percentage,
+                completed=item.completed,
+                last_watched_at=client_time,
+            )
+            db.add(new_record)
+            existing_records[item.media_id] = new_record
+
+    await db.commit()
+    stmt_all = select(WatchProgress).order_by(WatchProgress.last_watched_at.desc())
+    res_all = await db.execute(stmt_all)
+    return res_all.scalars().all()
+
+
+@router.delete("/{media_id}/watch-progress")
+async def delete_watch_progress(
+    media_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset or clear watch progress for a single media item."""
+    stmt = select(WatchProgress).where(WatchProgress.media_id == media_id)
+    result = await db.execute(stmt)
+    record = result.scalar_one_or_none()
+    if record:
+        await db.delete(record)
+        await db.commit()
+    return {"success": True, "media_id": media_id}
+
 
 
 
@@ -495,7 +620,15 @@ async def probe_media_codecs(drive_file_id: str, token: str) -> Dict[str, str]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            raise
         data = json.loads(stdout.decode("utf-8", errors="ignore"))
         v_codec = "h264"
         a_codec = "aac"
@@ -620,7 +753,8 @@ async def stream_compatible_media(
         finally:
             try:
                 process.kill()
-            except ProcessLookupError:
+                await process.wait()
+            except Exception:
                 pass
 
     return StreamingResponse(

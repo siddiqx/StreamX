@@ -828,7 +828,12 @@ export function getSmartSeriesEpisode(group: MediaGroup): MediaEpisode {
   // 1. Is there an episode actively in progress (any version)?
   for (const ep of group.episodes) {
     const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
-    const inProgress = history.find(h => epIds.includes(h.mediaId) && !h.completed && h.progressPercentage > 5 && h.progressPercentage < 90);
+    const inProgress = history.find(h =>
+      epIds.includes(h.mediaId) &&
+      !h.completed &&
+      (h.progressSeconds >= 15 || h.progressPercentage >= 2) &&
+      h.progressPercentage < 90
+    );
     if (inProgress) {
       return ep;
     }

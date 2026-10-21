@@ -58,57 +58,124 @@ export const HomeView: React.FC<HomeViewProps> = ({
   // Automatically organize media into series groups, anime, and genre shelves
   const library = useMemo(() => organizeMediaLibrary(media, offlineIds), [media, offlineIds]);
 
-  // Continue Watching items currently in progress (Collapsed by Series to eliminate duplicate title cards)
+  // Continue Watching items currently in progress or Up Next for series (Collapsed by Series)
   const continueWatchingList = useMemo(() => {
-    const validHistory = historyItems
-      .filter(h => !h.completed && h.progressPercentage > 0)
-      .sort((a, b) => new Date(b.lastWatchedAt).getTime() - new Date(a.lastWatchedAt).getTime());
-
     const seenGroupIds = new Set<string>();
     const seenMediaIds = new Set<number>();
-    const result: {
+    const candidates: {
       group?: MediaGroup;
       item: MediaItem;
       history: WatchHistoryItem;
       episodeLabel?: string;
+      sortTime: number;
     }[] = [];
 
-    for (const h of validHistory) {
-      const item = media.find(m => m.id === h.mediaId);
-      if (!item) continue;
-
-      // Find if this item belongs to a series group
-      const parentGroup = library.allGroups.find(g =>
-        g.type === 'series' && g.episodes.some(ep => ep.item.id === h.mediaId)
-      );
-
-      if (parentGroup) {
-        if (seenGroupIds.has(parentGroup.id)) {
-          // Already have the latest episode for this series in Continue Watching!
-          continue;
-        }
-        seenGroupIds.add(parentGroup.id);
-        const epObj = parentGroup.episodes.find(ep => ep.item.id === h.mediaId);
-        result.push({
-          group: parentGroup,
-          item: item,
-          history: h,
-          episodeLabel: epObj?.episodeLabel || `Ep ${epObj?.episodeNumber || ''}`,
-        });
-      } else {
-        // Standalone Movie or Single Video
-        if (seenMediaIds.has(item.id)) continue;
-        seenMediaIds.add(item.id);
-        const movieGroup = library.allGroups.find(g => g.featuredItem.id === item.id);
-        result.push({
-          group: movieGroup,
-          item: item,
-          history: h,
-        });
+    // Map each mediaId to its history entry for fast lookup
+    const historyMap = new Map<number, WatchHistoryItem>();
+    for (const h of historyItems) {
+      if (!historyMap.has(h.mediaId)) {
+        historyMap.set(h.mediaId, h);
       }
     }
 
-    return result;
+    // 1. Process Series Groups that have any watch history
+    for (const group of library.allGroups) {
+      if (group.type !== 'series' || !group.episodes || group.episodes.length === 0) continue;
+
+      const groupEpHistories: { ep: typeof group.episodes[0]; history: WatchHistoryItem }[] = [];
+      for (const ep of group.episodes) {
+        const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+        for (const id of epIds) {
+          const h = historyMap.get(id);
+          if (h) {
+            groupEpHistories.push({ ep, history: h });
+            break;
+          }
+        }
+      }
+
+      if (groupEpHistories.length === 0) continue;
+
+      // Sort by newest interaction
+      groupEpHistories.sort((a, b) => new Date(b.history.lastWatchedAt).getTime() - new Date(a.history.lastWatchedAt).getTime());
+      const latestInteraction = groupEpHistories[0];
+
+      // Check if there is an episode currently in progress in this series
+      const inProgressEp = groupEpHistories.find(({ history }) =>
+        !history.completed &&
+        (history.progressSeconds >= 15 || history.progressPercentage >= 2) &&
+        history.progressPercentage < 90
+      );
+
+      if (inProgressEp) {
+        seenGroupIds.add(group.id);
+        candidates.push({
+          group,
+          item: inProgressEp.ep.item,
+          history: inProgressEp.history,
+          episodeLabel: inProgressEp.ep.episodeLabel || `Ep ${inProgressEp.ep.episodeNumber || ''}`,
+          sortTime: new Date(inProgressEp.history.lastWatchedAt).getTime(),
+        });
+      } else if (latestInteraction.history.completed || latestInteraction.history.progressPercentage >= 90) {
+        // Latest watched episode is completed -> Find the NEXT uncompleted episode in sequence
+        const completedIds = new Set(
+          groupEpHistories
+            .filter(({ history }) => history.completed || history.progressPercentage >= 90)
+            .flatMap(({ ep }) => [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])])
+        );
+
+        const nextEp = group.episodes.find(ep => {
+          const ids = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+          return !ids.some(id => completedIds.has(id));
+        });
+
+        if (nextEp) {
+          seenGroupIds.add(group.id);
+          candidates.push({
+            group,
+            item: nextEp.item,
+            history: {
+              ...latestInteraction.history,
+              mediaId: nextEp.item.id,
+              progressPercentage: 0,
+              progressSeconds: 0,
+              completed: false,
+            },
+            episodeLabel: `Up Next: ${nextEp.episodeLabel || `Ep ${nextEp.episodeNumber || ''}`}`,
+            sortTime: new Date(latestInteraction.history.lastWatchedAt).getTime(),
+          });
+        }
+      }
+    }
+
+    // 2. Process Standalone Movies / Videos
+    for (const h of historyItems) {
+      if (h.completed || h.progressPercentage >= 90) continue;
+      // Must have at least 15s or 2% watched
+      if (h.progressSeconds < 15 && h.progressPercentage < 2) continue;
+
+      const item = media.find(m => m.id === h.mediaId);
+      if (!item) continue;
+
+      // Skip if already handled as part of a series group
+      const belongsToGroup = library.allGroups.find(g =>
+        g.type === 'series' && g.episodes.some(ep => ep.item.id === h.mediaId)
+      );
+      if (belongsToGroup) continue;
+
+      if (seenMediaIds.has(item.id)) continue;
+      seenMediaIds.add(item.id);
+
+      const movieGroup = library.allGroups.find(g => g.featuredItem.id === item.id);
+      candidates.push({
+        group: movieGroup,
+        item,
+        history: h,
+        sortTime: new Date(h.lastWatchedAt).getTime(),
+      });
+    }
+
+    return candidates.sort((a, b) => b.sortTime - a.sortTime).slice(0, 30);
   }, [historyItems, media, library.allGroups]);
 
   // Curated Recommendation Pool for the Dynamic Rotating Spotlight Hero

@@ -252,10 +252,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration - restricted to whitelisted origins
+# CORS configuration - restricted to whitelisted origins and Vercel/Cloudflare preview deployments
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.workers\.dev|https://.*\.trycloudflare\.com|https://.*\.pages\.dev",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],

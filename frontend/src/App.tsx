@@ -10,7 +10,7 @@ import {
   getLastApiHealth,
   type ApiHealthStatus,
 } from './api';
-import { syncActiveWatchSession } from './utils/watchHistory';
+import { syncActiveWatchSession, syncWatchHistoryWithCloud } from './utils/watchHistory';
 import { launchVlcWithTracking } from './utils/playerSettings';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
@@ -101,6 +101,12 @@ export const App: React.FC = () => {
       window.removeEventListener('focus', handleSync);
     };
   }, [media]);
+
+  // Synchronize watch progress with cloud backend
+  useEffect(() => {
+    syncWatchHistoryWithCloud(media);
+  }, [media.length]);
+
   const [isWifiOnly, setIsWifiOnly] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('streamx_wifi_only');

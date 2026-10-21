@@ -101,3 +101,27 @@ class PosterOverrideRequest(BaseModel):
 
 class BackdropOverrideRequest(BaseModel):
     backdrop_url: Optional[str] = None
+
+
+class WatchProgressRequest(BaseModel):
+    media_id: int
+    progress_seconds: int = 0
+    duration_seconds: int = 0
+    progress_percentage: int = 0
+    completed: bool = False
+    last_watched_at: Optional[datetime] = None
+
+
+class WatchProgressResponse(BaseModel):
+    id: int
+    media_id: int
+    progress_seconds: int
+    duration_seconds: int
+    progress_percentage: int
+    completed: bool
+    last_watched_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+

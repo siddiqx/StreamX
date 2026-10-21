@@ -691,3 +691,71 @@ export async function syncDriveLibrary(): Promise<{ status: string; synced_count
     return null;
   }
 }
+
+export interface BackendWatchProgress {
+  id: number;
+  media_id: number;
+  progress_seconds: number;
+  duration_seconds: number;
+  progress_percentage: number;
+  completed: boolean;
+  last_watched_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchBackendWatchProgress(): Promise<BackendWatchProgress[]> {
+  try {
+    const res = await fetch(`${getApiBase()}/media/watch-progress`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function saveBackendWatchProgress(item: {
+  media_id: number;
+  progress_seconds: number;
+  duration_seconds: number;
+  progress_percentage: number;
+  completed: boolean;
+  last_watched_at?: string;
+}): Promise<boolean> {
+  try {
+    const res = await fetch(`${getApiBase()}/media/watch-progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+      signal: AbortSignal.timeout(4000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function syncBackendWatchProgressBulk(items: {
+  media_id: number;
+  progress_seconds: number;
+  duration_seconds: number;
+  progress_percentage: number;
+  completed: boolean;
+  last_watched_at?: string;
+}[]): Promise<BackendWatchProgress[]> {
+  try {
+    const res = await fetch(`${getApiBase()}/media/watch-progress/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(items),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+

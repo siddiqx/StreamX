@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select, func
 
 from app.db.database import AsyncSessionLocal, init_db
-from app.db.models import Media, TelegramTransfer, TransferStatus, MetadataJob, MetadataJobStatus
+from app.db.models import Media, TelegramTransfer, TransferStatus, MetadataJob, MetadataJobStatus, WatchProgress
 from app.workers.transfer_worker import TransferWorker
 from app.workers.metadata_worker import MetadataWorker
 from app.utils.filename_parser import parse_filename
@@ -16,17 +16,24 @@ from app.utils.filenames import sanitize_filename
 @pytest.fixture
 async def clean_db():
     await init_db()
+    async with AsyncSessionLocal() as session:
+        for model in (TelegramTransfer, Media, MetadataJob, WatchProgress):
+            try:
+                items = (await session.execute(select(model))).scalars().all()
+                for it in items:
+                    await session.delete(it)
+            except Exception:
+                pass
+        await session.commit()
     yield
     async with AsyncSessionLocal() as session:
-        transfers = (await session.execute(select(TelegramTransfer))).scalars().all()
-        for t in transfers:
-            await session.delete(t)
-        media_items = (await session.execute(select(Media))).scalars().all()
-        for m in media_items:
-            await session.delete(m)
-        jobs = (await session.execute(select(MetadataJob))).scalars().all()
-        for j in jobs:
-            await session.delete(j)
+        for model in (TelegramTransfer, Media, MetadataJob, WatchProgress):
+            try:
+                items = (await session.execute(select(model))).scalars().all()
+                for it in items:
+                    await session.delete(it)
+            except Exception:
+                pass
         await session.commit()
 
 
