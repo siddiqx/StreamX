@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
   X, Play, Download, Film, ShieldAlert,
   Star, Search, Loader2, Check, CheckCircle2,
-  Tv, Sparkles, MonitorPlay, Zap, ChevronDown, ChevronUp,
+  Tv, Sparkles, MonitorPlay, ChevronDown, ChevronUp,
   Lock, Unlock, RefreshCw, Image as ImageIcon, Activity
 } from 'lucide-react';
 import type { MediaItem, MetadataCandidate, MetadataDiagnostics } from '../types';
@@ -274,8 +274,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   const taxonomyStyle = getTaxonomyBadgeStyle(taxonomyCategory);
 
-  const techMeta = parseMediaMetadata(item.filename);
-  const extension = item.filename.split('.').pop()?.toUpperCase() || 'MKV';
   const requiredWithSafetyMargin = Math.round(item.size * 1.05);
   const hasEnoughStorage = deviceFreeBytes >= requiredWithSafetyMargin;
 
@@ -1148,18 +1146,18 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                               {cleanTitle}
                             </p>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: '0.70rem', color: '#94a3b8', fontWeight: 600 }}>
-                                {ep.quality} · {ep.extension} · {formatBytes(ep.item.size)}
-                              </span>
-                              {epProgress?.completed && (
-                                <span style={{ color: '#10b981', fontSize: '0.68rem', fontWeight: 800 }}>
-                                  · Watched ✓
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+                              {epProgress?.completed ? (
+                                <span style={{ color: '#10b981', fontSize: '0.72rem', fontWeight: 800 }}>
+                                  Watched ✓
                                 </span>
-                              )}
-                              {epProgress && !epProgress.completed && epProgress.progressPercentage > 0 && (
-                                <span style={{ color: '#a5b4fc', fontSize: '0.68rem', fontWeight: 800 }}>
-                                  · {epProgress.progressPercentage}%
+                              ) : epProgress && epProgress.progressPercentage > 0 ? (
+                                <span style={{ color: '#818cf8', fontSize: '0.72rem', fontWeight: 800 }}>
+                                  {epProgress.progressPercentage}% watched
+                                </span>
+                              ) : (
+                                <span style={{ color: '#64748b', fontSize: '0.72rem', fontWeight: 600 }}>
+                                  Ready to play
                                 </span>
                               )}
                             </div>
@@ -1276,7 +1274,6 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   {group.versions.map((ver: MediaVersion) => {
                     const verItem = ver.item;
                     const verTech = parseMediaMetadata(verItem.filename);
-                    const verExt = ver.extension || verItem.filename.split('.').pop()?.toUpperCase() || 'MKV';
                     const isVerActive = verItem.id === item.id;
                     const verOffline = ver.isOffline ?? (offlineIds?.has(verItem.id) || false);
 
@@ -1295,36 +1292,27 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                         }}
                       >
                         <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{
                               fontWeight: 800,
-                              fontSize: '0.82rem',
+                              fontSize: '0.84rem',
                               color: '#fff',
-                              background: 'rgba(255,255,255,0.08)',
-                              padding: '2px 7px',
-                              borderRadius: '5px',
                             }}>
-                              {verItem.quality || verTech.quality || 'HD'}
-                            </span>
-                            <span style={{ fontSize: '0.76rem', color: '#94a3b8', fontWeight: 600 }}>
-                              {verExt} · {formatBytes(verItem.size)}
+                              {verItem.quality || verTech.quality || 'Full HD'}
                             </span>
                             {isVerActive && (
-                              <span style={{ fontSize: '0.68rem', color: '#818cf8', fontWeight: 800 }}>
-                                Active Selection
+                              <span style={{
+                                fontSize: '0.68rem',
+                                color: '#818cf8',
+                                fontWeight: 800,
+                                background: 'rgba(99,102,241,0.18)',
+                                padding: '2px 7px',
+                                borderRadius: '5px',
+                              }}>
+                                Active
                               </span>
                             )}
                           </div>
-                          <p style={{
-                            fontSize: '0.70rem',
-                            color: '#64748b',
-                            margin: '3px 0 0',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}>
-                            {verItem.filename}
-                          </p>
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1380,43 +1368,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </div>
             )}
 
-            {/* Technical Specifications Bar */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 16px',
-              borderRadius: '14px',
-              background: 'rgba(255,255,255,0.025)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              marginTop: '4px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Zap size={14} color="#818cf8" />
-                <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#e2e8f0' }}>
-                  {item.quality || techMeta.quality} · {extension} · {formatBytes(item.size)}
-                </span>
-              </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {item.metadata_locked && (
-                  <span style={{
-                    fontSize: '0.68rem',
-                    fontWeight: 800,
-                    color: '#fbbf24',
-                    background: 'rgba(251,191,36,0.14)',
-                    padding: '2px 7px',
-                    borderRadius: '5px',
-                    border: '1px solid rgba(251,191,36,0.3)',
-                  }}>
-                    LOCKED
-                  </span>
-                )}
-                <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
-                  Direct Stream
-                </span>
-              </div>
-            </div>
 
           </div>
         </div>

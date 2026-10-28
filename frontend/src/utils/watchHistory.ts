@@ -305,16 +305,23 @@ export function syncActiveWatchSession(mediaList: MediaItem[]): { updated: boole
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return { updated: false };
     const session: ActiveWatchSession = JSON.parse(raw);
-    localStorage.removeItem(SESSION_KEY);
 
-    if (!session || !session.mediaId || !session.startedAt) return { updated: false };
+    if (!session || !session.mediaId || !session.startedAt) {
+      localStorage.removeItem(SESSION_KEY);
+      return { updated: false };
+    }
 
     const elapsedSeconds = Math.round((Date.now() - session.startedAt) / 1000);
-    // Ignore brief switches under 15 seconds
-    if (elapsedSeconds < 15) return { updated: false };
+    // Don't discard active session on brief focus changes or player startup (< 15s)
+    if (elapsedSeconds < 15) {
+      return { updated: false };
+    }
 
-    // Discard absurd elapsed times (>4 hours) where user likely closed VLC or slept their machine
-    if (elapsedSeconds > 4 * 3600) {
+    // Only consume the session once real watch time has elapsed
+    localStorage.removeItem(SESSION_KEY);
+
+    // Discard absurd elapsed times (>6 hours) where user likely closed VLC or slept their machine
+    if (elapsedSeconds > 6 * 3600) {
       return { updated: false };
     }
 

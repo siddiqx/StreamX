@@ -774,6 +774,7 @@ async def stream_compatible_media(
 async def open_in_vlc(
     media_id: int,
     request: Request,
+    start: float = Query(0.0, ge=0.0, description="Seek start position in seconds"),
     db: AsyncSession = Depends(get_db),
     _authorized: bool = Depends(require_auth),
 ):
@@ -808,12 +809,14 @@ async def open_in_vlc(
         vlc_bin,
         "--no-qt-privacy-ask",
         "--demux=avformat",
-        "--network-caching=800",
-        "--file-caching=800",
+        "--network-caching=3000",
+        "--file-caching=3000",
         "--clock-jitter=0",
         "--clock-synchro=0",
-        stream_url,
     ]
+    if start > 0:
+        vlc_args.append(f"--start-time={int(start)}")
+    vlc_args.append(stream_url)
     try:
         if os.name == "nt":
             # Use CREATE_NEW_PROCESS_GROUP WITHOUT DETACHED_PROCESS so GUI window is rendered interactively
@@ -858,9 +861,9 @@ async def get_m3u_playlist(
         f"#EXTM3U\n"
         f"#EXTINF:-1,{safe_m3u_title}\n"
         f"#EXTVLCOPT:demux=avformat\n"
-        f"#EXTVLCOPT:network-caching=800\n"
-        f"#EXTVLCOPT:sout-mux-caching=800\n"
-        f"#EXTVLCOPT:file-caching=800\n"
+        f"#EXTVLCOPT:network-caching=3000\n"
+        f"#EXTVLCOPT:sout-mux-caching=3000\n"
+        f"#EXTVLCOPT:file-caching=3000\n"
         f"#EXTVLCOPT:clock-jitter=0\n"
         f"#EXTVLCOPT:clock-synchro=0\n"
         f"#EXTVLCOPT:http-reconnect=true\n"

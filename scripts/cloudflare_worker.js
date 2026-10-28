@@ -34,6 +34,9 @@ let cachedCatalogTime = 0;
 const edgeTransfersQueue = [];
 const MAX_EDGE_QUEUE = 50;
 
+// Dynamic edge watch progress map (ensures resume & tracking persist 24/7 when backend is offline)
+const edgeWatchProgress = new Map();
+
 // Update deduplication ring buffer
 const PROCESSED_UPDATE_IDS = new Set();
 const MAX_PROCESSED_UPDATE_HISTORY = 1000;
@@ -749,6 +752,10 @@ export default {
           let driveRes = await fetch(driveUrl, {
             method: request.method,
             headers: getStreamHeaders(token),
+            cf: {
+              cacheEverything: true,
+              cacheTtl: 86400,
+            },
           });
 
           if (driveRes.status === 401) {
@@ -837,6 +844,56 @@ export default {
 
     // If backend is not available, execute 24/7 edge handlers immediately
     if (!rawBase) {
+      // 24/7 Edge Watch Progress Synchronization Fallback
+      if (path.includes("/media/watch-progress")) {
+        if (request.method === "GET") {
+          return new Response(JSON.stringify(Array.from(edgeWatchProgress.values())), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": origin,
+              "Access-Control-Allow-Credentials": "true",
+            },
+          });
+        }
+        if (request.method === "POST") {
+          try {
+            const body = await request.clone().json();
+            if (path.endsWith("/sync") && Array.isArray(body)) {
+              for (const item of body) {
+                if (item.media_id) edgeWatchProgress.set(item.media_id, item);
+              }
+              return new Response(JSON.stringify(Array.from(edgeWatchProgress.values())), {
+                status: 200,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Access-Control-Allow-Origin": origin,
+                  "Access-Control-Allow-Credentials": "true",
+                },
+              });
+            } else if (body && body.media_id) {
+              edgeWatchProgress.set(body.media_id, body);
+              return new Response(JSON.stringify(body), {
+                status: 200,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Access-Control-Allow-Origin": origin,
+                  "Access-Control-Allow-Credentials": "true",
+                },
+              });
+            }
+          } catch (_) {}
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": origin,
+              "Access-Control-Allow-Credentials": "true",
+            },
+          });
+        }
+      }
+
       if (isOpenVlc) {
         return new Response(
           JSON.stringify({
@@ -905,7 +962,7 @@ export default {
           const cleanDriveId = rfc3986Encode(driveId);
           const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
           const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
-          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=800\n#EXTVLCOPT:sout-mux-caching=800\n#EXTVLCOPT:file-caching=800\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
           return new Response(m3u, {
             status: 200,
             headers: {
@@ -939,7 +996,7 @@ export default {
         const cleanDriveId = rfc3986Encode(driveId);
         const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
         const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
-        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=800\n#EXTVLCOPT:sout-mux-caching=800\n#EXTVLCOPT:file-caching=800\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
         return new Response(m3u, {
           status: 200,
           headers: {
@@ -1095,7 +1152,7 @@ export default {
         if (driveId) {
           const cleanEncoded = encodeURIComponent(filename);
           const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${encodeURIComponent(driveId)}`;
-          const m3u = `#EXTM3U\n#EXTINF:-1,${filename}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=800\n#EXTVLCOPT:sout-mux-caching=800\n#EXTVLCOPT:file-caching=800\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+          const m3u = `#EXTM3U\n#EXTINF:-1,${filename}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
           return new Response(m3u, {
             status: 200,
             headers: {

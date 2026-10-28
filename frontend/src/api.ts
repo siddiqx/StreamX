@@ -326,15 +326,36 @@ export function getVlcIntentUrl(mediaId: number, title?: string, driveFileId?: s
   return `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};${title ? `S.title=${rfc3986Encode(title)};` : ''}end`;
 }
 
-export async function openVlcOnHost(mediaId: number): Promise<{ success: boolean; message: string }> {
+export async function openVlcOnHost(mediaId: number, startSeconds?: number): Promise<{ success: boolean; message: string }> {
+  const qs = startSeconds && startSeconds > 0 ? `?start=${Math.round(startSeconds)}` : '';
+
+  // 1. First attempt direct connection to local backend machine (fastest, zero download prompt)
   try {
-    const res = await fetch(`${getApiBase()}/media/${mediaId}/open-vlc`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Failed to open VLC');
-    return { success: true, message: data.message || 'VLC launched on device' };
-  } catch (err: any) {
-    return { success: false, message: err.message || 'Could not launch VLC' };
+    const localRes = await fetch(`http://127.0.0.1:8000/media/${mediaId}/open-vlc${qs}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(1200),
+    });
+    if (localRes.ok) {
+      const data = await localRes.json();
+      return { success: true, message: data.message || 'Playing in VLC on PC' };
+    }
+  } catch {}
+
+  // 2. Fallback to configured API base if different
+  if (!getApiBase().includes('127.0.0.1') && !getApiBase().includes('localhost')) {
+    try {
+      const res = await fetch(`${getApiBase()}/media/${mediaId}/open-vlc${qs}`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(2000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, message: data.message || 'Playing in VLC' };
+      }
+    } catch {}
   }
+
+  return { success: false, message: 'Local VLC launcher unavailable' };
 }
 
 export function formatBytes(bytes: number): string {

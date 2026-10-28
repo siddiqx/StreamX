@@ -8,7 +8,7 @@ import {
   getStreamUrl,
   openVlcOnHost
 } from '../api';
-import { startWatchSession } from './watchHistory';
+import { startWatchSession, getWatchProgress } from './watchHistory';
 
 export interface PlayerSettings {
   defaultPlayer: 'vlc';
@@ -49,6 +49,12 @@ export async function launchVlcWithTracking(
   item: MediaItem,
   onStatusUpdate?: (status: string) => void
 ): Promise<{ success: boolean; message: string }> {
+  // Check existing watch progress for resume
+  const progress = getWatchProgress(item.id);
+  const resumeSecs = (progress && !progress.completed && progress.progressSeconds >= 15 && progress.progressPercentage < 90)
+    ? progress.progressSeconds
+    : 0;
+
   // 1. Record in persistent watch history and initiate session
   startWatchSession(item);
 
@@ -56,24 +62,25 @@ export async function launchVlcWithTracking(
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
   const isIos = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent);
 
-  const toastMessage = `Opening in VLC...`;
+  const toastMessage = resumeSecs > 0 ? `Resuming in VLC (${progress?.progressPercentage}%)...` : `Opening in VLC...`;
   if (onStatusUpdate) onStatusUpdate(toastMessage);
 
   // Notify UI toast
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('streamx_toast', {
-        detail: { message: `Opening "${title}" in VLC...`, type: 'play' },
+        detail: { message: toastMessage, type: 'play' },
       })
     );
   }
 
-  // 2. Android Launch (Intent directly launches VLC app with native hardware decode)
+  // 2. Android Launch (Intent directly launches VLC app with resume offset)
   if (isAndroid) {
     const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
     const rawUrl = streamUrl.replace(/^https?:\/\//, '');
     const scheme = streamUrl.startsWith('https') ? 'https' : 'http';
-    const intentUrl = `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};S.title=${encodeURIComponent(title)};end`;
+    const posParam = resumeSecs > 0 ? `i.position=${resumeSecs * 1000};` : '';
+    const intentUrl = `intent://${rawUrl}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;scheme=${scheme};S.title=${encodeURIComponent(title)};${posParam}end`;
     
     // Direct browser navigation triggers Android intent without popup blockage
     window.location.href = intentUrl;
@@ -97,75 +104,22 @@ export async function launchVlcWithTracking(
   }
 
   // 4. Desktop (Windows / Mac / Linux)
-  const isLocalHost = typeof window !== 'undefined' && (
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1' ||
-    window.location.hostname === '0.0.0.0'
-  );
+  // Try direct host OS launch via local backend first (0ms latency, automatic local process spawn)
+  try {
+    const hostRes = await openVlcOnHost(item.id, resumeSecs);
+    if (hostRes.success) {
+      if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
+      return hostRes;
+    }
+  } catch {}
 
-  // If connected to local backend machine, launch VLC directly on the OS
-  if (isLocalHost) {
-    try {
-      const hostRes = await openVlcOnHost(item.id);
-      if (hostRes.success) {
-        if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
-        return hostRes;
-      }
-    } catch {}
-  }
-
-  // Cloud production (Vercel) & remote stream launcher:
+  // Remote / Web launch via direct protocol handler (NO DOWNLOAD SCREEN)
   const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
+  const vlcProto = `vlc://${streamUrl}`;
 
-  // 1. Generate instant client-side M3U playlist file with avformat demuxer & 800ms low-latency caching
-  const cleanTitle = (title || item.filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim();
-  const m3uTitle = cleanTitle.replace(/,/g, ' -');
-  const m3uContent = (
-    `#EXTM3U\n` +
-    `#EXTINF:-1,${m3uTitle}\n` +
-    `#EXTVLCOPT:demux=avformat\n` +
-    `#EXTVLCOPT:network-caching=800\n` +
-    `#EXTVLCOPT:sout-mux-caching=800\n` +
-    `#EXTVLCOPT:file-caching=800\n` +
-    `#EXTVLCOPT:clock-jitter=0\n` +
-    `#EXTVLCOPT:clock-synchro=0\n` +
-    `#EXTVLCOPT:http-reconnect=true\n` +
-    `${streamUrl}\n`
-  );
+  // Direct protocol launch opens VLC directly without triggering a browser file download dialog
+  window.location.href = vlcProto;
 
-  try {
-    const blob = new Blob([m3uContent], { type: 'application/x-mpegurl;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
-    const safeFilename = cleanTitle.replace(/[/\\?%*:|"<>]/g, '_') || 'stream';
-
-    const m3uLink = document.createElement('a');
-    m3uLink.href = blobUrl;
-    m3uLink.download = `${safeFilename}.m3u`;
-    document.body.appendChild(m3uLink);
-    m3uLink.click();
-
-    setTimeout(() => {
-      try {
-        document.body.removeChild(m3uLink);
-        URL.revokeObjectURL(blobUrl);
-      } catch {}
-    }, 1500);
-  } catch {}
-
-  // 2. Safe protocol launch via hidden iframe (avoids cancelling page navigation or downloads)
-  try {
-    const vlcProto = `vlc://${streamUrl}`;
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = vlcProto;
-    document.body.appendChild(iframe);
-    setTimeout(() => {
-      try {
-        document.body.removeChild(iframe);
-      } catch {}
-    }, 2000);
-  } catch {}
-
-  if (onStatusUpdate) onStatusUpdate('✓ VLC Stream Ready');
+  if (onStatusUpdate) onStatusUpdate('✓ Opening in VLC');
   return { success: true, message: 'Opening in VLC...' };
 }
