@@ -889,18 +889,6 @@ export default {
       }
 
       if (isStream) {
-        if (isCompatibleStream) {
-          return new Response(
-            JSON.stringify({
-              error: "Universal compatible streaming requires the StreamX backend to be online.",
-              detail: "Edge direct streaming handles standard media files. Please use direct stream or VLC player when the backend is offline.",
-            }),
-            {
-              status: 503,
-              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
-            }
-          );
-        }
         const { driveId, filename } = await resolveMediaItem();
         if (driveId) {
           return await streamDirectFromDrive(driveId, filename);
@@ -1093,18 +1081,6 @@ export default {
       }
 
       if (isStream) {
-        if (isCompatibleStream) {
-          return new Response(
-            JSON.stringify({
-              error: "Universal compatible streaming requires the StreamX backend to be online.",
-              detail: "Edge direct streaming handles standard media files. Please use direct stream or VLC player when the backend is offline.",
-            }),
-            {
-              status: 503,
-              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
-            }
-          );
-        }
         const { driveId, filename } = await resolveMediaItem();
         if (driveId) {
           return await streamDirectFromDrive(driveId, filename);
