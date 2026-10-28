@@ -99,7 +99,7 @@ async function getLiveBackendUrl(env) {
   // 1. Check explicit environment variable (STREAMX_BACKEND_URL or BACKEND_URL)
   const envBackend = (env?.STREAMX_BACKEND_URL || env?.BACKEND_URL || "").trim().replace(/\/+$/, "");
   if (envBackend && isValidBackendUrl(envBackend)) {
-    if (!envBackend.includes(".trycloudflare.com") || (await isBackendAlive(envBackend, 2000))) {
+    if (await isBackendAlive(envBackend, 1500)) {
       dynamicBackendUrl = envBackend;
       lastTunnelFetch = now;
       return dynamicBackendUrl;
@@ -546,6 +546,7 @@ async function handleTelegramWebhook(request, env, rawBase) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const path = url.pathname;
     const origin = request.headers.get("Origin") || "*";
 
     // Handle CORS preflight
@@ -561,6 +562,8 @@ export default {
         },
       });
     }
+
+    try {
 
     // Dynamic tunnel registration endpoint from authenticated local server
     if ((url.pathname === "/system/tunnel" || url.pathname === "/api/system/tunnel") && request.method === "POST") {
@@ -674,6 +677,7 @@ export default {
     const isTransfers = url.pathname === "/transfers" || url.pathname === "/api/transfers";
     const isHealth = url.pathname === "/health" || url.pathname === "/system/status" || url.pathname === "/api/health";
     const isOpenVlc = url.pathname.includes("/open-vlc");
+    const isWatchProgress = url.pathname.includes("/watch-progress");
     const driveIdParam = url.searchParams.get("drive_id");
 
     // Extract media ID from path if present
@@ -962,12 +966,13 @@ export default {
           const cleanDriveId = rfc3986Encode(driveId);
           const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
           const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
+          const safeAscii = cleanTitle.replace(/[^a-zA-Z0-9._-]/g, '_');
           const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
           return new Response(m3u, {
             status: 200,
             headers: {
               "Content-Type": "application/x-mpegurl; charset=utf-8",
-              "Content-Disposition": `attachment; filename="${cleanEncoded}.m3u"`,
+              "Content-Disposition": `attachment; filename="${safeAscii}.m3u"; filename*=UTF-8''${cleanEncoded}.m3u`,
               "Access-Control-Allow-Origin": origin,
               "Access-Control-Allow-Credentials": "true",
             },
@@ -996,12 +1001,13 @@ export default {
         const cleanDriveId = rfc3986Encode(driveId);
         const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
         const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
+        const safeAscii = cleanTitle.replace(/[^a-zA-Z0-9._-]/g, '_');
         const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
         return new Response(m3u, {
           status: 200,
           headers: {
             "Content-Type": "application/x-mpegurl; charset=utf-8",
-            "Content-Disposition": `attachment; filename="${cleanEncoded}.m3u"`,
+            "Content-Disposition": `attachment; filename="${safeAscii}.m3u"; filename*=UTF-8''${cleanEncoded}.m3u`,
             "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
             "Cache-Control": "no-cache",
@@ -1127,6 +1133,55 @@ export default {
         );
       }
 
+      if (isWatchProgress) {
+        if (request.method === "GET") {
+          return new Response(JSON.stringify(Array.from(edgeWatchProgress.values())), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": origin,
+              "Access-Control-Allow-Credentials": "true",
+            },
+          });
+        }
+        if (request.method === "POST") {
+          try {
+            const body = await request.clone().json();
+            if (url.pathname.endsWith("/sync") && Array.isArray(body)) {
+              for (const item of body) {
+                if (item.media_id) edgeWatchProgress.set(item.media_id, item);
+              }
+              return new Response(JSON.stringify(Array.from(edgeWatchProgress.values())), {
+                status: 200,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Access-Control-Allow-Origin": origin,
+                  "Access-Control-Allow-Credentials": "true",
+                },
+              });
+            } else if (body && body.media_id) {
+              edgeWatchProgress.set(body.media_id, body);
+              return new Response(JSON.stringify(body), {
+                status: 200,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Access-Control-Allow-Origin": origin,
+                  "Access-Control-Allow-Credentials": "true",
+                },
+              });
+            }
+          } catch (_) {}
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": origin,
+              "Access-Control-Allow-Credentials": "true",
+            },
+          });
+        }
+      }
+
       if (isOpenVlc) {
         return new Response(
           JSON.stringify({
@@ -1175,6 +1230,24 @@ export default {
         {
           status: 200,
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        }
+      );
+    }
+  } catch (fatalError) {
+    console.error("StreamX Edge Uncaught Fatal Exception:", fatalError);
+      return new Response(
+        JSON.stringify({
+          error: "Edge runtime exception",
+          detail: fatalError?.message || String(fatalError),
+          edge: "StreamX 24/7 Cloudflare Gateway",
+        }),
+        {
+          status: 500,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+          },
         }
       );
     }
