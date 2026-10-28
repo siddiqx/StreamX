@@ -327,13 +327,19 @@ export function getVlcIntentUrl(mediaId: number, title?: string, driveFileId?: s
 }
 
 export async function openVlcOnHost(mediaId: number, startSeconds?: number): Promise<{ success: boolean; message: string }> {
+  // If running in browser under remote HTTPS, browser blocks http://127.0.0.1 (Mixed Content)
+  // and cloud edge workers cannot spawn desktop applications. Return immediately in 0ms.
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return { success: false, message: 'Local launcher unavailable on remote origin' };
+  }
+
   const qs = startSeconds && startSeconds > 0 ? `?start=${Math.round(startSeconds)}` : '';
 
   // 1. First attempt direct connection to local backend machine (fastest, zero download prompt)
   try {
     const localRes = await fetch(`http://127.0.0.1:8000/media/${mediaId}/open-vlc${qs}`, {
       method: 'POST',
-      signal: AbortSignal.timeout(1200),
+      signal: AbortSignal.timeout(800),
     });
     if (localRes.ok) {
       const data = await localRes.json();
@@ -341,12 +347,13 @@ export async function openVlcOnHost(mediaId: number, startSeconds?: number): Pro
     }
   } catch {}
 
-  // 2. Fallback to configured API base if different
-  if (!getApiBase().includes('127.0.0.1') && !getApiBase().includes('localhost')) {
+  // 2. Fallback to configured API base only if local
+  const base = getApiBase();
+  if (base.includes('127.0.0.1') || base.includes('localhost')) {
     try {
-      const res = await fetch(`${getApiBase()}/media/${mediaId}/open-vlc${qs}`, {
+      const res = await fetch(`${base}/media/${mediaId}/open-vlc${qs}`, {
         method: 'POST',
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(800),
       });
       if (res.ok) {
         const data = await res.json();

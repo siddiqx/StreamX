@@ -199,7 +199,7 @@ async def test_apostrophe_and_special_char_m3u_stream():
                 # M3U stream URL must have %27 for apostrophe
                 assert "%27" in m3u_text
                 # Must contain low-latency caching hints for VLC
-                assert "network-caching=3000" in m3u_text
+                assert "network-caching=1500" in m3u_text
                 assert "video-track=0" in m3u_text
                 assert "http-reconnect=true" in m3u_text
     finally:

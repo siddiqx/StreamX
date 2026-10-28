@@ -30,6 +30,19 @@ let googleTokenExpiry = 0;
 let cachedCatalog = null;
 let cachedCatalogTime = 0;
 
+// Fast in-memory catalog item resolver (0ms latency, zero external API queries)
+function getFastCatalogItem(predicate) {
+  if (Array.isArray(cachedCatalog) && cachedCatalog.length > 0) {
+    const found = cachedCatalog.find(predicate);
+    if (found) return found;
+  }
+  if (Array.isArray(embeddedSnapshot) && embeddedSnapshot.length > 0) {
+    const found = embeddedSnapshot.find(predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
 // Dynamic edge transfers queue (tracks files received while backend is offline)
 const edgeTransfersQueue = [];
 const MAX_EDGE_QUEUE = 50;
@@ -680,6 +693,20 @@ export default {
     const isWatchProgress = url.pathname.includes("/watch-progress");
     const driveIdParam = url.searchParams.get("drive_id");
 
+    // Fast-path: /open-vlc on remote worker edge returns 404 in 0ms without proxying to dead backend
+    if (isOpenVlc) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          detail: "Desktop backend is running remotely on edge. Use M3U stream launcher for VLC.",
+        }),
+        {
+          status: 404,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        }
+      );
+    }
+
     // Extract media ID from path if present
     const mediaIdMatch = url.pathname.match(/\/media\/(\d+)/);
     const mediaId = mediaIdMatch ? parseInt(mediaIdMatch[1], 10) : 0;
@@ -728,11 +755,10 @@ export default {
         };
 
         // Fast HEAD probe: VLC and video players probe headers before fetching bytes.
-        // If catalog has the item size, reply in 0ms without waiting for Google Drive roundtrip.
+        // Fulfill in 0ms directly from in-memory snapshot without waiting for external API queries.
         if (request.method === "HEAD") {
           try {
-            const catalog = await getDynamicCatalog(env);
-            const item = catalog.find((x) => x.drive_file_id === driveFileId || (mediaId > 0 && x.id === mediaId));
+            const item = getFastCatalogItem((x) => x.drive_file_id === driveFileId || (mediaId > 0 && x.id === mediaId));
             if (item && item.size) {
               const h = new Headers();
               const ctype = targetFilename.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/x-matroska";
@@ -756,10 +782,6 @@ export default {
           let driveRes = await fetch(driveUrl, {
             method: request.method,
             headers: getStreamHeaders(token),
-            cf: {
-              cacheEverything: true,
-              cacheTtl: 86400,
-            },
           });
 
           if (driveRes.status === 401) {
@@ -834,14 +856,20 @@ export default {
         }
       }
       if (!resolvedDriveId && mediaId > 0) {
-        try {
-          const catalogData = await getDynamicCatalog(env);
-          const item = catalogData.find((x) => x.id === mediaId);
-          if (item) {
-            resolvedDriveId = item.drive_file_id;
-            if (item.filename && resolvedFilename === "stream.mkv") resolvedFilename = item.filename;
-          }
-        } catch (_) {}
+        const fastItem = getFastCatalogItem((x) => x.id === mediaId);
+        if (fastItem) {
+          resolvedDriveId = fastItem.drive_file_id;
+          if (fastItem.filename && resolvedFilename === "stream.mkv") resolvedFilename = fastItem.filename;
+        } else {
+          try {
+            const catalogData = await getDynamicCatalog(env);
+            const item = catalogData.find((x) => x.id === mediaId);
+            if (item) {
+              resolvedDriveId = item.drive_file_id;
+              if (item.filename && resolvedFilename === "stream.mkv") resolvedFilename = item.filename;
+            }
+          } catch (_) {}
+        }
       }
       return { driveId: resolvedDriveId, filename: resolvedFilename };
     };
@@ -967,7 +995,7 @@ export default {
           const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
           const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
           const safeAscii = cleanTitle.replace(/[^a-zA-Z0-9._-]/g, '_');
-          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=1500\n#EXTVLCOPT:sout-mux-caching=1500\n#EXTVLCOPT:file-caching=1500\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
           return new Response(m3u, {
             status: 200,
             headers: {
@@ -1002,7 +1030,7 @@ export default {
         const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
         const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
         const safeAscii = cleanTitle.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=1500\n#EXTVLCOPT:sout-mux-caching=1500\n#EXTVLCOPT:file-caching=1500\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
         return new Response(m3u, {
           status: 200,
           headers: {

@@ -105,14 +105,22 @@ export async function launchVlcWithTracking(
   }
 
   // 4. Desktop (Windows / Mac / Linux)
-  // Try direct host OS launch via local backend first (0ms latency, automatic local process spawn)
-  try {
-    const hostRes = await openVlcOnHost(item.id, resumeSecs);
-    if (hostRes.success) {
-      if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
-      return hostRes;
-    }
-  } catch {}
+  // Try direct host OS launch via local backend ONLY when accessing on localhost (0ms latency, avoids 3.2s freeze on web)
+  const isLocalHost = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '0.0.0.0'
+  );
+
+  if (isLocalHost) {
+    try {
+      const hostRes = await openVlcOnHost(item.id, resumeSecs);
+      if (hostRes.success) {
+        if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
+        return hostRes;
+      }
+    } catch {}
+  }
 
   // Remote / Web launch via direct M3U stream launcher (Universal VLC launch without broken vlc://)
   const playlistUrl = getPlaylistUrl(item.id, item.drive_file_id, item.filename);

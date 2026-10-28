@@ -809,8 +809,8 @@ async def open_in_vlc(
         vlc_bin,
         "--no-qt-privacy-ask",
         "--video-track=0",
-        "--network-caching=3000",
-        "--file-caching=3000",
+        "--network-caching=1500",
+        "--file-caching=1500",
         "--http-reconnect",
     ]
     if start > 0:
@@ -860,9 +860,9 @@ async def get_m3u_playlist(
         f"#EXTM3U\n"
         f"#EXTINF:-1,{safe_m3u_title}\n"
         f"#EXTVLCOPT:video-track=0\n"
-        f"#EXTVLCOPT:network-caching=3000\n"
-        f"#EXTVLCOPT:sout-mux-caching=3000\n"
-        f"#EXTVLCOPT:file-caching=3000\n"
+        f"#EXTVLCOPT:network-caching=1500\n"
+        f"#EXTVLCOPT:sout-mux-caching=1500\n"
+        f"#EXTVLCOPT:file-caching=1500\n"
         f"#EXTVLCOPT:http-reconnect=true\n"
         f"{stream_url}\n"
     )
