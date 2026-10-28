@@ -78,26 +78,30 @@ def main():
             input=val,
             text=True,
             capture_output=True,
+            encoding="utf-8",
+            errors="replace",
             env=env_os,
             cwd=str(ROOT_DIR),
         )
         if p.returncode == 0:
-            print(f"  ✓ Secret {key} configured.")
+            print(f"  [OK] Secret {key} configured.")
         else:
-            print(f"  ✗ Failed to configure {key}: {p.stderr}")
+            print(f"  [FAIL] Failed to configure {key}: {p.stderr}")
 
     print("\nDeploying updated Cloudflare Worker...")
     p_dep = subprocess.run(
         [NPX_CMD, "wrangler", "deploy"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env=env_os,
         cwd=str(ROOT_DIR),
     )
     if p_dep.returncode == 0:
-        print("✓ Cloudflare Worker deployed successfully.")
+        print("[OK] Cloudflare Worker deployed successfully.")
     else:
-        print(f"✗ Wrangler deploy failed:\n{p_dep.stderr}")
+        print(f"[FAIL] Wrangler deploy failed:\n{p_dep.stderr}")
 
     print("\nTesting live edge stream endpoint...")
     test_url = "https://streamx-worker.siddiqsiddiq00012.workers.dev/media/76/stream/test.mkv?drive_id=1TlpXTJh9acSIrQ6bKvzoYtA9eAc8_pPU"
@@ -108,9 +112,9 @@ def main():
     print(f"Bytes received: {len(test_resp.content)}")
 
     if test_resp.status_code in (200, 206) and len(test_resp.content) > 0:
-        print("\n🎉 ALL STREAMING CHANNELS OPERATIONAL!")
+        print("\nALL STREAMING CHANNELS OPERATIONAL!")
     else:
-        print(f"\n⚠️ Unexpected response: {test_resp.text[:300]}")
+        print(f"\nUnexpected response: {test_resp.text[:300]}")
 
 
 if __name__ == "__main__":
