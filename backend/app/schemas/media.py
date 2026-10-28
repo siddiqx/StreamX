@@ -58,6 +58,7 @@ class MediaResponse(BaseModel):
     episode: Optional[int] = None
     quality: Optional[str] = None
     release_group: Optional[str] = None
+    series_key: Optional[str] = None
 
     # Enriched metadata fields
     metadata_entity_id: Optional[int] = None

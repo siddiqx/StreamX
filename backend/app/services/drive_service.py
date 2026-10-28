@@ -544,6 +544,7 @@ class GoogleDriveService:
                         episode=parsed_tech.episode,
                         quality=parsed_tech.quality,
                         release_group=parsed_tech.release_group,
+                        series_key=metadata_service.get_series_key(name),
                         metadata_status=MetadataStatus.PENDING,
                     )
                     session.add(item)

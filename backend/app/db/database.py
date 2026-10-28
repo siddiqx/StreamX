@@ -66,6 +66,7 @@ def _migrate_schema_sync(connection):
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_series_key ON media (series_key)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_metadata_status ON media (metadata_status)")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_media_media_type ON media (media_type)")
+        connection.exec_driver_sql("UPDATE media SET series_key = 'canonical_' || (SELECT provider FROM metadata_entities WHERE metadata_entities.id = media.metadata_entity_id) || '_' || (SELECT provider_id FROM metadata_entities WHERE metadata_entities.id = media.metadata_entity_id) WHERE series_key IS NULL AND metadata_entity_id IS NOT NULL")
 
     res = connection.exec_driver_sql("PRAGMA table_info(telegram_transfers)").fetchall()
     transfer_cols = {row[1] for row in res}

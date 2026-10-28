@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     TELEGRAM_API_HASH: Optional[str] = Field(default=None, description="Telegram MTProto API Hash")
     TELEGRAM_SESSION_STRING: Optional[str] = Field(default=None, description="Telegram MTProto Session String")
     TELEGRAM_ALLOWED_USER_IDS: Optional[str] = Field(
-        default="8142877259,7344705202,8640979779",
+        default=None,
         description="Comma-separated user IDs allowed to interact with the bot",
     )
     # Telegram Media Relay: the MTProto worker runs under ONE user account (owner)
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
         default=None, description="Channel/group (username or ID) for bot->MTProto media relay"
     )
     TELEGRAM_OWNER_USER_ID: Optional[int] = Field(
-        default=8142877259, description="Owner Telegram user ID (MTProto session owner). Forward fallback target."
+        default=None, description="Owner Telegram user ID (MTProto session owner). Forward fallback target."
     )
     TELEGRAM_WEBHOOK_SECRET: Optional[str] = Field(
         default=None, description="Secret token to authenticate incoming Telegram webhook requests"
@@ -88,7 +88,7 @@ class Settings(BaseSettings):
 
     @property
     def allowed_telegram_users(self) -> List[int]:
-        users: List[int] = [8142877259, 7344705202, 8640979779]
+        users: List[int] = []
         if self.TELEGRAM_OWNER_USER_ID and self.TELEGRAM_OWNER_USER_ID not in users:
             users.append(self.TELEGRAM_OWNER_USER_ID)
         if self.TELEGRAM_ALLOWED_USER_IDS:

@@ -71,3 +71,8 @@ Thumbs.db
 scratch/
 temp_downloads/
 tools/
+*.tmp
+scripts/*.tmp
+test_*.db
+.wrangler/
+.agents/

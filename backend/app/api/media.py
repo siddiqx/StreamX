@@ -94,6 +94,7 @@ def format_media_item(item: Media) -> MediaResponse:
         episode=item.episode,
         quality=item.quality,
         release_group=item.release_group,
+        series_key=item.series_key,
         metadata_entity_id=item.metadata_entity_id,
         metadata_status=item.metadata_status.value if hasattr(item.metadata_status, "value") else str(item.metadata_status),
         metadata_confidence=item.metadata_confidence,
@@ -657,6 +658,7 @@ async def stream_compatible_media(
     request: Request,
     start: float = Query(0.0, ge=0.0, description="Seek start position in seconds"),
     mode: str = Query("auto", description="Streaming strategy: 'auto', 'remux', or 'transcode'"),
+    drive_id: Optional[str] = Query(None, description="Direct Google Drive file ID"),
     db: AsyncSession = Depends(get_db),
 ):
     """Stream media on-the-fly as fragmented MP4 for 100% universal browser playback.
@@ -671,12 +673,16 @@ async def stream_compatible_media(
     stmt = select(Media).where(Media.id == media_id)
     result = await db.execute(stmt)
     item = result.scalar_one_or_none()
-    if not item:
+
+    drive_file_id = drive_id or (item.drive_file_id if item else None)
+    if not drive_file_id:
         raise HTTPException(status_code=404, detail="Media item not found")
+
+    filename = item.filename if item else "media.mkv"
 
     headers = {
         "Content-Type": "video/mp4",
-        "Content-Disposition": make_content_disposition("inline", f"{item.filename}.mp4"),
+        "Content-Disposition": make_content_disposition("inline", f"{filename}.mp4"),
         "Accept-Ranges": "none",
         "Cache-Control": "no-cache",
     }
@@ -686,9 +692,9 @@ async def stream_compatible_media(
         return Response(content=b"", status_code=200, headers=headers)
 
     creds = await drive_service.get_credentials()
-    drive_url = f"https://www.googleapis.com/drive/v3/files/{item.drive_file_id}?alt=media"
+    drive_url = f"https://www.googleapis.com/drive/v3/files/{drive_file_id}?alt=media"
 
-    codecs = await probe_media_codecs(item.drive_file_id, creds.token)
+    codecs = await probe_media_codecs(drive_file_id, creds.token)
     v_codec = codecs.get("video", "h264")
     a_codec = codecs.get("audio", "opus")
     pix_fmt = codecs.get("pix_fmt", "yuv420p")

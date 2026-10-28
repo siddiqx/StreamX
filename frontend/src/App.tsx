@@ -309,7 +309,21 @@ export const App: React.FC = () => {
 
   // Direct Playback Router: Directly launches VLC Media Player
   const handlePlayMedia = (item: MediaItem) => {
-    launchVlcWithTracking(item);
+    const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isLocal = typeof window !== 'undefined' && (
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1'
+    );
+    if (isMobile || isLocal) {
+      launchVlcWithTracking(item);
+  
+    } else {
+      setSelectedMedia(null);
+      setSelectedGroup(null);
+      setPlayingMedia(item);
+    }
+    return;
+
   };
 
   return (
@@ -415,6 +429,11 @@ export const App: React.FC = () => {
         isOffline={selectedMedia ? offlineIds.has(selectedMedia.id) : false}
         onStartDownload={handleStartDownload}
         onDeleteDownload={handleDeleteDownload}
+        onPlayInBrowser={(browserItem) => {
+          setSelectedMedia(null);
+          setSelectedGroup(null);
+          setPlayingMedia(browserItem);
+        }}
         deviceFreeBytes={deviceFreeBytes}
         onItemUpdated={(updated) => {
           setSelectedMedia(updated);

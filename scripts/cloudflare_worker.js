@@ -47,6 +47,21 @@ function isDuplicateUpdate(updateId) {
   return false;
 }
 
+const DEFAULT_FALLBACK_BACKEND_URL = "https://streamx-backend-cqm0.onrender.com";
+
+async function isBackendAlive(baseUrl, timeoutMs = 2000) {
+  if (!baseUrl) return false;
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return res.ok || res.status === 200 || res.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 function isValidBackendUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== "string") return false;
   try {
@@ -75,28 +90,40 @@ async function getLiveBackendUrl(env) {
   if (dynamicBackendUrl && (now - lastTunnelFetch < 30000)) {
     return dynamicBackendUrl;
   }
-  if (env?.BACKEND_URL && env.BACKEND_URL.trim()) {
-    const candidate = env.BACKEND_URL.trim().replace(/\/+$/, "");
-    if (isValidBackendUrl(candidate)) {
-      dynamicBackendUrl = candidate;
+
+  // 1. Check explicit environment variable (STREAMX_BACKEND_URL or BACKEND_URL)
+  const envBackend = (env?.STREAMX_BACKEND_URL || env?.BACKEND_URL || "").trim().replace(/\/+$/, "");
+  if (envBackend && isValidBackendUrl(envBackend)) {
+    if (!envBackend.includes(".trycloudflare.com") || (await isBackendAlive(envBackend, 2000))) {
+      dynamicBackendUrl = envBackend;
       lastTunnelFetch = now;
       return dynamicBackendUrl;
     }
   }
+
+  // 2. Check dynamic cloudflare tunnel registered via active_tunnel.txt
   try {
     const res = await fetch("https://raw.githubusercontent.com/siddiqx/StreamX/main/active_tunnel.txt", {
       headers: { "Cache-Control": "no-cache" },
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(2500),
     });
     if (res.ok) {
-      const txt = (await res.text()).trim();
-      if (txt && isValidBackendUrl(txt)) {
-        dynamicBackendUrl = txt.replace(/\/+$/, "");
+      const txt = (await res.text()).trim().replace(/\/+$/, "");
+      if (txt && isValidBackendUrl(txt) && (await isBackendAlive(txt, 2000))) {
+        dynamicBackendUrl = txt;
         lastTunnelFetch = now;
         return dynamicBackendUrl;
       }
     }
   } catch (_) {}
+
+  // 3. Fallback to permanent cloud backend (Render)
+  if (DEFAULT_FALLBACK_BACKEND_URL && isValidBackendUrl(DEFAULT_FALLBACK_BACKEND_URL)) {
+    dynamicBackendUrl = DEFAULT_FALLBACK_BACKEND_URL;
+    lastTunnelFetch = now;
+    return dynamicBackendUrl;
+  }
+
   return "";
 }
 
@@ -211,7 +238,7 @@ async function getDynamicCatalog(env) {
             if (matched) {
               return {
                 ...matched,
-                id: idx + 1,
+                id: matched.id || (idx + 1),
                 drive_file_id: f.id,
                 filename: fname,
                 size: size,
@@ -626,6 +653,7 @@ export default {
     }
 
     const isStream = url.pathname.includes("/stream");
+    const isCompatibleStream = url.pathname.includes("/stream/compatible");
     const isPlaylist = url.pathname.includes("/playlist.m3u");
     const isCatalog = url.pathname === "/media" || url.pathname === "/api/media";
     const isTransfers = url.pathname === "/transfers" || url.pathname === "/api/transfers";
@@ -663,7 +691,7 @@ export default {
           resHeaders.set("Accept-Ranges", "bytes");
 
           let ctype = resHeaders.get("Content-Type") || "";
-          if (!ctype || ctype.includes("octet-stream") || ctype.includes("x-download") || ctype.includes("text/html")) {
+          if (!ctype || ctype.includes("octet-stream") || ctype.includes("x-download") || ctype.includes("application/")) {
             ctype = targetFilename.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/x-matroska";
             resHeaders.set("Content-Type", ctype);
           }
@@ -720,7 +748,10 @@ export default {
           }
 
           if (driveRes.ok || driveRes.status === 206) {
-            return formatMediaResponse(driveRes);
+            const driveCtype = driveRes.headers.get("Content-Type") || "";
+            if (!driveCtype.includes("text/html")) {
+              return formatMediaResponse(driveRes);
+            }
           }
         }
 
@@ -769,7 +800,7 @@ export default {
       let resolvedDriveId = driveIdParam;
       let resolvedFilename = url.searchParams.get("filename") || "stream.mkv";
       const pathFileMatch = url.pathname.match(/\/stream\/(.+)$/);
-      if (pathFileMatch && pathFileMatch[1]) {
+      if (pathFileMatch && pathFileMatch[1] && pathFileMatch[1] !== "compatible") {
         try {
           resolvedFilename = decodeURIComponent(pathFileMatch[1]);
         } catch (_) {
@@ -846,6 +877,18 @@ export default {
       }
 
       if (isStream) {
+        if (isCompatibleStream) {
+          return new Response(
+            JSON.stringify({
+              error: "Universal compatible streaming requires the StreamX backend to be online.",
+              detail: "Edge direct streaming handles standard media files. Please use direct stream or VLC player when the backend is offline.",
+            }),
+            {
+              status: 503,
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+            }
+          );
+        }
         const { driveId, filename } = await resolveMediaItem();
         if (driveId) {
           return await streamDirectFromDrive(driveId, filename);
@@ -908,7 +951,7 @@ export default {
     }
 
     // Fast-path: video streams stream directly from Google Drive if worker token is active, otherwise forward to live backend
-    if (isStream) {
+    if (isStream && !isCompatibleStream) {
       const { driveId, filename } = await resolveMediaItem();
       if (driveId) {
         const directRes = await streamDirectFromDrive(driveId, filename);
@@ -1038,6 +1081,18 @@ export default {
       }
 
       if (isStream) {
+        if (isCompatibleStream) {
+          return new Response(
+            JSON.stringify({
+              error: "Universal compatible streaming requires the StreamX backend to be online.",
+              detail: "Edge direct streaming handles standard media files. Please use direct stream or VLC player when the backend is offline.",
+            }),
+            {
+              status: 503,
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+            }
+          );
+        }
         const { driveId, filename } = await resolveMediaItem();
         if (driveId) {
           return await streamDirectFromDrive(driveId, filename);

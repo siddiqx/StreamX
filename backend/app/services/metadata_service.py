@@ -40,6 +40,19 @@ class MetadataService:
         self.provider = tmdb_provider
         self.anilist_provider = anilist_provider
 
+    async def _trigger_snapshot_export(self) -> None:
+        """Helper to invoke catalog snapshot export non-blockingly."""
+        try:
+            from pathlib import Path
+            import sys
+            repo_root = Path(__file__).resolve().parent.parent.parent.parent
+            if str(repo_root) not in sys.path:
+                sys.path.insert(0, str(repo_root))
+            from scripts.export_snapshot import export_catalog_snapshot
+            await export_catalog_snapshot()
+        except Exception as ex:
+            logger.debug(f"Catalog snapshot trigger note: {ex}")
+
     async def enqueue_media_for_enrichment(self, media_id: int, session: Optional[AsyncSession] = None) -> MetadataJob:
         """Create or schedule a metadata job for a given media row."""
         close_session = False
@@ -462,12 +475,15 @@ class MetadataService:
                     taxonomy, cat = classify_media(parsed, None, raw_filename=m.filename, mime_type=m.mime_type)
                     m.category = cat
                     m.media_type = taxonomy.value
+
                     m.metadata_status = (
                         MetadataStatus.LOW_CONFIDENCE
                         if best_cand is not None
                         else MetadataStatus.NOT_FOUND
                     )
                     m.metadata_confidence = confidence
+                    if not m.series_key:
+                        m.series_key = self.get_series_key(m.filename, None)
                     await session.commit()
                     log_event(
                         "METADATA_MATCH_REJECTED",
@@ -512,6 +528,8 @@ class MetadataService:
                 m.category = cat
                 m.media_type = taxonomy.value
 
+
+                m.series_key = self.get_series_key(m.filename, entity)
                 # Set backwards-compatible poster and backdrop urls
                 if not m.poster_override:
                     # Refresh stale/empty cached URLs on reprocessing; never overwrite manual overrides.
@@ -553,6 +571,8 @@ class MetadataService:
                     await self.propagate_metadata_to_siblings(media_id, session=session)
                 except Exception as ex:
                     logger.warning(f"Sibling propagation failed for #{media_id}: {ex}")
+
+                asyncio.create_task(self._trigger_snapshot_export())
 
                 return True
 
@@ -819,6 +839,7 @@ class MetadataService:
 
             await session.commit()
 
+            asyncio.create_task(self._trigger_snapshot_export())
             # Apply one canonical match/artwork to every sibling episode.
             if apply_to_series:
                 await self.propagate_metadata_to_siblings(
@@ -886,6 +907,7 @@ class MetadataService:
                     media.metadata_entity_id = new_entity.id
 
             await session.commit()
+            asyncio.create_task(self._trigger_snapshot_export())
             log_event("METADATA_MANUALLY_PATCHED", media_id=media_id)
             return True
 
@@ -921,6 +943,7 @@ class MetadataService:
                             sibling.metadata_status = MetadataStatus.MANUAL
 
             await session.commit()
+            asyncio.create_task(self._trigger_snapshot_export())
             log_event("POSTER_OVERRIDE_UPDATED", media_id=media_id, poster_url=media.poster_override)
             return True
 

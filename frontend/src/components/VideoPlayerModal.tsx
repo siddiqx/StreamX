@@ -243,6 +243,18 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
 
   const handleVideoError = () => {
     setIsLoading(false);
+    if (streamMode === 'direct') {
+      console.warn('Direct stream failed in browser demuxer. Auto-falling back to Universal compatible stream...');
+      setStreamMode('universal');
+      setSeekOffset(0);
+      setCurrentTime(0);
+      setIsLoading(true);
+      if (videoRef.current && item) {
+        videoRef.current.src = getCompatibleStreamUrl(item.id, undefined, transcodeForced ? 'transcode' : 'auto', item.drive_file_id);
+        videoRef.current.play().catch(() => {});
+      }
+      return;
+    }
     setPlaybackError(
       'This stream uses advanced video/audio encoding designed for native playback.'
     );

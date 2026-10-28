@@ -684,6 +684,9 @@ class TransferWorker:
         taxonomy_type, shelf_cat = classify_media(parsed_tech, raw_filename=filename, mime_type=mime_type)
         is_media = is_media_file(filename, mime_type)
 
+        from app.services.metadata_service import metadata_service
+        initial_series_key = metadata_service.get_series_key(filename)
+
         async with AsyncSessionLocal() as session:
             media = Media(
                 drive_file_id=drive_file_id,
@@ -696,6 +699,7 @@ class TransferWorker:
                 episode=parsed_tech.episode,
                 quality=parsed_tech.quality,
                 release_group=parsed_tech.release_group,
+                series_key=initial_series_key,
             )
             session.add(media)
 
@@ -711,14 +715,13 @@ class TransferWorker:
             await session.refresh(media)
             media_id = media.id
 
-        # Auto-export updated catalog snapshot for 24/7 cloud edge availability
-        asyncio.create_task(self._auto_export_catalog_snapshot())
+        # For non-media files, export catalog immediately since no enrichment will run
+        if not is_media:
+            asyncio.create_task(self._auto_export_catalog_snapshot())
 
         # Automatically enqueue metadata enrichment job ONLY for video media
         if media_id and is_media:
             try:
-                from app.services.metadata_service import metadata_service
-
                 await metadata_service.enqueue_media_for_enrichment(media_id)
             except Exception as e:
                 logger.warning(f"Failed to enqueue metadata job for media #{media_id}: {e}")
@@ -739,33 +742,14 @@ class TransferWorker:
         )
 
     async def _auto_export_catalog_snapshot(self) -> None:
-        """Automatically dumps updated library to scripts/catalog_snapshot.json and commits/pushes to GitHub."""
+        """Atomically dumps updated library to scripts/catalog_snapshot.json with zero git side-effects."""
         try:
-            import json, subprocess
-            from app.api.media import format_media_item
-            from sqlalchemy.orm import selectinload
+            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            if repo_root not in sys.path:
+                sys.path.insert(0, repo_root)
+            from scripts.export_snapshot import export_catalog_snapshot
 
-            async with AsyncSessionLocal() as session:
-                stmt = select(Media).options(selectinload(Media.metadata_entity)).order_by(Media.id.desc())
-                items = (await session.execute(stmt)).scalars().all()
-                data = [format_media_item(i).model_dump(mode="json") for i in items]
-
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            snapshot_path = os.path.join(base_dir, "scripts", "catalog_snapshot.json")
-            with open(snapshot_path, "w", encoding="utf-8") as f:
-                json.dump(data, f)
-            logger.info(f"Auto-exported catalog snapshot: {len(data)} items")
-
-            # Non-blocking quiet background git push
-            def _quiet_push():
-                try:
-                    subprocess.run(["git", "add", "scripts/catalog_snapshot.json"], cwd=base_dir, capture_output=True, timeout=10)
-                    subprocess.run(["git", "commit", "-m", "chore: auto-sync catalog snapshot with Google Drive"], cwd=base_dir, capture_output=True, timeout=10)
-                    subprocess.run(["git", "push", "origin", "main"], cwd=base_dir, capture_output=True, timeout=15)
-                except Exception:
-                    pass
-
-            asyncio.get_event_loop().run_in_executor(None, _quiet_push)
+            await export_catalog_snapshot()
         except Exception as e:
             logger.debug(f"Catalog auto-export note: {e}")
 

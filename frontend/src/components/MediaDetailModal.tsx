@@ -46,6 +46,7 @@ export interface MediaDetailModalProps {
   onDeleteDownload: (item: MediaItem) => void;
   deviceFreeBytes: number;
   onItemUpdated?: (updatedItem: MediaItem) => void;
+  onPlayInBrowser?: (item: MediaItem) => void;
 }
 
 export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
@@ -58,6 +59,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   onDeleteDownload,
   deviceFreeBytes,
   onItemUpdated,
+  onPlayInBrowser,
 }) => {
   const [backdropError, setBackdropError] = useState(false);
   const [posterError, setPosterError] = useState(false);
@@ -100,7 +102,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     const targetItem = (isSeriesGroup && selectedEpisodeId)
       ? episodes.find(e => e.item.id === selectedEpisodeId)?.item || item
       : (isSeriesGroup && activeEpisodeTarget ? activeEpisodeTarget.ep.item : item);
-    if (!targetItem) return;
+    if (!targetItem) { return; }
     const progress = getWatchProgress(targetItem.id);
     if (progress?.completed) {
       markWatchUnwatched(targetItem.id, targetItem);
@@ -279,20 +281,36 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   const handleOpenVlcForEpisode = async (epItem: MediaItem) => {
     setSelectedEpisodeId(epItem.id);
+
     setIsLaunchingVlc(true);
     await launchVlcWithTracking(epItem, (msg) => setVlcStatus(msg));
     setIsLaunchingVlc(false);
     setTimeout(() => setVlcStatus(null), 3500);
   };
 
-  const handlePrimaryPlayAction = async () => {
-    const targetItem = activeEpisodeTarget ? activeEpisodeTarget.ep.item : (group?.episodes?.[0]?.item || item);
-    if (!targetItem) return;
-    setIsLaunchingVlc(true);
-    await launchVlcWithTracking(targetItem, (msg) => setVlcStatus(msg));
-    setIsLaunchingVlc(false);
-    setTimeout(() => setVlcStatus(null), 3500);
+  const handlePlayEpisodeInBrowser = (epItem: MediaItem) => {
+    setSelectedEpisodeId(epItem.id);
+    if (onPlayInBrowser) {
+      onPlayInBrowser(epItem);
+    } else {
+      handleOpenVlcForEpisode(epItem);
+    }
   };
+
+  const handlePrimaryPlayAction = async (preferredTarget?: 'browser' | 'vlc') => {
+    const targetItem = activeEpisodeTarget ? activeEpisodeTarget.ep.item : (group?.episodes?.[0]?.item || item);
+    if (!targetItem) { return; }
+    if (preferredTarget === 'vlc' || !onPlayInBrowser) {
+      setIsLaunchingVlc(true);
+      await launchVlcWithTracking(targetItem, (msg) => setVlcStatus(msg));
+      setIsLaunchingVlc(false);
+      setTimeout(() => setVlcStatus(null), 3500);
+    } else {
+      onPlayInBrowser(targetItem);
+      return;
+    }
+  };
+
 
   const handleOpenSearch = async () => {
     setShowSearchModal(true);
@@ -361,6 +379,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
       if (!posterOk || !backdropOk) {
         setActionMessage('Could not save one or more artwork overrides.');
         return;
+    
       }
 
       // Re-read the canonical server representation so the UI never relies on
@@ -369,6 +388,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
       if (!refreshed) {
         setActionMessage('Artwork was saved, but the updated media record could not be refreshed.');
         return;
+    
       }
 
       setActionMessage('✓ Custom artwork overrides saved and permanently locked.');
@@ -702,7 +722,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               {/* Single Play Action (Direct VLC Handoff) */}
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
-                  onClick={handlePrimaryPlayAction}
+                  onClick={() => handlePrimaryPlayAction('browser')}
                   disabled={isLaunchingVlc}
                   style={{
                     flex: 1,
@@ -738,12 +758,41 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   </div>
                   <span>
                     {isLaunchingVlc
-                      ? 'Opening in VLC...'
+                      ? 'Launching...'
                       : activeEpisodeTarget
                       ? activeEpisodeTarget.label
                       : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
                       ? `Resume Play (${watchProgress.progressPercentage}%)`
                       : 'Play'}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => handlePrimaryPlayAction('vlc')}
+                  disabled={isLaunchingVlc}
+                  title="Play directly in native VLC Media Player"
+                  style={{
+                    width: '84px',
+                    height: '52px',
+                    borderRadius: '14px',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.16)',
+                    color: '#f8fafc',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '3px',
+                    cursor: isLaunchingVlc ? 'wait' : 'pointer',
+                    transition: 'all 0.18s ease',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.13)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+                >
+                  <Tv size={16} color="#fbbf24" />
+                  <span>{isLaunchingVlc ? '...' : 'VLC'}
                   </span>
                 </button>
               </div>
@@ -1012,7 +1061,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                       <div
                         key={ep.item.id}
                         className="episode-interactive-card"
-                        onClick={() => handleOpenVlcForEpisode(ep.item)}
+                        onClick={() => handlePlayEpisodeInBrowser(ep.item)}
                         style={{
                           background: isEpActive ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255, 255, 255, 0.04)',
                           backdropFilter: 'blur(10px)',
@@ -1121,7 +1170,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
-                            onClick={() => handleOpenVlcForEpisode(ep.item)}
+                            onClick={() => handlePlayEpisodeInBrowser(ep.item)}
                             aria-label={`Play ${ep.cleanTitle}`}
                             title="Play"
                             style={{
@@ -1148,6 +1197,28 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             }}
                           >
                             <Play size={16} fill="#090d16" style={{ marginLeft: '1.5px' }} />
+                          </button>
+
+                          {/* VLC Button */}
+                          <button
+                            onClick={() => handleOpenVlcForEpisode(ep.item)}
+                            aria-label={`Play in VLC: ${ep.cleanTitle}`}
+                            title="Play in VLC"
+                            style={{
+                              width: '38px',
+                              height: '38px',
+                              borderRadius: '50%',
+                              background: 'rgba(255,255,255,0.06)',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              color: '#fbbf24',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: isLaunchingVlc ? 'wait' : 'pointer',
+                              transition: 'all 0.18s ease',
+                            }}
+                          >
+                            <Tv size={15} />
                           </button>
 
                           {/* Download Button */}
