@@ -1,10 +1,10 @@
 import os
 import sys
 
-# Ensure app package is discoverable
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-if os.path.exists(os.path.join(os.path.abspath(os.path.dirname(__file__)), "backend")):
-    sys.path.insert(0, os.path.join(os.path.abspath(os.path.dirname(__file__)), "backend"))
+# Ensure backend package is discoverable first before current dir to avoid self-import conflict
+backend_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "backend")
+if os.path.exists(backend_dir) and backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from app.main import app as fastapi_app
 
