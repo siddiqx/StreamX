@@ -709,6 +709,9 @@ export default {
           }
           const safeAsciiName = targetFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
           resHeaders.set("Content-Disposition", `inline; filename="${safeAsciiName}"; filename*=UTF-8''${rfc3986Encode(targetFilename)}`);
+          if (res.status === 206) {
+            resHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=86400");
+          }
 
           return new Response(request.method === "HEAD" ? null : res.body, {
             status: res.status,
@@ -902,7 +905,7 @@ export default {
           const cleanDriveId = rfc3986Encode(driveId);
           const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
           const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
-          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:network-caching=5000\n#EXTVLCOPT:sout-mux-caching=5000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:network-caching=1000\n#EXTVLCOPT:sout-mux-caching=1000\n#EXTVLCOPT:file-caching=1000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
           return new Response(m3u, {
             status: 200,
             headers: {
@@ -936,7 +939,7 @@ export default {
         const cleanDriveId = rfc3986Encode(driveId);
         const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
         const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
-        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:network-caching=5000\n#EXTVLCOPT:sout-mux-caching=5000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:network-caching=1000\n#EXTVLCOPT:sout-mux-caching=1000\n#EXTVLCOPT:file-caching=1000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
         return new Response(m3u, {
           status: 200,
           headers: {

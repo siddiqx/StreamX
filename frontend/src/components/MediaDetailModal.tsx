@@ -719,52 +719,64 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
             {/* Action Center: Big Streaming CTA + Frosted Toolbar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {/* Single Play Action (Direct VLC Handoff) */}
-              <div style={{ display: 'flex', gap: '10px' }}>
+              {/* Single Play Action (In-App Cinema + Native VLC Options) */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: '10px' }}>
                 <button
                   onClick={() => handlePrimaryPlayAction('browser')}
                   disabled={isLaunchingVlc}
                   style={{
-                    flex: 1,
-                    height: '52px',
+                    height: '54px',
                     borderRadius: '14px',
                     background: 'linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%)',
                     color: '#090d16',
-                    boxShadow: '0 4px 24px rgba(255,255,255,0.28), 0 2px 10px rgba(0,0,0,0.5)',
-                    fontSize: '0.96rem',
+                    boxShadow: '0 6px 26px rgba(255,255,255,0.25), 0 2px 10px rgba(0,0,0,0.5)',
+                    fontSize: '0.94rem',
                     fontWeight: 800,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '9px',
+                    gap: '10px',
                     cursor: isLaunchingVlc ? 'wait' : 'pointer',
                     border: 'none',
                     transition: 'all 0.18s ease',
-                    letterSpacing: '0.01em',
+                    padding: '0 16px',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-1px)')}
                   onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
                 >
                   <div style={{
-                    width: '26px',
-                    height: '26px',
+                    width: '28px',
+                    height: '28px',
                     borderRadius: '50%',
                     background: '#090d16',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    flexShrink: 0,
                   }}>
-                    <Play size={14} fill="#ffffff" color="#ffffff" style={{ marginLeft: '1px' }} />
+                    <Play size={15} fill="#ffffff" color="#ffffff" style={{ marginLeft: '1.5px' }} />
                   </div>
-                  <span>
-                    {isLaunchingVlc
-                      ? 'Launching...'
-                      : activeEpisodeTarget
-                      ? activeEpisodeTarget.label
-                      : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
-                      ? `Resume Play (${watchProgress.progressPercentage}%)`
-                      : 'Play'}
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden' }}>
+                    <span style={{
+                      fontSize: '0.92rem',
+                      fontWeight: 800,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '100%',
+                    }}>
+                      {isLaunchingVlc
+                        ? 'Launching...'
+                        : activeEpisodeTarget
+                        ? activeEpisodeTarget.label
+                        : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
+                        ? `Resume (${watchProgress.progressPercentage}%)`
+                        : 'Watch Now'}
+                    </span>
+                    <span style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 700, marginTop: '-1px' }}>
+                      In-App Player
+                    </span>
+                  </div>
                 </button>
 
                 <button
@@ -772,28 +784,38 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   disabled={isLaunchingVlc}
                   title="Play directly in native VLC Media Player"
                   style={{
-                    width: '84px',
-                    height: '52px',
+                    height: '54px',
                     borderRadius: '14px',
-                    background: 'rgba(255,255,255,0.08)',
-                    border: '1px solid rgba(255,255,255,0.16)',
-                    color: '#f8fafc',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
+                    background: 'linear-gradient(135deg, rgba(249,115,22,0.22) 0%, rgba(234,88,12,0.38) 100%)',
+                    border: '1.5px solid rgba(249,115,22,0.65)',
+                    boxShadow: '0 6px 20px rgba(249,115,22,0.22)',
+                    color: '#fff',
                     display: 'flex',
-                    flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '3px',
+                    gap: '9px',
                     cursor: isLaunchingVlc ? 'wait' : 'pointer',
                     transition: 'all 0.18s ease',
+                    padding: '0 14px',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.13)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(249,115,22,0.3) 0%, rgba(234,88,12,0.5) 100%)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(249,115,22,0.22) 0%, rgba(234,88,12,0.38) 100%)';
+                  }}
                 >
-                  <Tv size={16} color="#fbbf24" />
-                  <span>{isLaunchingVlc ? '...' : 'VLC'}
-                  </span>
+                  <Tv size={20} color="#fb923c" style={{ flexShrink: 0 }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#fed7aa' }}>
+                      {isLaunchingVlc ? 'Launching...' : 'VLC Player'}
+                    </span>
+                    <span style={{ fontSize: '0.64rem', color: 'rgba(253,186,116,0.8)', fontWeight: 700, marginTop: '-1px' }}>
+                      Hardware 10-Bit
+                    </span>
+                  </div>
                 </button>
               </div>
 

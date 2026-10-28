@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X, Play, Pause, RotateCcw, RotateCw, Maximize2, Minimize2,
   Tv, ExternalLink, Download, CheckCircle2,
-  Volume2, VolumeX, RefreshCw, Copy, Check
+  Volume2, VolumeX, RefreshCw, Copy, Check, ChevronLeft,
+  PictureInPicture2
 } from 'lucide-react';
 import type { MediaItem } from '../types';
 import {
@@ -29,6 +30,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   const controlsTimeoutRef = useRef<any>(null);
   const progressSaveIntervalRef = useRef<any>(null);
   const isScrubbingRef = useRef<boolean>(false);
+  const lastTapRef = useRef<{ time: number; x: number }>({ time: 0, x: 0 });
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -37,6 +39,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   const [bufferedEnd, setBufferedEnd] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
+  const [scrubPercent, setScrubPercent] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -44,6 +47,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [vlcLaunchMessage, setVlcLaunchMessage] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [doubleTapRipple, setDoubleTapRipple] = useState<'left' | 'right' | null>(null);
 
   // Default to direct zero-disk edge streaming first
   const [streamMode, setStreamMode] = useState<'direct' | 'universal'>('direct');
@@ -142,7 +146,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         if (isPlaying && !isScrubbingRef.current) {
           setShowControls(false);
         }
-      }, 4000);
+      }, 3500);
     }
   }, [isPlaying]);
 
@@ -195,6 +199,46 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
     resetControlsTimer();
   };
 
+  // Double-tap on video screen gesture (YouTube/Netflix mobile style)
+  const handleScreenTouchOrClick = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    const now = Date.now();
+    const container = containerRef.current;
+    if (!container) return;
+
+    let clientX = 0;
+    if ('touches' in e && e.touches.length > 0) {
+      clientX = e.touches[0].clientX;
+    } else if ('clientX' in e) {
+      clientX = e.clientX;
+    }
+
+    const rect = container.getBoundingClientRect();
+    const xPos = clientX - rect.left;
+    const width = rect.width;
+
+    if (now - lastTapRef.current.time < 320) {
+      // Double tap detected!
+      if (xPos < width * 0.38) {
+        // Left side -> Rewind 10s
+        seekRelative(-10);
+        setDoubleTapRipple('left');
+        setTimeout(() => setDoubleTapRipple(null), 650);
+      } else if (xPos > width * 0.62) {
+        // Right side -> Fast forward 10s
+        seekRelative(10);
+        setDoubleTapRipple('right');
+        setTimeout(() => setDoubleTapRipple(null), 650);
+      } else {
+        // Center double tap -> Toggle play/pause
+        togglePlay();
+      }
+      lastTapRef.current = { time: 0, x: 0 };
+    } else {
+      lastTapRef.current = { time: now, x: xPos };
+      resetControlsTimer();
+    }
+  };
+
   // Debounced scrub slider handlers
   const handleScrubStart = () => {
     isScrubbingRef.current = true;
@@ -206,6 +250,9 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   const handleScrubChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const target = parseFloat(e.target.value);
     setScrubValue(target);
+    if (totalDuration > 0) {
+      setScrubPercent((target / totalDuration) * 100);
+    }
   };
 
   const handleScrubCommit = () => {
@@ -234,7 +281,6 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
   // Keyboard shortcut listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if user is typing in an input field
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
       if (e.key === 'Escape') {
@@ -317,6 +363,12 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           await (c as any).webkitRequestFullscreen();
         }
         setIsFullscreen(true);
+        // Attempt landscape lock on mobile devices if supported
+        try {
+          if (screen.orientation && (screen.orientation as any).lock) {
+            (screen.orientation as any).lock('landscape').catch(() => {});
+          }
+        } catch {}
       } else {
         if (document.exitFullscreen) {
           await document.exitFullscreen();
@@ -329,6 +381,18 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       const v = videoRef.current as any;
       if (v?.webkitEnterFullscreen) v.webkitEnterFullscreen();
     }
+  };
+
+  const togglePiP = async () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (v.requestPictureInPicture) {
+        await v.requestPictureInPicture();
+      }
+    } catch {}
   };
 
   const handleVideoError = () => {
@@ -346,7 +410,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       return;
     }
     setPlaybackError(
-      'This media uses high-definition audio/video streams (MKV / 10-bit / AC3) optimized for native hardware playback.'
+      'This release contains studio-quality 10-bit MKV video / Dolby AC3 audio. For 100% full hardware decode, multi-audio tracks, and soft subtitles, launch directly in VLC.'
     );
   };
 
@@ -404,27 +468,28 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: '#05070a',
+        backgroundColor: '#000000',
         zIndex: 9999,
         display: 'flex',
-        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
         userSelect: 'none',
-        fontFamily: 'var(--font-sans, system-ui, sans-serif)',
+        fontFamily: 'var(--font-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif)',
       }}
-      onClick={resetControlsTimer}
-      onMouseMove={resetControlsTimer}
+      onClick={handleScreenTouchOrClick}
     >
       {/* Background artwork blur for cinema ambiance */}
       {(backdrop || poster) && (
         <div
           style={{
             position: 'absolute',
-            inset: 0,
+            inset: -40,
             backgroundImage: `url(${backdrop || poster})`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
-            opacity: isPlaying && !playbackError ? 0.06 : 0.22,
-            filter: 'blur(35px)',
+            opacity: isPlaying && !playbackError ? 0.05 : 0.25,
+            filter: 'blur(55px) saturate(140%)',
             transition: 'opacity 0.6s ease',
             pointerEvents: 'none',
           }}
@@ -473,7 +538,6 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           updateBufferProgress();
 
           // AUDIO-ONLY DETECTION WATCHDOG:
-          // If video plays uninterrupted for > 3.5s with zero decoded video width (10-bit Hi10P codec):
           if (!v.paused && v.currentTime > 3.5 && v.readyState >= 3) {
             if (v.videoWidth === 0 && !isAudioOnlyDetected) {
               setIsAudioOnlyDetected(true);
@@ -492,7 +556,51 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         onError={handleVideoError}
       />
 
-      {/* Loading Cinematic Spinner */}
+      {/* Animated Double-Tap Seek Ripples (YouTube Mobile Style) */}
+      {doubleTapRipple && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            width: '45%',
+            left: doubleTapRipple === 'left' ? 0 : 'auto',
+            right: doubleTapRipple === 'right' ? 0 : 'auto',
+            zIndex: 32,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            background: doubleTapRipple === 'left'
+              ? 'radial-gradient(circle at 30% 50%, rgba(99,102,241,0.25) 0%, transparent 70%)'
+              : 'radial-gradient(circle at 70% 50%, rgba(99,102,241,0.25) 0%, transparent 70%)',
+            animation: 'fadeInOut 0.65s ease forwards',
+          }}
+        >
+          <div
+            style={{
+              padding: '16px 24px',
+              borderRadius: '999px',
+              background: 'rgba(15,21,32,0.85)',
+              backdropFilter: 'blur(16px)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              color: '#fff',
+              fontSize: '1rem',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            }}
+          >
+            {doubleTapRipple === 'left' ? <RotateCcw size={20} color="#818cf8" /> : <RotateCw size={20} color="#818cf8" />}
+            <span>{doubleTapRipple === 'left' ? '-10s' : '+10s'}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Cinematic Spinner with media glow */}
       {isLoading && !playbackError && (
         <div
           style={{
@@ -502,50 +610,58 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '16px',
+            gap: '14px',
             pointerEvents: 'none',
             zIndex: 25,
           }}
         >
           <div
             style={{
-              width: '60px',
-              height: '60px',
-              borderRadius: '22px',
-              background: 'rgba(15,21,32,0.85)',
-              backdropFilter: 'blur(16px)',
-              border: '1px solid rgba(255,255,255,0.18)',
+              width: '64px',
+              height: '64px',
+              borderRadius: '24px',
+              background: 'rgba(10,15,29,0.85)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: '1.5px solid rgba(255,255,255,0.18)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.7), 0 0 24px rgba(99,102,241,0.3)',
             }}
           >
             <div
               style={{
-                width: '30px',
-                height: '30px',
+                width: '32px',
+                height: '32px',
                 border: '3px solid rgba(99,102,241,0.25)',
                 borderTopColor: '#818cf8',
                 borderRadius: '50%',
-                animation: 'spin 0.8s linear infinite',
+                animation: 'spin 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite',
               }}
             />
           </div>
-          <span style={{ fontSize: '0.84rem', color: '#cbd5e1', fontWeight: 600, letterSpacing: '0.02em' }}>
-            Streaming zero-disk media...
+          <span style={{
+            fontSize: '0.82rem',
+            color: '#e2e8f0',
+            fontWeight: 700,
+            letterSpacing: '0.02em',
+            textShadow: '0 2px 8px rgba(0,0,0,0.8)',
+          }}>
+            Zero-Disk Cinema Stream
           </span>
         </div>
       )}
 
-      {/* Hardware-Accelerated Stream Card (Error or Format Fallback) */}
+      {/* Hyper-Modern Hardware Acceleration & Codec Guidance Card */}
       {playbackError && (
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'radial-gradient(circle at center, rgba(15,23,42,0.96) 0%, rgba(3,7,18,0.99) 100%)',
-            backdropFilter: 'blur(20px)',
+            background: 'radial-gradient(circle at center, rgba(15,23,42,0.96) 0%, rgba(2,6,23,0.99) 100%)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -557,40 +673,41 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         >
           <div
             style={{
-              width: '72px',
-              height: '72px',
-              borderRadius: '24px',
+              width: '76px',
+              height: '76px',
+              borderRadius: '26px',
               background: 'linear-gradient(135deg, rgba(249,115,22,0.25), rgba(234,88,12,0.45))',
-              border: '1px solid rgba(249,115,22,0.5)',
+              border: '1.5px solid rgba(249,115,22,0.55)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               marginBottom: '16px',
-              boxShadow: '0 8px 30px rgba(249,115,22,0.3)',
+              boxShadow: '0 12px 36px rgba(249,115,22,0.35)',
             }}
           >
-            <Tv size={36} color="#fb923c" />
+            <Tv size={38} color="#fb923c" />
           </div>
 
           <h3
             style={{
-              fontSize: '1.25rem',
+              fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)',
               fontWeight: 900,
               color: '#fff',
               margin: '0 0 8px',
               fontFamily: 'var(--font-display, inherit)',
+              letterSpacing: '-0.02em',
             }}
           >
-            Native Hardware Playback
+            Enhanced Studio Quality Stream
           </h3>
 
           <p
             style={{
-              fontSize: '0.85rem',
+              fontSize: '0.86rem',
               color: '#94a3b8',
-              maxWidth: '420px',
-              lineHeight: 1.5,
-              margin: '0 0 20px',
+              maxWidth: '440px',
+              lineHeight: 1.55,
+              margin: '0 0 22px',
             }}
           >
             {playbackError}
@@ -613,27 +730,28 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '360px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '380px' }}>
             <button
               onClick={handleLaunchVlc}
               style={{
-                height: '48px',
+                height: '50px',
                 borderRadius: '14px',
                 background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-                boxShadow: '0 6px 24px rgba(249,115,22,0.45)',
+                boxShadow: '0 6px 26px rgba(249,115,22,0.45)',
                 border: 'none',
                 color: '#fff',
-                fontSize: '0.92rem',
+                fontSize: '0.94rem',
                 fontWeight: 800,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '8px',
+                gap: '9px',
                 cursor: 'pointer',
+                transition: 'transform 0.18s ease',
               }}
             >
-              <ExternalLink size={19} />
-              Open in VLC Media Player (Instant HD)
+              <ExternalLink size={20} />
+              Open in VLC Media Player (Instant 1000ms Buffer)
             </button>
 
             <button
@@ -644,17 +762,17 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                 background: 'rgba(255,255,255,0.06)',
                 border: '1px solid rgba(255,255,255,0.14)',
                 color: '#e2e8f0',
-                fontSize: '0.8rem',
+                fontSize: '0.80rem',
                 fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '6px',
+                gap: '7px',
                 cursor: 'pointer',
               }}
             >
               <CheckCircle2 size={16} color="#818cf8" />
-              Always Open in VLC & Remember
+              Always Open in VLC for MKV
             </button>
 
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -662,8 +780,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                 onClick={handleRetryDirect}
                 style={{
                   flex: 1,
-                  height: '38px',
-                  borderRadius: '10px',
+                  height: '40px',
+                  borderRadius: '11px',
                   background: 'rgba(255,255,255,0.08)',
                   border: '1px solid rgba(255,255,255,0.15)',
                   color: '#cbd5e1',
@@ -684,8 +802,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                 onClick={handleCopyStreamUrl}
                 style={{
                   flex: 1,
-                  height: '38px',
-                  borderRadius: '10px',
+                  height: '40px',
+                  borderRadius: '11px',
                   background: copiedUrl ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.08)',
                   border: copiedUrl ? '1px solid rgba(16,185,129,0.5)' : '1px solid rgba(255,255,255,0.15)',
                   color: copiedUrl ? '#6ee7b7' : '#cbd5e1',
@@ -722,7 +840,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
               }}
             >
               <Download size={14} />
-              Download Playlist File (.m3u)
+              Download Playlist (.m3u)
             </a>
           </div>
         </div>
@@ -738,7 +856,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             transform: 'translateX(-50%)',
             zIndex: 45,
             width: 'calc(100% - 32px)',
-            maxWidth: '540px',
+            maxWidth: '520px',
             background: 'linear-gradient(135deg, rgba(234, 88, 12, 0.95) 0%, rgba(194, 65, 12, 0.98) 100%)',
             backdropFilter: 'blur(16px)',
             border: '1px solid rgba(255, 255, 255, 0.25)',
@@ -826,47 +944,50 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           left: 0,
           right: 0,
           zIndex: 35,
-          padding: 'max(env(safe-area-inset-top, 0px), 14px) 18px 24px',
-          background: 'linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)',
+          padding: 'max(env(safe-area-inset-top, 0px), 12px) 16px 20px',
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.94) 0%, rgba(0,0,0,0.55) 60%, transparent 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: '12px',
+          gap: '10px',
           opacity: showControls ? 1 : 0,
           pointerEvents: showControls ? 'all' : 'none',
           transition: 'opacity 0.25s ease',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+        {/* Left: Back button + Title Stack */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
           <button
             onClick={() => {
               flushProgress();
               onClose();
             }}
-            aria-label="Close Player"
+            aria-label="Back to library"
             style={{
               width: '40px',
               height: '40px',
               borderRadius: '50%',
               background: 'rgba(255,255,255,0.12)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255,255,255,0.2)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              border: '1px solid rgba(255,255,255,0.22)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: '#fff',
               cursor: 'pointer',
               flexShrink: 0,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
             }}
           >
-            <X size={20} />
+            <ChevronLeft size={22} />
           </button>
 
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <h2
               style={{
-                fontSize: '0.98rem',
+                fontSize: 'clamp(0.92rem, 3.2vw, 1.08rem)',
                 fontWeight: 800,
                 color: '#fff',
                 fontFamily: 'var(--font-display, inherit)',
@@ -874,34 +995,64 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
+                letterSpacing: '-0.01em',
               }}
             >
               {displayName}
             </h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'nowrap', overflow: 'hidden' }}>
               <span
                 style={{
-                  fontSize: '0.66rem',
+                  fontSize: '0.64rem',
                   fontWeight: 800,
                   color: '#818cf8',
                   background: 'rgba(99,102,241,0.16)',
-                  padding: '2px 8px',
-                  borderRadius: '6px',
+                  padding: '2px 7px',
+                  borderRadius: '5px',
                   border: '1px solid rgba(99,102,241,0.3)',
+                  flexShrink: 0,
                 }}
               >
                 {item.category}
               </span>
               {item.canonical_metadata?.runtime && (
-                <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
-                  {formatRuntime(item.canonical_metadata.runtime)}
+                <span style={{ fontSize: '0.70rem', color: '#94a3b8', fontWeight: 600, flexShrink: 0 }}>
+                  · {formatRuntime(item.canonical_metadata.runtime)}
                 </span>
               )}
             </div>
           </div>
         </div>
 
+        {/* Right: VLC Launcher + Stream Switcher */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          {/* Quick Launch in VLC Player Button */}
+          <button
+            onClick={handleLaunchVlc}
+            title="Launch in native VLC Media Player for 100% hardware decoding"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'linear-gradient(135deg, rgba(249,115,22,0.3) 0%, rgba(234,88,12,0.45) 100%)',
+              border: '1.5px solid rgba(249,115,22,0.7)',
+              borderRadius: '999px',
+              padding: '6px 14px',
+              color: '#fdba74',
+              fontSize: '0.76rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              flexShrink: 0,
+              boxShadow: '0 4px 18px rgba(249,115,22,0.35)',
+              transition: 'all 0.18s ease',
+            }}
+          >
+            <Tv size={15} color="#fb923c" />
+            <span>Launch VLC</span>
+          </button>
+
           {/* Stream Mode Indicator / Selector */}
           <button
             onClick={toggleStreamMode}
@@ -909,53 +1060,24 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              background: streamMode === 'direct' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.08)',
-              border: streamMode === 'direct' ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.18)',
+              gap: '5px',
+              background: streamMode === 'direct' ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.08)',
+              border: streamMode === 'direct' ? '1px solid rgba(99,102,241,0.55)' : '1px solid rgba(255,255,255,0.18)',
               borderRadius: '999px',
-              padding: '6px 12px',
+              padding: '6px 10px',
               color: streamMode === 'direct' ? '#a5b4fc' : '#cbd5e1',
-              fontSize: '0.74rem',
+              fontSize: '0.72rem',
               fontWeight: 800,
               cursor: 'pointer',
               backdropFilter: 'blur(10px)',
-              transition: 'all 0.2s ease',
+              WebkitBackdropFilter: 'blur(10px)',
+              transition: 'all 0.18s ease',
             }}
           >
-            <span style={{ fontSize: '0.8rem' }}>{streamMode === 'direct' ? '⚡' : '🔄'}</span>
-            <span>{streamMode === 'direct' ? 'Direct Stream' : 'Universal MP4'}</span>
-          </button>
-
-          {/* Quick Launch in VLC Player Button */}
-          <button
-            onClick={handleLaunchVlc}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              background: 'linear-gradient(135deg, rgba(249,115,22,0.25) 0%, rgba(234,88,12,0.4) 100%)',
-              border: '1px solid rgba(249,115,22,0.6)',
-              borderRadius: '999px',
-              padding: '7px 14px',
-              color: '#fdba74',
-              fontSize: '0.76rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              backdropFilter: 'blur(10px)',
-              flexShrink: 0,
-              boxShadow: '0 4px 14px rgba(249,115,22,0.25)',
-            }}
-          >
-            <div
-              style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                background: '#f97316',
-                boxShadow: '0 0 10px #f97316',
-              }}
-            />
-            Launch VLC
+            <span style={{ fontSize: '0.78rem' }}>{streamMode === 'direct' ? '⚡' : '🔄'}</span>
+            <span style={{ display: 'none', minWidth: '40px' }} className="mode-text-expand">
+              {streamMode === 'direct' ? 'Direct' : 'Remux'}
+            </span>
           </button>
         </div>
       </div>
@@ -968,7 +1090,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '32px',
+          gap: 'clamp(20px, 6vw, 42px)',
           zIndex: 30,
           opacity: showControls && !playbackError ? 1 : 0,
           pointerEvents: showControls && !playbackError ? 'all' : 'none',
@@ -985,18 +1107,23 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           }}
           aria-label="Skip backward 10s"
           style={{
-            width: '52px',
-            height: '52px',
+            width: 'clamp(46px, 11vw, 56px)',
+            height: 'clamp(46px, 11vw, 56px)',
             borderRadius: '50%',
-            background: 'rgba(15,21,32,0.65)',
-            backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(255,255,255,0.18)',
+            background: 'rgba(15,21,32,0.7)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: '1.5px solid rgba(255,255,255,0.18)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
             cursor: 'pointer',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            transition: 'transform 0.15s ease',
           }}
+          onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.92)')}
+          onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
         >
           <RotateCcw size={22} />
         </button>
@@ -1008,18 +1135,21 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           }}
           aria-label={isPlaying ? 'Pause' : 'Play'}
           style={{
-            width: '74px',
-            height: '74px',
+            width: 'clamp(64px, 16vw, 78px)',
+            height: 'clamp(64px, 16vw, 78px)',
             borderRadius: '50%',
             background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-            boxShadow: '0 8px 32px rgba(99,102,241,0.55)',
+            boxShadow: '0 10px 36px rgba(99,102,241,0.6), 0 0 20px rgba(99,102,241,0.4)',
             border: 'none',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
             cursor: 'pointer',
+            transition: 'transform 0.15s ease',
           }}
+          onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.93)')}
+          onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
         >
           {isPlaying ? <Pause size={32} fill="#fff" /> : <Play size={32} fill="#fff" style={{ marginLeft: '4px' }} />}
         </button>
@@ -1031,18 +1161,23 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           }}
           aria-label="Skip forward 10s"
           style={{
-            width: '52px',
-            height: '52px',
+            width: 'clamp(46px, 11vw, 56px)',
+            height: 'clamp(46px, 11vw, 56px)',
             borderRadius: '50%',
-            background: 'rgba(15,21,32,0.65)',
-            backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(255,255,255,0.18)',
+            background: 'rgba(15,21,32,0.7)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: '1.5px solid rgba(255,255,255,0.18)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
             cursor: 'pointer',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            transition: 'transform 0.15s ease',
           }}
+          onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.92)')}
+          onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
         >
           <RotateCw size={22} />
         </button>
@@ -1056,20 +1191,20 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
           left: 0,
           right: 0,
           zIndex: 35,
-          padding: '24px 20px max(env(safe-area-inset-bottom, 0px), 16px)',
-          background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)',
+          padding: '24px 18px max(env(safe-area-inset-bottom, 0px), 14px)',
+          background: 'linear-gradient(to top, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.6) 65%, transparent 100%)',
           display: 'flex',
           flexDirection: 'column',
-          gap: '12px',
+          gap: '10px',
           opacity: showControls && !playbackError ? 1 : 0,
           pointerEvents: showControls && !playbackError ? 'all' : 'none',
           transition: 'opacity 0.25s ease',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Scrub Bar with Buffer Layer */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <span style={{ fontSize: '0.78rem', color: '#cbd5e1', fontWeight: 700, minWidth: '44px', fontVariantNumeric: 'tabular-nums' }}>
+        {/* Scrub Bar with Live Hover/Scrub Time Bubble */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '0.78rem', color: '#cbd5e1', fontWeight: 800, minWidth: '42px', fontVariantNumeric: 'tabular-nums' }}>
             {formatTime(displayTime)}
           </span>
 
@@ -1083,6 +1218,31 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
               cursor: 'pointer',
             }}
           >
+            {/* Live Scrub Bubble */}
+            {isScrubbing && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '26px',
+                  left: `${Math.max(4, Math.min(96, scrubPercent))}%`,
+                  transform: 'translateX(-50%)',
+                  background: 'rgba(15,21,32,0.95)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  color: '#fff',
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.7)',
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {formatTime(scrubValue)}
+              </div>
+            )}
+
             {/* Background Track */}
             <div
               style={{
@@ -1091,7 +1251,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                 right: 0,
                 height: '6px',
                 borderRadius: '3px',
-                background: 'rgba(255,255,255,0.15)',
+                background: 'rgba(255,255,255,0.18)',
               }}
             />
 
@@ -1104,8 +1264,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                   width: `${Math.min(100, (bufferedEnd / totalDuration) * 100)}%`,
                   height: '6px',
                   borderRadius: '3px',
-                  background: 'rgba(255,255,255,0.3)',
-                  transition: 'width 0.3s ease',
+                  background: 'rgba(255,255,255,0.35)',
+                  transition: 'width 0.25s ease',
                   pointerEvents: 'none',
                 }}
               />
@@ -1135,14 +1295,14 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             />
           </div>
 
-          <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 700, minWidth: '44px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 800, minWidth: '42px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {totalDuration ? formatTime(totalDuration) : 'LIVE'}
           </span>
         </div>
 
-        {/* Extra Bottom Actions (Mute, Volume, Fullscreen) */}
+        {/* Extra Bottom Actions Row (Mute, Volume, PiP, Fullscreen) */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <button
               onClick={toggleMute}
               style={{
@@ -1158,6 +1318,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
               {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
             </button>
 
+            {/* Desktop Volume Slider */}
             <input
               type="range"
               min={0}
@@ -1176,7 +1337,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
                 }
               }}
               style={{
-                width: '70px',
+                width: '68px',
                 accentColor: '#6366f1',
                 cursor: 'pointer',
                 height: '4px',
@@ -1184,9 +1345,28 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
             />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Picture in Picture */}
+            <button
+              onClick={togglePiP}
+              title="Picture in Picture"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#cbd5e1',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '6px',
+              }}
+            >
+              <PictureInPicture2 size={19} />
+            </button>
+
+            {/* Fullscreen Toggle */}
             <button
               onClick={toggleFullscreen}
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
               style={{
                 background: 'none',
                 border: 'none',

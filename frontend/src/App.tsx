@@ -11,7 +11,6 @@ import {
   type ApiHealthStatus,
 } from './api';
 import { syncActiveWatchSession, syncWatchHistoryWithCloud } from './utils/watchHistory';
-import { launchVlcWithTracking } from './utils/playerSettings';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
@@ -307,23 +306,11 @@ export const App: React.FC = () => {
     }
   };
 
-  // Direct Playback Router: Directly launches VLC Media Player
+  // Universal In-App Playback Router (Mobile + Desktop)
   const handlePlayMedia = (item: MediaItem) => {
-    const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-    const isLocal = typeof window !== 'undefined' && (
-      window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1'
-    );
-    if (isMobile || isLocal) {
-      launchVlcWithTracking(item);
-  
-    } else {
-      setSelectedMedia(null);
-      setSelectedGroup(null);
-      setPlayingMedia(item);
-    }
-    return;
-
+    setSelectedMedia(null);
+    setSelectedGroup(null);
+    setPlayingMedia(item);
   };
 
   return (

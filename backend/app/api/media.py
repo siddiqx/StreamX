@@ -848,8 +848,11 @@ async def get_m3u_playlist(
     m3u_content = (
         f"#EXTM3U\n"
         f"#EXTINF:-1,{safe_m3u_title}\n"
-        f"#EXTVLCOPT:network-caching=5000\n"
-        f"#EXTVLCOPT:sout-mux-caching=5000\n"
+        f"#EXTVLCOPT:network-caching=1000\n"
+        f"#EXTVLCOPT:sout-mux-caching=1000\n"
+        f"#EXTVLCOPT:file-caching=1000\n"
+        f"#EXTVLCOPT:clock-jitter=0\n"
+        f"#EXTVLCOPT:clock-synchro=0\n"
         f"#EXTVLCOPT:http-reconnect=true\n"
         f"{stream_url}\n"
     )
