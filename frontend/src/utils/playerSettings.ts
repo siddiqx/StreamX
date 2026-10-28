@@ -6,6 +6,7 @@ import type { MediaItem } from '../types';
 import {
   getMediaDisplayName,
   getStreamUrl,
+  getPlaylistUrl,
   openVlcOnHost
 } from '../api';
 import { startWatchSession, getWatchProgress } from './watchHistory';
@@ -113,12 +114,9 @@ export async function launchVlcWithTracking(
     }
   } catch {}
 
-  // Remote / Web launch via direct protocol handler (NO DOWNLOAD SCREEN)
-  const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
-  const vlcProto = `vlc://${streamUrl}`;
-
-  // Direct protocol launch opens VLC directly without triggering a browser file download dialog
-  window.location.href = vlcProto;
+  // Remote / Web launch via direct M3U stream launcher (Universal VLC launch without broken vlc://)
+  const playlistUrl = getPlaylistUrl(item.id, item.drive_file_id, item.filename);
+  window.location.href = playlistUrl;
 
   if (onStatusUpdate) onStatusUpdate('✓ Opening in VLC');
   return { success: true, message: 'Opening in VLC...' };

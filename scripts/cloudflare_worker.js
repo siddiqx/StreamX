@@ -967,7 +967,7 @@ export default {
           const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
           const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
           const safeAscii = cleanTitle.replace(/[^a-zA-Z0-9._-]/g, '_');
-          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
           return new Response(m3u, {
             status: 200,
             headers: {
@@ -1002,7 +1002,7 @@ export default {
         const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
         const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
         const safeAscii = cleanTitle.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:demux=avformat\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:clock-jitter=0\n#EXTVLCOPT:clock-synchro=0\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
         return new Response(m3u, {
           status: 200,
           headers: {

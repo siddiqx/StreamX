@@ -808,11 +808,10 @@ async def open_in_vlc(
     vlc_args = [
         vlc_bin,
         "--no-qt-privacy-ask",
-        "--demux=avformat",
+        "--video-track=0",
         "--network-caching=3000",
         "--file-caching=3000",
-        "--clock-jitter=0",
-        "--clock-synchro=0",
+        "--http-reconnect",
     ]
     if start > 0:
         vlc_args.append(f"--start-time={int(start)}")
@@ -860,12 +859,10 @@ async def get_m3u_playlist(
     m3u_content = (
         f"#EXTM3U\n"
         f"#EXTINF:-1,{safe_m3u_title}\n"
-        f"#EXTVLCOPT:demux=avformat\n"
+        f"#EXTVLCOPT:video-track=0\n"
         f"#EXTVLCOPT:network-caching=3000\n"
         f"#EXTVLCOPT:sout-mux-caching=3000\n"
         f"#EXTVLCOPT:file-caching=3000\n"
-        f"#EXTVLCOPT:clock-jitter=0\n"
-        f"#EXTVLCOPT:clock-synchro=0\n"
         f"#EXTVLCOPT:http-reconnect=true\n"
         f"{stream_url}\n"
     )
