@@ -117,15 +117,16 @@ export async function launchVlcWithTracking(
   // Cloud production (Vercel) & remote stream launcher:
   const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
 
-  // 1. Generate instant client-side M3U playlist file with 1000ms low-latency caching
+  // 1. Generate instant client-side M3U playlist file with avformat demuxer & 800ms low-latency caching
   const cleanTitle = (title || item.filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim();
   const m3uTitle = cleanTitle.replace(/,/g, ' -');
   const m3uContent = (
     `#EXTM3U\n` +
     `#EXTINF:-1,${m3uTitle}\n` +
-    `#EXTVLCOPT:network-caching=1000\n` +
-    `#EXTVLCOPT:sout-mux-caching=1000\n` +
-    `#EXTVLCOPT:file-caching=1000\n` +
+    `#EXTVLCOPT:demux=avformat\n` +
+    `#EXTVLCOPT:network-caching=800\n` +
+    `#EXTVLCOPT:sout-mux-caching=800\n` +
+    `#EXTVLCOPT:file-caching=800\n` +
     `#EXTVLCOPT:clock-jitter=0\n` +
     `#EXTVLCOPT:clock-synchro=0\n` +
     `#EXTVLCOPT:http-reconnect=true\n` +

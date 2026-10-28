@@ -59,12 +59,12 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   onDeleteDownload,
   deviceFreeBytes,
   onItemUpdated,
-  onPlayInBrowser,
 }) => {
   const [backdropError, setBackdropError] = useState(false);
   const [posterError, setPosterError] = useState(false);
   const [vlcStatus, setVlcStatus] = useState<string | null>(null);
   const [isLaunchingVlc, setIsLaunchingVlc] = useState(false);
+  const [launchingEpId, setLaunchingEpId] = useState<number | null>(null);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
 
   // Manual Metadata Correction Modal State
@@ -281,34 +281,25 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
   const handleOpenVlcForEpisode = async (epItem: MediaItem) => {
     setSelectedEpisodeId(epItem.id);
-
+    setLaunchingEpId(epItem.id);
     setIsLaunchingVlc(true);
     await launchVlcWithTracking(epItem, (msg) => setVlcStatus(msg));
     setIsLaunchingVlc(false);
+    setLaunchingEpId(null);
     setTimeout(() => setVlcStatus(null), 3500);
   };
 
-  const handlePlayEpisodeInBrowser = (epItem: MediaItem) => {
-    setSelectedEpisodeId(epItem.id);
-    if (onPlayInBrowser) {
-      onPlayInBrowser(epItem);
-    } else {
-      handleOpenVlcForEpisode(epItem);
-    }
-  };
-
-  const handlePrimaryPlayAction = async (preferredTarget?: 'browser' | 'vlc') => {
-    const targetItem = activeEpisodeTarget ? activeEpisodeTarget.ep.item : (group?.episodes?.[0]?.item || item);
-    if (!targetItem) { return; }
-    if (preferredTarget === 'vlc' || !onPlayInBrowser) {
-      setIsLaunchingVlc(true);
-      await launchVlcWithTracking(targetItem, (msg) => setVlcStatus(msg));
-      setIsLaunchingVlc(false);
-      setTimeout(() => setVlcStatus(null), 3500);
-    } else {
-      onPlayInBrowser(targetItem);
-      return;
-    }
+  const handlePrimaryPlayAction = async () => {
+    const targetItem = (isSeriesGroup && selectedEpisodeId)
+      ? episodes.find(e => e.item.id === selectedEpisodeId)?.item || item
+      : (activeEpisodeTarget ? activeEpisodeTarget.ep.item : (group?.episodes?.[0]?.item || item));
+    if (!targetItem) return;
+    setIsLaunchingVlc(true);
+    setLaunchingEpId(targetItem.id);
+    await launchVlcWithTracking(targetItem, (msg) => setVlcStatus(msg));
+    setIsLaunchingVlc(false);
+    setLaunchingEpId(null);
+    setTimeout(() => setVlcStatus(null), 3500);
   };
 
 
@@ -719,105 +710,78 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
             {/* Action Center: Big Streaming CTA + Frosted Toolbar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {/* Single Play Action (In-App Cinema + Native VLC Options) */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: '10px' }}>
-                <button
-                  onClick={() => handlePrimaryPlayAction('browser')}
-                  disabled={isLaunchingVlc}
-                  style={{
-                    height: '54px',
-                    borderRadius: '14px',
-                    background: 'linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%)',
-                    color: '#090d16',
-                    boxShadow: '0 6px 26px rgba(255,255,255,0.25), 0 2px 10px rgba(0,0,0,0.5)',
+              {/* Single High-Contrast Cinema Play Action (Direct VLC Default) */}
+              <button
+                onClick={handlePrimaryPlayAction}
+                disabled={isLaunchingVlc}
+                style={{
+                  width: '100%',
+                  height: '52px',
+                  borderRadius: '14px',
+                  background: 'linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%)',
+                  color: '#090d16',
+                  boxShadow: '0 6px 26px rgba(255,255,255,0.25), 0 2px 10px rgba(0,0,0,0.5)',
+                  fontSize: '0.96rem',
+                  fontWeight: 800,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px',
+                  cursor: isLaunchingVlc ? 'wait' : 'pointer',
+                  border: 'none',
+                  transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                  padding: '0 20px',
+                  userSelect: 'none',
+                  touchAction: 'manipulation',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 8px 30px rgba(255,255,255,0.35), 0 2px 10px rgba(0,0,0,0.5)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 6px 26px rgba(255,255,255,0.25), 0 2px 10px rgba(0,0,0,0.5)';
+                }}
+              >
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  background: '#090d16',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  {isLaunchingVlc ? (
+                    <Loader2 size={16} color="#ffffff" className="animate-spin" />
+                  ) : (
+                    <Play size={16} fill="#ffffff" color="#ffffff" style={{ marginLeft: '1.5px' }} />
+                  )}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden' }}>
+                  <span style={{
                     fontSize: '0.94rem',
                     fontWeight: 800,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '10px',
-                    cursor: isLaunchingVlc ? 'wait' : 'pointer',
-                    border: 'none',
-                    transition: 'all 0.18s ease',
-                    padding: '0 16px',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-1px)')}
-                  onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
-                >
-                  <div style={{
-                    width: '28px',
-                    height: '28px',
-                    borderRadius: '50%',
-                    background: '#090d16',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: '100%',
+                    letterSpacing: '-0.01em',
                   }}>
-                    <Play size={15} fill="#ffffff" color="#ffffff" style={{ marginLeft: '1.5px' }} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden' }}>
-                    <span style={{
-                      fontSize: '0.92rem',
-                      fontWeight: 800,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      maxWidth: '100%',
-                    }}>
-                      {isLaunchingVlc
-                        ? 'Launching...'
-                        : activeEpisodeTarget
-                        ? activeEpisodeTarget.label
-                        : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
-                        ? `Resume (${watchProgress.progressPercentage}%)`
-                        : 'Watch Now'}
-                    </span>
-                    <span style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 700, marginTop: '-1px' }}>
-                      In-App Player
-                    </span>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handlePrimaryPlayAction('vlc')}
-                  disabled={isLaunchingVlc}
-                  title="Play directly in native VLC Media Player"
-                  style={{
-                    height: '54px',
-                    borderRadius: '14px',
-                    background: 'linear-gradient(135deg, rgba(249,115,22,0.22) 0%, rgba(234,88,12,0.38) 100%)',
-                    border: '1.5px solid rgba(249,115,22,0.65)',
-                    boxShadow: '0 6px 20px rgba(249,115,22,0.22)',
-                    color: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '9px',
-                    cursor: isLaunchingVlc ? 'wait' : 'pointer',
-                    transition: 'all 0.18s ease',
-                    padding: '0 14px',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(249,115,22,0.3) 0%, rgba(234,88,12,0.5) 100%)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(249,115,22,0.22) 0%, rgba(234,88,12,0.38) 100%)';
-                  }}
-                >
-                  <Tv size={20} color="#fb923c" style={{ flexShrink: 0 }} />
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                    <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#fed7aa' }}>
-                      {isLaunchingVlc ? 'Launching...' : 'VLC Player'}
-                    </span>
-                    <span style={{ fontSize: '0.64rem', color: 'rgba(253,186,116,0.8)', fontWeight: 700, marginTop: '-1px' }}>
-                      Hardware 10-Bit
-                    </span>
-                  </div>
-                </button>
-              </div>
+                    {isLaunchingVlc
+                      ? 'Launching VLC...'
+                      : activeEpisodeTarget
+                      ? activeEpisodeTarget.label
+                      : watchProgress && !watchProgress.completed && watchProgress.progressPercentage > 0
+                      ? `Resume (${watchProgress.progressPercentage}%)`
+                      : 'Play'}
+                  </span>
+                  <span style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 700, marginTop: '-1px' }}>
+                    Opens directly in VLC Media Player
+                  </span>
+                </div>
+              </button>
 
               {/* Secondary Action Toolbar: Download, Watched, TMDB */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
@@ -1071,35 +1035,53 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                 </div>
 
                 {/* Episode Cards Stack */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {episodes.map((ep) => {
                     const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
                     const epOffline = offlineIds ? epIds.some(id => offlineIds.has(id)) : false;
                     const epProgress = getWatchProgress(ep.item.id) || (ep.versions?.map(v => getWatchProgress(v.item.id)).find(p => p !== null)) || null;
                     const epNumStr = ep.episodeNumber ? String(ep.episodeNumber).padStart(2, '0') : 'EP';
-                    const isEpActive = activeEpisodeTarget ? epIds.includes(activeEpisodeTarget.ep.item.id) : false;
+                    const isSelected = selectedEpisodeId === ep.item.id || (activeEpisodeTarget && activeEpisodeTarget.ep.item.id === ep.item.id);
+                    const isEpLaunching = launchingEpId === ep.item.id;
+                    const cleanTitle = (ep.episodeNumber && ep.episodeNumber > 0)
+                      ? `Episode ${ep.episodeNumber}`
+                      : (ep.cleanTitle || `Episode ${epNumStr}`);
 
                     return (
                       <div
                         key={ep.item.id}
                         className="episode-interactive-card"
-                        onClick={() => handlePlayEpisodeInBrowser(ep.item)}
+                        onClick={() => handleOpenVlcForEpisode(ep.item)}
                         style={{
-                          background: isEpActive ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255, 255, 255, 0.04)',
-                          backdropFilter: 'blur(10px)',
-                          WebkitBackdropFilter: 'blur(10px)',
-                          border: isEpActive ? '1px solid rgba(129, 140, 248, 0.65)' : '1px solid rgba(255, 255, 255, 0.08)',
-                          boxShadow: isEpActive ? '0 0 16px rgba(99, 102, 241, 0.22)' : 'none',
-                          borderRadius: '16px',
-                          padding: '13px 16px',
+                          background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                          backdropFilter: 'blur(12px)',
+                          WebkitBackdropFilter: 'blur(12px)',
+                          border: isSelected ? '1.5px solid rgba(129, 140, 248, 0.55)' : '1px solid rgba(255, 255, 255, 0.07)',
+                          boxShadow: isSelected ? '0 0 20px rgba(99, 102, 241, 0.22)' : 'none',
+                          borderRadius: '14px',
+                          padding: '11px 14px',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
-                          gap: '14px',
+                          gap: '12px',
                           cursor: 'pointer',
                           position: 'relative',
                           overflow: 'hidden',
-                          transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                          transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                          userSelect: 'none',
+                          touchAction: 'manipulation',
+                        }}
+                        onMouseEnter={e => {
+                          if (!isSelected) {
+                            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)';
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (!isSelected) {
+                            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
+                          }
                         }}
                       >
                         {/* Progress line under card */}
@@ -1109,76 +1091,74 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             bottom: 0,
                             left: 0,
                             right: 0,
-                            height: '3px',
+                            height: '2.5px',
                             background: 'rgba(255,255,255,0.1)',
                           }}>
                             <div style={{
                               width: `${epProgress.progressPercentage}%`,
                               height: '100%',
-                              background: 'linear-gradient(90deg, #ef4444, #f87171)',
-                              boxShadow: '0 0 8px rgba(239,68,68,0.7)',
+                              background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                              boxShadow: '0 0 8px rgba(99,102,241,0.6)',
                             }} />
                           </div>
                         )}
 
                         {/* Left: Number Disc & Clean Title */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
                           {/* Episode Number Disc */}
                           <div style={{
-                            width: '42px',
-                            height: '42px',
-                            borderRadius: '12px',
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '10px',
                             background: epProgress?.completed
-                              ? 'linear-gradient(135deg, rgba(16,185,129,0.25) 0%, rgba(5,150,105,0.15) 100%)'
-                              : epProgress && epProgress.progressPercentage > 0
-                              ? 'linear-gradient(135deg, rgba(239,68,68,0.25) 0%, rgba(220,38,38,0.15) 100%)'
-                              : 'linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)',
+                              ? 'linear-gradient(135deg, rgba(16,185,129,0.22) 0%, rgba(5,150,105,0.12) 100%)'
+                              : isSelected
+                              ? 'linear-gradient(135deg, rgba(99,102,241,0.3) 0%, rgba(79,70,229,0.2) 100%)'
+                              : 'rgba(255, 255, 255, 0.05)',
                             border: `1.5px solid ${
                               epProgress?.completed
-                                ? 'rgba(16,185,129,0.5)'
-                                : epProgress && epProgress.progressPercentage > 0
-                                ? 'rgba(239,68,68,0.5)'
-                                : 'rgba(255,255,255,0.14)'
+                                ? 'rgba(16,185,129,0.45)'
+                                : isSelected
+                                ? 'rgba(129,140,248,0.55)'
+                                : 'rgba(255, 255, 255, 0.1)'
                             }`,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '0.86rem',
+                            fontSize: '0.82rem',
                             fontWeight: 900,
-                            color: epProgress?.completed ? '#34d399' : epProgress && epProgress.progressPercentage > 0 ? '#fca5a5' : '#f1f5f9',
+                            color: epProgress?.completed ? '#34d399' : isSelected ? '#c7d2fe' : '#e2e8f0',
                             flexShrink: 0,
-                            boxShadow: epProgress?.completed ? '0 0 12px rgba(16,185,129,0.2)' : 'none',
                           }}>
-                            {epProgress?.completed ? <Check size={17} strokeWidth={3} /> : epNumStr}
+                            {epProgress?.completed ? <Check size={16} strokeWidth={3} /> : epNumStr}
                           </div>
 
                           {/* Episode Title & Tech specs */}
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <p style={{
-                              fontSize: '0.90rem',
+                              fontSize: '0.88rem',
                               fontWeight: 800,
-                              color: '#fff',
+                              color: isSelected ? '#ffffff' : '#f1f5f9',
                               margin: 0,
                               whiteSpace: 'nowrap',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               letterSpacing: '-0.01em',
                             }}>
-                              {ep.cleanTitle}
+                              {cleanTitle}
                             </p>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.70rem', color: '#94a3b8', fontWeight: 600 }}>
                                 {ep.quality} · {ep.extension} · {formatBytes(ep.item.size)}
-                                {ep.versions && ep.versions.length > 1 && ` · ${ep.versions.length} versions`}
                               </span>
                               {epProgress?.completed && (
-                                <span style={{ color: '#10b981', fontSize: '0.70rem', fontWeight: 800 }}>
+                                <span style={{ color: '#10b981', fontSize: '0.68rem', fontWeight: 800 }}>
                                   · Watched ✓
                                 </span>
                               )}
                               {epProgress && !epProgress.completed && epProgress.progressPercentage > 0 && (
-                                <span style={{ color: '#f87171', fontSize: '0.70rem', fontWeight: 800 }}>
+                                <span style={{ color: '#a5b4fc', fontSize: '0.68rem', fontWeight: 800 }}>
                                   · {epProgress.progressPercentage}%
                                 </span>
                               )}
@@ -1186,18 +1166,18 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Right: Single Play Button (Direct VLC) */}
+                        {/* Right: Actions (Single Play in VLC + Download) */}
                         <div
                           style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
-                            onClick={() => handlePlayEpisodeInBrowser(ep.item)}
-                            aria-label={`Play ${ep.cleanTitle}`}
-                            title="Play"
+                            onClick={() => handleOpenVlcForEpisode(ep.item)}
+                            aria-label={`Play ${cleanTitle} in VLC`}
+                            title="Play in VLC"
                             style={{
-                              width: '38px',
-                              height: '38px',
+                              width: '36px',
+                              height: '36px',
                               borderRadius: '50%',
                               background: '#ffffff',
                               border: 'none',
@@ -1205,42 +1185,24 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              cursor: 'pointer',
-                              boxShadow: '0 4px 14px rgba(255,255,255,0.28)',
-                              transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                              cursor: isLaunchingVlc ? 'wait' : 'pointer',
+                              boxShadow: '0 4px 14px rgba(255,255,255,0.25)',
+                              transition: 'all 0.16s cubic-bezier(0.16, 1, 0.3, 1)',
                             }}
                             onMouseEnter={e => {
                               e.currentTarget.style.transform = 'scale(1.1)';
-                              e.currentTarget.style.boxShadow = '0 6px 20px rgba(255,255,255,0.45)';
+                              e.currentTarget.style.boxShadow = '0 6px 18px rgba(255,255,255,0.45)';
                             }}
                             onMouseLeave={e => {
                               e.currentTarget.style.transform = 'scale(1.0)';
-                              e.currentTarget.style.boxShadow = '0 4px 14px rgba(255,255,255,0.28)';
+                              e.currentTarget.style.boxShadow = '0 4px 14px rgba(255,255,255,0.25)';
                             }}
                           >
-                            <Play size={16} fill="#090d16" style={{ marginLeft: '1.5px' }} />
-                          </button>
-
-                          {/* VLC Button */}
-                          <button
-                            onClick={() => handleOpenVlcForEpisode(ep.item)}
-                            aria-label={`Play in VLC: ${ep.cleanTitle}`}
-                            title="Play in VLC"
-                            style={{
-                              width: '38px',
-                              height: '38px',
-                              borderRadius: '50%',
-                              background: 'rgba(255,255,255,0.06)',
-                              border: '1px solid rgba(255,255,255,0.12)',
-                              color: '#fbbf24',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: isLaunchingVlc ? 'wait' : 'pointer',
-                              transition: 'all 0.18s ease',
-                            }}
-                          >
-                            <Tv size={15} />
+                            {isEpLaunching ? (
+                              <Loader2 size={15} color="#090d16" className="animate-spin" />
+                            ) : (
+                              <Play size={15} fill="#090d16" style={{ marginLeft: '1.5px' }} />
+                            )}
                           </button>
 
                           {/* Download Button */}
@@ -1255,22 +1217,22 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                             aria-label="Download Episode"
                             title={epOffline ? 'Downloaded' : 'Download file'}
                             style={{
-                              width: '38px',
-                              height: '38px',
+                              width: '34px',
+                              height: '34px',
                               borderRadius: '50%',
-                              background: epOffline ? 'rgba(16,185,129,0.18)' : 'rgba(255,255,255,0.06)',
-                              border: epOffline ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.12)',
-                              color: epOffline ? '#10b981' : '#cbd5e1',
+                              background: epOffline ? 'rgba(16,185,129,0.18)' : 'rgba(255,255,255,0.05)',
+                              border: epOffline ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                              color: epOffline ? '#10b981' : '#94a3b8',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               cursor: 'pointer',
-                              transition: 'all 0.18s ease',
+                              transition: 'all 0.16s ease',
                             }}
-                            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.08)')}
+                            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.06)')}
                             onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1.0)')}
                           >
-                            {epOffline ? <Check size={16} strokeWidth={2.8} /> : <Download size={15} />}
+                            {epOffline ? <Check size={14} strokeWidth={2.8} /> : <Download size={14} />}
                           </button>
                         </div>
                       </div>

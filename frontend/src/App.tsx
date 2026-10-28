@@ -16,7 +16,7 @@ import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
 import { TransferModal } from './components/TransferModal';
 import { MediaDetailModal } from './components/MediaDetailModal';
-import { VideoPlayerModal } from './components/VideoPlayerModal';
+import { launchVlcWithTracking } from './utils/playerSettings';
 import { HomeView } from './views/HomeView';
 import { SearchView } from './views/SearchView';
 import { LibraryView } from './views/LibraryView';
@@ -31,7 +31,6 @@ export const App: React.FC = () => {
   const [apiHealth, setApiHealth] = useState<ApiHealthStatus>(getLastApiHealth);
 
   const [selectedGroup, setSelectedGroup] = useState<MediaGroup | null>(null);
-  const [playingMedia, setPlayingMedia] = useState<MediaItem | null>(null);
   const [downloads, setDownloads] = useState<DeviceDownload[]>(() => {
     try {
       const saved = localStorage.getItem('streamx_downloads');
@@ -306,11 +305,9 @@ export const App: React.FC = () => {
     }
   };
 
-  // Universal In-App Playback Router (Mobile + Desktop)
+  // Direct VLC Media Player Default Launcher (Mobile + Desktop)
   const handlePlayMedia = (item: MediaItem) => {
-    setSelectedMedia(null);
-    setSelectedGroup(null);
-    setPlayingMedia(item);
+    launchVlcWithTracking(item);
   };
 
   return (
@@ -416,25 +413,12 @@ export const App: React.FC = () => {
         isOffline={selectedMedia ? offlineIds.has(selectedMedia.id) : false}
         onStartDownload={handleStartDownload}
         onDeleteDownload={handleDeleteDownload}
-        onPlayInBrowser={(browserItem) => {
-          setSelectedMedia(null);
-          setSelectedGroup(null);
-          setPlayingMedia(browserItem);
-        }}
         deviceFreeBytes={deviceFreeBytes}
         onItemUpdated={(updated) => {
           setSelectedMedia(updated);
           setMedia((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
         }}
       />
-
-      {playingMedia && (
-        <VideoPlayerModal
-          item={playingMedia}
-          onClose={() => setPlayingMedia(null)}
-          isOffline={offlineIds.has(playingMedia.id)}
-        />
-      )}
 
 
       {/* Floating Status Notification Toast */}

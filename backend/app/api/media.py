@@ -804,14 +804,23 @@ async def open_in_vlc(
         except Exception:
             pass
 
+    vlc_args = [
+        vlc_bin,
+        "--no-qt-privacy-ask",
+        "--demux=avformat",
+        "--network-caching=800",
+        "--file-caching=800",
+        "--clock-jitter=0",
+        "--clock-synchro=0",
+        stream_url,
+    ]
     try:
         if os.name == "nt":
             # Use CREATE_NEW_PROCESS_GROUP WITHOUT DETACHED_PROCESS so GUI window is rendered interactively
-            # Pass --no-qt-privacy-ask to bypass first-run dialog
             flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            subprocess.Popen([vlc_bin, "--no-qt-privacy-ask", stream_url], creationflags=flags)
+            subprocess.Popen(vlc_args, creationflags=flags)
         else:
-            subprocess.Popen([vlc_bin, stream_url])
+            subprocess.Popen(vlc_args)
         return {"status": "ok", "message": "VLC Media Player launched", "url": stream_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to launch VLC: {str(e)}")
@@ -848,9 +857,10 @@ async def get_m3u_playlist(
     m3u_content = (
         f"#EXTM3U\n"
         f"#EXTINF:-1,{safe_m3u_title}\n"
-        f"#EXTVLCOPT:network-caching=1000\n"
-        f"#EXTVLCOPT:sout-mux-caching=1000\n"
-        f"#EXTVLCOPT:file-caching=1000\n"
+        f"#EXTVLCOPT:demux=avformat\n"
+        f"#EXTVLCOPT:network-caching=800\n"
+        f"#EXTVLCOPT:sout-mux-caching=800\n"
+        f"#EXTVLCOPT:file-caching=800\n"
         f"#EXTVLCOPT:clock-jitter=0\n"
         f"#EXTVLCOPT:clock-synchro=0\n"
         f"#EXTVLCOPT:http-reconnect=true\n"
