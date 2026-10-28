@@ -18,6 +18,8 @@
  *    - Dynamic M3U playlist generation on the fly.
  */
 
+import embeddedSnapshot from "./catalog_snapshot.json";
+
 // In-memory runtime state (persists across warm isolate invocations)
 let dynamicBackendUrl = null;
 let lastTunnelFetch = 0;
@@ -117,11 +119,13 @@ async function getLiveBackendUrl(env) {
     }
   } catch (_) {}
 
-  // 3. Fallback to permanent cloud backend (Render)
+  // 3. Fallback to permanent cloud backend (Render) - only if responsive
   if (DEFAULT_FALLBACK_BACKEND_URL && isValidBackendUrl(DEFAULT_FALLBACK_BACKEND_URL)) {
-    dynamicBackendUrl = DEFAULT_FALLBACK_BACKEND_URL;
-    lastTunnelFetch = now;
-    return dynamicBackendUrl;
+    if (await isBackendAlive(DEFAULT_FALLBACK_BACKEND_URL, 1500)) {
+      dynamicBackendUrl = DEFAULT_FALLBACK_BACKEND_URL;
+      lastTunnelFetch = now;
+      return dynamicBackendUrl;
+    }
   }
 
   return "";
@@ -178,17 +182,25 @@ async function getDynamicCatalog(env) {
     return cachedCatalog;
   }
 
-  // Step 1: Fetch pre-enriched GitHub metadata snapshot to guarantee posters, backdrops, and genres
+  // Step 1: Pre-populate snapshot map with embedded catalog snapshot (guaranteed 76 items with posters & backdrops)
   let snapshotMap = new Map();
-  let snapshotList = [];
+  let snapshotList = Array.isArray(embeddedSnapshot) && embeddedSnapshot.length > 0 ? [...embeddedSnapshot] : [];
+  for (const item of snapshotList) {
+    if (item.drive_file_id) snapshotMap.set(item.drive_file_id, item);
+    if (item.filename) snapshotMap.set(item.filename.toLowerCase().trim(), item);
+  }
+
+  // Step 2: Fetch pre-enriched GitHub metadata snapshot to pick up any newer additions
   try {
     const ghRes = await fetch("https://raw.githubusercontent.com/siddiqx/StreamX/main/scripts/catalog_snapshot.json", {
       headers: { "Cache-Control": "no-cache" },
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(3000),
     });
     if (ghRes.ok) {
-      snapshotList = await ghRes.json();
-      if (Array.isArray(snapshotList)) {
+      const remoteList = await ghRes.json();
+      if (Array.isArray(remoteList) && remoteList.length >= snapshotList.length) {
+        snapshotList = remoteList;
+        snapshotMap.clear();
         for (const item of snapshotList) {
           if (item.drive_file_id) snapshotMap.set(item.drive_file_id, item);
           if (item.filename) snapshotMap.set(item.filename.toLowerCase().trim(), item);
