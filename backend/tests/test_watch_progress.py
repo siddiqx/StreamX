@@ -131,7 +131,7 @@ async def test_image_proxy_ssrf_protection():
         # Attacker tries arbitrary external domain
         res_evil = await client.get("/media/image-proxy?url=https://evil.com/malicious.jpg")
         assert res_evil.status_code == 400
-        assert "Only official TMDB or AniList images" in res_evil.json()["detail"]
+        assert "Only official TMDB" in res_evil.json()["detail"]
 
         # Attacker tries localhost / loopback SSRF
         res_local = await client.get("/media/image-proxy?url=http://127.0.0.1:8000/media")

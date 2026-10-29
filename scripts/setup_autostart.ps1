@@ -12,4 +12,7 @@ $Shortcut.WorkingDirectory = $rootDir
 $Shortcut.Description = "StreamX 24/7 Background Transfer & Ingestion Engine"
 $Shortcut.Save()
 
+# Ensure VLC protocol is registered in Windows registry
+& $pythonwPath (Join-Path $rootDir "scripts\register_vlc_protocol.py")
+
 Write-Host "[OK] Startup shortcut successfully installed at: $ShortcutPath"

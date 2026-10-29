@@ -252,6 +252,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Private Network Access (PNA) preflight support for web app connecting to local VLC launcher
+@app.middleware("http")
+async def add_private_network_access_header(request, call_next):
+    if request.method == "OPTIONS" and request.headers.get("access-control-request-private-network"):
+        from fastapi.responses import Response
+        res = Response(status_code=204)
+        origin = request.headers.get("origin") or "*"
+        res.headers["Access-Control-Allow-Origin"] = origin
+        res.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, HEAD"
+        res.headers["Access-Control-Allow-Headers"] = "*"
+        res.headers["Access-Control-Allow-Credentials"] = "true"
+        res.headers["Access-Control-Allow-Private-Network"] = "true"
+        return res
+
+    response = await call_next(request)
+    if request.headers.get("access-control-request-private-network"):
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
 # CORS configuration - restricted to whitelisted origins and Vercel/Cloudflare preview deployments
 app.add_middleware(
     CORSMiddleware,
@@ -268,3 +287,27 @@ app.include_router(transfers_router)
 app.include_router(media_router)
 app.include_router(metadata_router)
 app.include_router(telegram_router)
+
+# Mount Frontend SPA for zero-latency localhost PC access
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
+
+_frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if _frontend_dist.exists() and (_frontend_dist / "index.html").exists():
+    if (_frontend_dist / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="spa_assets")
+
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    async def serve_spa(full_path: str):
+        # Exclude backend API routes and docs
+        api_prefixes = ("api", "media", "transfers", "health", "system", "telegram", "metadata", "docs", "redoc", "openapi.json")
+        first_segment = full_path.strip("/").split("/")[0] if full_path.strip("/") else ""
+        if first_segment in api_prefixes:
+            raise HTTPException(status_code=404, detail="API route not found")
+
+        target_file = _frontend_dist / full_path
+        if full_path and target_file.is_file():
+            return FileResponse(target_file)
+        return FileResponse(_frontend_dist / "index.html")

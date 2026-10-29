@@ -327,19 +327,13 @@ export function getVlcIntentUrl(mediaId: number, title?: string, driveFileId?: s
 }
 
 export async function openVlcOnHost(mediaId: number, startSeconds?: number): Promise<{ success: boolean; message: string }> {
-  // If running in browser under remote HTTPS, browser blocks http://127.0.0.1 (Mixed Content)
-  // and cloud edge workers cannot spawn desktop applications. Return immediately in 0ms.
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return { success: false, message: 'Local launcher unavailable on remote origin' };
-  }
-
   const qs = startSeconds && startSeconds > 0 ? `?start=${Math.round(startSeconds)}` : '';
 
   // 1. First attempt direct connection to local backend machine (fastest, zero download prompt)
   try {
     const localRes = await fetch(`http://127.0.0.1:8000/media/${mediaId}/open-vlc${qs}`, {
       method: 'POST',
-      signal: AbortSignal.timeout(800),
+      signal: AbortSignal.timeout(600),
     });
     if (localRes.ok) {
       const data = await localRes.json();

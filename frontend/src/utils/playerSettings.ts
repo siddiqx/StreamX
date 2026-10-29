@@ -6,7 +6,6 @@ import type { MediaItem } from '../types';
 import {
   getMediaDisplayName,
   getStreamUrl,
-  getPlaylistUrl,
   openVlcOnHost
 } from '../api';
 import { startWatchSession, getWatchProgress } from './watchHistory';
@@ -105,26 +104,22 @@ export async function launchVlcWithTracking(
   }
 
   // 4. Desktop (Windows / Mac / Linux)
-  // Try direct host OS launch via local backend ONLY when accessing on localhost (0ms latency, avoids 3.2s freeze on web)
-  const isLocalHost = typeof window !== 'undefined' && (
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1' ||
-    window.location.hostname === '0.0.0.0'
-  );
+  // Step A: Attempt direct host OS launch via local backend (0ms latency, zero download)
+  try {
+    const hostRes = await openVlcOnHost(item.id, resumeSecs);
+    if (hostRes.success) {
+      if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
+      return hostRes;
+    }
+  } catch {}
 
-  if (isLocalHost) {
-    try {
-      const hostRes = await openVlcOnHost(item.id, resumeSecs);
-      if (hostRes.success) {
-        if (onStatusUpdate) onStatusUpdate('✓ Playing in VLC on PC');
-        return hostRes;
-      }
-    } catch {}
-  }
+  // Step B: Direct VLC Protocol Launch (Universal across Windows, macOS, Linux)
+  // Launches native hardware VLC directly via vlc:// without any download prompt or file saving
+  const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
+  const posParam = resumeSecs > 0 ? `?start=${Math.round(resumeSecs)}` : '';
+  const vlcProtocolUrl = `vlc://${streamUrl}${posParam}`;
 
-  // Remote / Web launch via direct M3U stream launcher (Universal VLC launch without broken vlc://)
-  const playlistUrl = getPlaylistUrl(item.id, item.drive_file_id, item.filename);
-  window.location.href = playlistUrl;
+  window.location.href = vlcProtocolUrl;
 
   if (onStatusUpdate) onStatusUpdate('✓ Opening in VLC');
   return { success: true, message: 'Opening in VLC...' };

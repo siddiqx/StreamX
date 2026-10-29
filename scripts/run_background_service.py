@@ -19,6 +19,14 @@ LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 # Grace period on boot for Wi-Fi and network adapters to obtain IP
 time.sleep(5)
 
+# Ensure VLC protocol handler is registered in Windows HKCU registry
+try:
+    reg_script = ROOT / "scripts" / "register_vlc_protocol.py"
+    if reg_script.exists():
+        subprocess.run([str(PYTHON), str(reg_script)], check=False, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+except Exception:
+    pass
+
 while True:
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as log:

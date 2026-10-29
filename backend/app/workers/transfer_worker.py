@@ -173,9 +173,9 @@ class TransferWorker:
                     if has_anime_signals(p, raw_filename=fn):
                         return "Anime"
 
-            m_stmt = select(Media.filename, Media.category).where(
-                Media.is_deleted.is_(False),
-            )
+            m_stmt = select(Media.filename, Media.category)
+            if hasattr(Media, "is_deleted"):
+                m_stmt = m_stmt.where(Media.is_deleted.is_(False))
             m_rows = (await session.execute(m_stmt)).all()
             for fn, m_cat in m_rows:
                 p = parse_filename(fn)
