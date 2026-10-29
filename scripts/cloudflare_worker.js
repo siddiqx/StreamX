@@ -774,6 +774,16 @@ export default {
         const parsedImg = new URL(targetImg);
         const allowedHosts = ["image.tmdb.org", "s4.anilist.co", "anilist.co", "m.media-amazon.com", "drive.google.com", "lh3.googleusercontent.com", "googleusercontent.com"];
         const host = parsedImg.hostname.toLowerCase();
+        if (host === "s4.anilist.co" || host === "anilist.co") {
+          return new Response(null, {
+            status: 302,
+            headers: {
+              Location: targetImg,
+              "Access-Control-Allow-Origin": origin,
+              "Cache-Control": "public, max-age=604800, immutable",
+            },
+          });
+        }
         if (parsedImg.protocol === "https:" && (allowedHosts.includes(host) || host.endsWith(".googleusercontent.com"))) {
           const imgRes = await fetch(targetImg, {
             headers: { "User-Agent": "Mozilla/5.0 StreamX-Edge/1.0" },
