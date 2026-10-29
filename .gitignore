@@ -4,6 +4,8 @@
 !.env.example
 *.session
 *.session-journal
+logs/
+*.log
 
 # Python
 __pycache__/

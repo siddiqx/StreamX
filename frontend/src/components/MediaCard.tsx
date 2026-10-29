@@ -39,7 +39,6 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
   width,
 }) => {
   const [imageError, setImageError] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
   const [pressed, setPressed] = useState(false);
 
   // Resolve target item and metadata
@@ -56,7 +55,6 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
   React.useEffect(() => {
     setCurrentPoster(posterUrl);
     setImageError(false);
-    setImageLoaded(false);
     setHasTriedProxy(false);
   }, [posterUrl]);
 
@@ -158,33 +156,18 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
     >
       {/* Poster Image */}
       {hasPoster && currentPoster ? (
-        <>
-          {!imageLoaded && (
-            <div
-              className="skeleton-shimmer"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                backgroundColor: '#111827',
-              }}
-            />
-          )}
-          <img
-            src={currentPoster}
-            alt={title}
-            loading="lazy"
-            onLoad={() => setImageLoaded(true)}
-            onError={handlePosterError}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              display: 'block',
-              opacity: imageLoaded ? 1 : 0,
-              transition: 'opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
-            }}
-          />
-        </>
+        <img
+          src={currentPoster}
+          alt={title}
+          loading="lazy"
+          onError={handlePosterError}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+          }}
+        />
       ) : (
         /* Netflix-style Elegant Fallback Card */
         <div style={{

@@ -280,20 +280,31 @@ async function getDynamicCatalog(env) {
             const cleanTitle = fname
               .replace(/\[[^\]]*\]/g, "")
               .replace(/\([^\)]*\)/g, "")
-              .replace(/\b(EP?\d+|S\d+E\d+|S\d+|\d+p|1080p|720p|4k|2160p|Sub|Dual|AAC|HEVC|x264|x265|WEB-DL|BluRay|HDTV)\b/gi, "")
+              .replace(/@[a-zA-Z0-9_]+/g, "")
+              .replace(/\.(mkv|mp4|avi|mov|webm)$/i, "")
+              .replace(/\b(EP?\d+|S\d+[-_ ]*E\d+|S\d+|\d+p|1080p|720p|4k|2160p|Sub|Dual|AAC|HEVC|x264|x265|WEB-DL|BluRay|HDTV)\b/gi, "")
               .replace(/[-_.]+/g, " ")
               .trim()
               .toLowerCase();
+            const cleanWords = cleanTitle.split(/\s+/).filter((w) => w.length >= 2);
 
-            // Match against any sibling item in snapshotList sharing the series title
+            // Match against any sibling item in snapshotList sharing the series title or tokens
             const siblingMatch = snapshotList.find((item) => {
               if (!item) return false;
               const itemTitle = (item.canonical_metadata?.title || item.title || item.clean_title || "").toLowerCase().trim();
               const itemFn = (item.filename || "").toLowerCase();
-              return (
-                (cleanTitle.length >= 3 && itemTitle && (itemTitle.includes(cleanTitle) || cleanTitle.includes(itemTitle))) ||
-                (cleanTitle.length >= 3 && itemFn && itemFn.includes(cleanTitle))
-              );
+              if (cleanTitle.length >= 3) {
+                if (itemTitle && (itemTitle.includes(cleanTitle) || cleanTitle.includes(itemTitle))) return true;
+                if (itemFn && itemFn.includes(cleanTitle)) return true;
+              }
+              if (cleanWords.length >= 2) {
+                const titleTokens = itemTitle.split(/[^a-z0-9]+/);
+                const fnTokens = itemFn.split(/[^a-z0-9]+/);
+                const allInTitle = cleanWords.every((w) => titleTokens.includes(w));
+                const allInFn = cleanWords.every((w) => fnTokens.includes(w));
+                if (allInTitle || allInFn) return true;
+              }
+              return false;
             });
 
             const isAnime = lowerName.includes("s0") || lowerName.includes("ep") || lowerName.includes("sub") || lowerName.includes("dual") || (siblingMatch && siblingMatch.category === "Anime");

@@ -593,6 +593,11 @@ export function organizeMediaLibrary(
         .sort((a, b) => itemRichness(b) - itemRichness(a));
       if (candidates.length > 0) {
         group.featuredItem = candidates[0];
+        const richest = candidates[0];
+        const richestPoster = richest.poster_override?.trim() || getMediaPosterUrl(richest);
+        if (richestPoster) group.posterUrl = richestPoster;
+        const richestBackdrop = richest.backdrop_override?.trim() || getMediaBackdropUrl(richest);
+        if (richestBackdrop) group.backdropUrl = richestBackdrop;
       }
     } else {
       // Movie version sorting: 4K UHD > 1080p > 720p > 480p
@@ -605,6 +610,11 @@ export function organizeMediaLibrary(
       group.versions.sort((a, b) => qualityRank(b.quality) - qualityRank(a.quality));
       if (group.versions.length > 0) {
         group.featuredItem = group.versions[0].item;
+        const bestVer = group.versions.map(v => v.item).sort((a, b) => itemRichness(b) - itemRichness(a))[0] || group.versions[0].item;
+        const bestPoster = bestVer.poster_override?.trim() || getMediaPosterUrl(bestVer);
+        if (bestPoster) group.posterUrl = bestPoster;
+        const bestBackdrop = bestVer.backdrop_override?.trim() || getMediaBackdropUrl(bestVer);
+        if (bestBackdrop) group.backdropUrl = bestBackdrop;
       }
     }
   }

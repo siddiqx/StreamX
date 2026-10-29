@@ -45,17 +45,28 @@ def compute_string_similarity(a: str, b: str) -> float:
     shorter_words, longer_words = (words_a, words_b) if len(words_a) < len(words_b) else (words_b, words_a)
     shorter_orig, longer_orig = (orig_a, orig_b) if len(orig_a) < len(orig_b) else (orig_b, orig_a)
 
-    # Check if the shorter title is a multi-word leading prefix of the longer title
+    # Check if the shorter title is a multi-word prefix, suffix, or contiguous subphrase of the longer title
     # (e.g. "Trapped in a Dating Sim" -> "Trapped in a Dating Sim: The World of Otome Games...",
     #       "The Daily Life" -> "The Daily Life of the Immortal King",
     #       "The Fragrant Flower" -> "The Fragrant Flower Blooms with Dignity",
-    #       "The Promised" -> "The Promised Neverland")
-    is_leading_prefix = (
-        (len(shorter_words) >= 2 and longer_words[:len(shorter_words)] == shorter_words)
-        or (len(shorter_orig) >= 2 and longer_orig[:len(shorter_orig)] == shorter_orig)
-    )
+    #       "The Promised" -> "The Promised Neverland",
+    #       "Loser Ranger" -> "Go! Go! Loser Ranger!")
+    is_multi_word_match = False
+    if len(shorter_words) >= 2:
+        n = len(shorter_words)
+        if longer_words[:n] == shorter_words or longer_words[-n:] == shorter_words:
+            is_multi_word_match = True
+        elif any(longer_words[i : i + n] == shorter_words for i in range(len(longer_words) - n + 1)):
+            is_multi_word_match = True
 
-    if is_leading_prefix:
+    if not is_multi_word_match and len(shorter_orig) >= 2:
+        n = len(shorter_orig)
+        if longer_orig[:n] == shorter_orig or longer_orig[-n:] == shorter_orig:
+            is_multi_word_match = True
+        elif any(longer_orig[i : i + n] == shorter_orig for i in range(len(longer_orig) - n + 1)):
+            is_multi_word_match = True
+
+    if is_multi_word_match:
         ratio = max(ratio, 0.92)
     elif norm_a in norm_b or norm_b in norm_a:
         ratio = max(ratio, 0.75)
