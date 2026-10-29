@@ -116,7 +116,8 @@ export async function launchVlcWithTracking(
   // Step B: Direct VLC Protocol Launch (Universal across Windows, macOS, Linux)
   // Launches native hardware VLC directly via vlc:// without any download prompt or file saving
   const streamUrl = getStreamUrl(item.id, item.drive_file_id, item.filename);
-  const posParam = resumeSecs > 0 ? `?start=${Math.round(resumeSecs)}` : '';
+  const sep = streamUrl.includes('?') ? '&' : '?';
+  const posParam = resumeSecs > 0 ? `${sep}start=${Math.round(resumeSecs)}` : '';
   const vlcProtocolUrl = `vlc://${streamUrl}${posParam}`;
 
   window.location.href = vlcProtocolUrl;

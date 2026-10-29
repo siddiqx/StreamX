@@ -548,7 +548,6 @@ async def stream_media(
     if res.status_code not in (200, 206):
         err_text = await res.aread()
         await res.aclose()
-        await client.aclose()
         logger.error(f"Google Drive streaming error HTTP {res.status_code} for file {drive_file_id}: {err_text}")
         raise HTTPException(status_code=res.status_code, detail=f"Google Drive stream error: {res.status_code}")
 
@@ -558,7 +557,6 @@ async def stream_media(
                 yield chunk
         finally:
             await res.aclose()
-            await client.aclose()
 
     if "Content-Range" in res.headers:
         headers["Content-Range"] = res.headers["Content-Range"]
@@ -800,26 +798,17 @@ async def open_in_vlc(
     if not vlc_bin:
         raise HTTPException(status_code=404, detail="VLC Media Player was not found on this system.")
 
-    clean_title = sanitize_filename(item.filename)
-    stream_url = f"http://127.0.0.1:8000/media/{media_id}/stream/{clean_title}"
-
-    # If the detected VLC executable is legacy (e.g. 0.9.8) and cannot decode HEVC, fallback to compatible stream
-    if "tools" not in vlc_bin.lower() and "Program Files (x86)" in vlc_bin:
-        try:
-            creds = await drive_service.get_credentials()
-            codecs = await probe_media_codecs(item.drive_file_id, creds.token)
-            if codecs.get("video") in ("hevc", "h265", "x265"):
-                stream_url = f"http://127.0.0.1:8000/media/{media_id}/stream/compatible"
-        except Exception:
-            pass
+    # Use clean, safe URL without raw brackets or Unicode characters that trigger VLC MRL errors.
+    # VLC parses the display title directly from the stream's Content-Disposition header.
+    stream_url = f"http://127.0.0.1:8000/media/{media_id}/stream"
 
     vlc_args = [
         vlc_bin,
         "--no-qt-privacy-ask",
-        "--video-track=0",
-        "--network-caching=1500",
-        "--file-caching=1500",
+        "--network-caching=300",
+        "--file-caching=300",
         "--http-reconnect",
+        "--avcodec-hw=any",
     ]
     if start > 0:
         vlc_args.append(f"--start-time={int(start)}")

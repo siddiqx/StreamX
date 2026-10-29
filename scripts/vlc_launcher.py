@@ -15,9 +15,11 @@ from pathlib import Path
 def find_vlc_binary() -> str:
     """Locate the best VLC executable on the host system."""
     project_root = Path(__file__).resolve().parent.parent
+    bundled_vlc = project_root / "tools" / "vlc-3.0.21" / "vlc.exe"
     candidates = [
+        str(bundled_vlc),
+        r"d:\02_Projects\StreamX\tools\vlc-3.0.21\vlc.exe",
         os.path.expandvars(r"%ProgramFiles%\VideoLAN\VLC\vlc.exe"),
-        str(project_root / "tools" / "vlc-3.0.21" / "vlc.exe"),
         os.path.expandvars(r"%ProgramFiles(x86)%\VideoLAN\VLC\vlc.exe"),
         os.path.expandvars(r"%LocalAppData%\Programs\VideoLAN\VLC\vlc.exe"),
     ]
@@ -29,41 +31,49 @@ def find_vlc_binary() -> str:
 
 def clean_target_url(raw_arg: str) -> tuple[str, int]:
     """Extract clean HTTP/HTTPS stream URL and optional seek offset."""
-    raw = raw_arg.strip()
+    raw = raw_arg.strip().strip("\"'")
 
     # Strip custom protocol prefixes
-    if raw.lower().startswith("vlc://"):
-        raw = raw[6:]
-    elif raw.lower().startswith("vlc:"):
-        raw = raw[4:]
-    elif raw.lower().startswith("streamx://"):
-        raw = raw[10:]
-    elif raw.lower().startswith("streamx:"):
-        raw = raw[8:]
+    for prefix in ("vlc://", "vlc:", "streamx://", "streamx:"):
+        if raw.lower().startswith(prefix):
+            raw = raw[len(prefix):]
+            break
 
-    # Remove enclosing quotes if any
-    raw = raw.strip("\"' ")
+    raw = raw.strip().strip("\"'")
 
-    # Handle percent-encoded URLs (e.g. https%3A%2F%2F...)
-    if raw.startswith("http%3A") or raw.startswith("https%3A"):
+    # Handle percent-encoded full URLs (e.g. https%3A%2F%2F...)
+    if raw.lower().startswith("http%3a") or raw.lower().startswith("https%3a"):
         raw = urllib.parse.unquote(raw)
 
-    # Fix single-slash schemes resulting from protocol parsing
+    # Fix single-slash schemes resulting from browser protocol parsing
     if raw.startswith("https:/") and not raw.startswith("https://"):
         raw = "https://" + raw[7:].lstrip("/")
     elif raw.startswith("http:/") and not raw.startswith("http://"):
         raw = "http://" + raw[6:].lstrip("/")
 
-    # Extract resume seek position if present
-    start_time = 0
-    match = re.search(r"[?&#](?:start|pos|t)=([0-9.]+)", raw)
-    if match:
-        try:
-            start_time = int(float(match.group(1)))
-        except (ValueError, TypeError):
-            pass
+    # Parse URL components
+    parts = urllib.parse.urlsplit(raw)
 
-    return raw, start_time
+    # Ensure path is URL encoded so spaces, square brackets, and unicode do not break VLC MRL parser
+    clean_path = urllib.parse.quote(urllib.parse.unquote(parts.path), safe="/")
+
+    # Extract resume seek position if present and clean query parameters
+    start_time = 0
+    query_pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    filtered_pairs = []
+    for k, v in query_pairs:
+        if k in ("start", "pos", "t"):
+            try:
+                start_time = int(float(v))
+            except (ValueError, TypeError):
+                pass
+        else:
+            filtered_pairs.append((k, v))
+
+    clean_query = urllib.parse.urlencode(filtered_pairs)
+    clean_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, clean_path, clean_query, ""))
+
+    return clean_url, start_time
 
 
 def main():
@@ -85,10 +95,10 @@ def main():
     vlc_args = [
         vlc_bin,
         "--no-qt-privacy-ask",
-        "--video-track=0",
-        "--network-caching=1500",
-        "--file-caching=1500",
+        "--network-caching=300",
+        "--file-caching=300",
         "--http-reconnect",
+        "--avcodec-hw=any",
     ]
 
     if start_time > 0:

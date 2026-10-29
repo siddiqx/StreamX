@@ -43,6 +43,21 @@ class GoogleDriveService:
         self._folder_cache: Dict[str, str] = {}
         self._show_folder_cache: Dict[str, str] = {}
         self._lock = asyncio.Lock()
+        self._stream_client: Optional[httpx.AsyncClient] = None
+
+    def _get_stream_client(self) -> httpx.AsyncClient:
+        """Get or initialize pooled HTTP client with keep-alive for zero-handshake streaming."""
+        if self._stream_client is None or self._stream_client.is_closed:
+            limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
+            timeout = httpx.Timeout(300.0, connect=10.0, read=300.0)
+            self._stream_client = httpx.AsyncClient(limits=limits, timeout=timeout)
+        return self._stream_client
+
+    async def close_stream_client(self) -> None:
+        """Gracefully close pooled stream client on server shutdown."""
+        if self._stream_client and not self._stream_client.is_closed:
+            await self._stream_client.aclose()
+            self._stream_client = None
 
     def is_configured(self) -> bool:
         return bool(
@@ -999,14 +1014,14 @@ class GoogleDriveService:
         return sync_res
 
     async def get_download_stream(self, drive_file_id: str, range_header: Optional[str] = None):
-        """Yield chunks directly from Google Drive alt=media endpoint for streaming or ranged downloads."""
+        """Yield chunks directly from Google Drive alt=media endpoint with connection pooling."""
         creds = await self.get_credentials()
         headers = {"Authorization": f"Bearer {creds.token}"}
         if range_header:
             headers["Range"] = range_header
 
         url = f"https://www.googleapis.com/drive/v3/files/{drive_file_id}?alt=media"
-        client = httpx.AsyncClient(timeout=300.0)
+        client = self._get_stream_client()
         req = client.build_request("GET", url, headers=headers)
         res = await client.send(req, stream=True)
         return client, res

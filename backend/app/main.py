@@ -242,6 +242,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             pass
 
     await mtproto_service.disconnect()
+    try:
+        await drive_service.close_stream_client()
+    except Exception:
+        pass
     log_event("SHUTDOWN")
 
 
