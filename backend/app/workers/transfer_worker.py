@@ -96,6 +96,9 @@ class TransferWorker:
 
     async def broadcast_transfers_to_edge(self) -> None:
         """Push real-time transfer progress to Cloudflare edge worker so Vercel production site reflects live downloads."""
+        if getattr(settings, "STREAMX_ENV", "production") == "testing":
+            return
+
         now = time.time()
         if now - TransferWorker._last_edge_sync < 1.5:
             return

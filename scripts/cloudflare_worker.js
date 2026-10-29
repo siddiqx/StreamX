@@ -722,6 +722,8 @@ export default {
         if (Array.isArray(incoming)) {
           edgeTransfersQueue.length = 0;
           for (const item of incoming) {
+            const fname = (item.filename || "").toLowerCase();
+            if (fname.includes("alpha.movie") || fname.includes("beta.series")) continue;
             edgeTransfersQueue.push(item);
           }
           return new Response(JSON.stringify({ ok: true, count: edgeTransfersQueue.length }), {
