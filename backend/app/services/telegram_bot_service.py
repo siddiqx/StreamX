@@ -404,14 +404,20 @@ class TelegramBotService:
         elif cmd == "/help":
             await self._handle_help(chat_id)
             return
-        elif cmd == "/status":
+        elif cmd in ("/status", "/stats", "/health", "/system"):
             await self._handle_status(chat_id)
             return
-        elif cmd == "/queue":
+        elif cmd in ("/queue", "/downloads", "/download", "/transfers", "/transfer", "/progress"):
             await self._handle_queue(chat_id)
             return
-        elif cmd == "/library":
+        elif cmd in ("/library", "/catalog", "/list"):
             await self._handle_library(chat_id)
+            return
+        elif cmd in ("/search", "/find"):
+            await self._handle_search(chat_id, args)
+            return
+        elif cmd in ("/drive", "/storage"):
+            await self._handle_drive_storage(chat_id)
             return
         elif cmd == "/retry":
             await self._handle_retry(chat_id, args)
@@ -419,11 +425,17 @@ class TelegramBotService:
         elif cmd == "/cancel":
             await self._handle_cancel(chat_id, args)
             return
+        elif cmd in ("/clear", "/clean"):
+            await self._handle_clear(chat_id)
+            return
         elif cmd == "/rename":
             await self._handle_rename(chat_id, text)
             return
         elif cmd == "/ping":
             await self._handle_ping(chat_id)
+            return
+        elif cmd.startswith("/"):
+            await self._handle_unknown_command(chat_id, cmd)
             return
 
         # Check for media attachment
@@ -679,6 +691,99 @@ class TelegramBotService:
             logger.debug(f"Could not signal transfer cancellation to worker: {e}")
 
         await self.send_message(chat_id, f"🚫 <b>Transfer #{tid} Cancelled</b>\n<code>{html.escape(t.filename)}</code>")
+
+    async def _handle_search(self, chat_id: int, args: list) -> None:
+        if not args:
+            await self.send_message(
+                chat_id,
+                "🔍 <b>Usage:</b> <code>/search &lt;query&gt;</code>\nExample: <code>/search Summoner</code>"
+            )
+            return
+
+        query = " ".join(args).strip().lower()
+        async with AsyncSessionLocal() as session:
+            stmt = select(Media).order_by(Media.id.desc())
+            items = (await session.execute(stmt)).scalars().all()
+            matches = [
+                m for m in items
+                if query in (m.filename or "").lower()
+                or query in (getattr(m, "title", None) or "").lower()
+                or query in (getattr(m, "canonical_title", None) or "").lower()
+            ][:6]
+
+        if not matches:
+            await self.send_message(
+                chat_id,
+                f"🔍 <b>No media found matching:</b> <i>{html.escape(query)}</i>\n\n"
+                "Try searching for another keyword or type /library to browse all."
+            )
+            return
+
+        lines = [f"🔍 <b>Search Results for:</b> <i>{html.escape(query)}</i> ({len(matches)} found)\n"]
+        for m in matches:
+            display_title = getattr(m, "canonical_title", None) or getattr(m, "title", None) or m.filename
+            size_str = format_bytes(m.size or 0)
+            lines.append(f"• <b>{html.escape(display_title)}</b>\n  📁 {html.escape(m.category)} · {size_str}")
+        lines.append("\n🎬 <i>Open StreamX on web or mobile to watch in VLC.</i>")
+        await self.send_message(chat_id, "\n\n".join(lines))
+
+    async def _handle_drive_storage(self, chat_id: int) -> None:
+        async with AsyncSessionLocal() as session:
+            stmt = select(Media)
+            items = (await session.execute(stmt)).scalars().all()
+
+        total_count = len(items)
+        total_size = sum(m.size for m in items if m.size)
+        anime_count = sum(1 for m in items if m.category == "Anime")
+        tv_count = sum(1 for m in items if m.category == "TV Shows")
+        movies_count = sum(1 for m in items if m.category == "Movies")
+        other_count = sum(1 for m in items if m.category == "Other")
+
+        msg = (
+            "☁️ <b>StreamX — Google Drive Storage Vault</b>\n\n"
+            f"📦 <b>Total Media Vault Size:</b> {format_bytes(total_size)} ({total_count} files)\n\n"
+            "📁 <b>Category Breakdown:</b>\n"
+            f"• 🌸 <b>Anime:</b> {anime_count} files\n"
+            f"• 📺 <b>TV Shows:</b> {tv_count} files\n"
+            f"• 🎬 <b>Movies:</b> {movies_count} files\n"
+            f"• 📂 <b>Other:</b> {other_count} files\n\n"
+            "⚡ <i>All media streams directly with HTTP 206 Partial Content and zero local SSD disk wear.</i>"
+        )
+        await self.send_message(chat_id, msg)
+
+    async def _handle_clear(self, chat_id: int) -> None:
+        async with AsyncSessionLocal() as session:
+            stmt = select(TelegramTransfer).where(
+                TelegramTransfer.status.in_([TransferStatus.FAILED, TransferStatus.CANCELLED])
+            )
+            failed = (await session.execute(stmt)).scalars().all()
+            for t in failed:
+                t.is_deleted = True
+            await session.commit()
+            cleared_count = len(failed)
+
+        await self.send_message(
+            chat_id,
+            f"🧹 <b>Queue Cleaned</b>\n\nCleared {cleared_count} failed/cancelled transfer records from the queue view."
+        )
+
+    async def _handle_unknown_command(self, chat_id: int, cmd: str) -> None:
+        safe_cmd = html.escape(cmd)
+        msg = (
+            f"❓ <b>Unrecognized Command:</b> <code>{safe_cmd}</code>\n\n"
+            "<b>Available Commands:</b>\n"
+            "• /queue (or /downloads) — View active transfers & live progress\n"
+            "• /status — System health & queue overview\n"
+            "• /library — Browse uploaded Google Drive collection\n"
+            "• /search &lt;query&gt; — Search media titles in library\n"
+            "• /drive — View Drive storage quota and folders\n"
+            "• /retry [id] — Retry failed or cancelled transfers\n"
+            "• /cancel &lt;id&gt; — Cancel an active transfer\n"
+            "• /clear — Remove failed transfers from queue\n"
+            "• /ping — Check 24/7 server latency\n"
+            "• /help — Full instructions"
+        )
+        await self.send_message(chat_id, msg)
 
     async def _handle_ping(self, chat_id: int) -> None:
         msg = (
@@ -1015,33 +1120,57 @@ class TelegramBotService:
 
                 new_count = 0
                 enqueued_transfers = []
-                for m in messages:
+                # Process in chronological order (oldest to newest) so Episode 1 is enqueued before Episode 2, 3, 4
+                for m in reversed(messages):
                     file_obj = getattr(m, "file", None)
-                    if file_obj and getattr(file_obj, "name", None):
-                        fname = sanitize_filename(file_obj.name)
-                        fsize = getattr(file_obj, "size", 0) or 0
-                        if (
-                            m.id not in existing_tids
-                            and m.id not in existing_fwds
-                            and fname not in existing_filenames
-                            and fname not in existing_media
-                        ):
-                            t = TelegramTransfer(
-                                telegram_chat_id=self.owner_user_id or settings.TELEGRAM_OWNER_USER_ID,
-                                telegram_message_id=m.id,
-                                telegram_file_id=f"mtproto_{m.id}",
-                                filename=fname,
-                                size=fsize,
-                                status=TransferStatus.QUEUED,
-                                forwarded_chat_id=self.owner_user_id or settings.TELEGRAM_OWNER_USER_ID,
-                                forwarded_message_id=m.id,
-                            )
-                            session.add(t)
-                            existing_tids.add(m.id)
-                            existing_fwds.add(m.id)
-                            existing_filenames.add(fname)
-                            enqueued_transfers.append((fname, fsize, m.id))
-                            new_count += 1
+                    if not file_obj:
+                        continue
+
+                    # Robust filename extraction (handles files where DocumentAttributeFilename is missing)
+                    fname = getattr(file_obj, "name", None)
+                    if not fname and hasattr(m, "document") and m.document:
+                        for attr in getattr(m.document, "attributes", []):
+                            if hasattr(attr, "file_name") and attr.file_name:
+                                fname = attr.file_name
+                                break
+
+                    if not fname and m.message:
+                        first_line = m.message.strip().split("\n")[0][:80]
+                        ext = getattr(file_obj, "ext", "") or ".mp4"
+                        if not ext.startswith("."):
+                            ext = f".{ext}"
+                        fname = f"{first_line}{ext}"
+
+                    if not fname:
+                        ext = getattr(file_obj, "ext", ".mp4") or ".mp4"
+                        if not ext.startswith("."):
+                            ext = f".{ext}"
+                        fname = f"telegram_media_{m.id}{ext}"
+
+                    fname = sanitize_filename(fname)
+                    fsize = getattr(file_obj, "size", 0) or 0
+                    if (
+                        m.id not in existing_tids
+                        and m.id not in existing_fwds
+                        and fname not in existing_filenames
+                        and fname not in existing_media
+                    ):
+                        t = TelegramTransfer(
+                            telegram_chat_id=self.owner_user_id or settings.TELEGRAM_OWNER_USER_ID,
+                            telegram_message_id=m.id,
+                            telegram_file_id=f"mtproto_{m.id}",
+                            filename=fname,
+                            size=fsize,
+                            status=TransferStatus.QUEUED,
+                            forwarded_chat_id=self.owner_user_id or settings.TELEGRAM_OWNER_USER_ID,
+                            forwarded_message_id=m.id,
+                        )
+                        session.add(t)
+                        existing_tids.add(m.id)
+                        existing_fwds.add(m.id)
+                        existing_filenames.add(fname)
+                        enqueued_transfers.append((fname, fsize, m.id))
+                        new_count += 1
 
                 if new_count > 0:
                     await session.commit()

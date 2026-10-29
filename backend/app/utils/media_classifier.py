@@ -43,6 +43,7 @@ ANIME_FANSUB_GROUPS = {
     "subsplease", "erai-raws", "horriblesubs", "judas", "asw",
     "golumpa", "animedynasty", "animestation", "aniwatch", "anime_maniaac",
     "commie", "coalgirls", "fff", "kametsu", "animeraws",
+    "watchbox", "dynasty", "animes_horizon", "animeshorizon",
 }
 
 
@@ -128,7 +129,12 @@ def has_anime_signals(
         r"\bsubsplease\b",
         r"\berai-raws\b",
         r"@[a-z0-9_]*anime[a-z0-9_]*",
+        r"@[a-z0-9_]*watchbox[a-z0-9_]*",
+        r"\bwatchbox\b",
         r"\bxanime\w*\b",
+        r"\[(?:sub|dual|multi|esub|raw|dub)\]",
+        r"\bdual[-_ ]?audio\b",
+        r"@?animes?[_-]?horizon",
     ]
     for pattern in anime_tokens:
         if re.search(pattern, filename_lower):

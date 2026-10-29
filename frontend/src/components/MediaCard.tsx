@@ -27,7 +27,7 @@ const getCategoryIcon = (cat: string) => {
   return Film;
 };
 
-export const MediaCard: React.FC<MediaCardProps> = ({
+export const MediaCardComponent: React.FC<MediaCardProps> = ({
   item,
   group,
   isOffline: isOfflineProp,
@@ -39,6 +39,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   width,
 }) => {
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
   const [pressed, setPressed] = useState(false);
 
   // Resolve target item and metadata
@@ -55,11 +56,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   React.useEffect(() => {
     setCurrentPoster(posterUrl);
     setImageError(false);
+    setImageLoaded(false);
     setHasTriedProxy(false);
   }, [posterUrl]);
 
   const handlePosterError = () => {
-    if (!hasTriedProxy && posterUrl && posterUrl.includes('image.tmdb.org')) {
+    if (!hasTriedProxy && posterUrl && (posterUrl.startsWith('http://') || posterUrl.startsWith('https://')) && !posterUrl.includes('image-proxy')) {
       setHasTriedProxy(true);
       setCurrentPoster(`${API_BASE}/media/image-proxy?url=${encodeURIComponent(posterUrl)}`);
     } else {
@@ -132,6 +134,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   return (
     <div
+      className="media-card-shell"
       style={{
         position: 'relative',
         borderRadius: '12px',
@@ -155,18 +158,33 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     >
       {/* Poster Image */}
       {hasPoster && currentPoster ? (
-        <img
-          src={currentPoster}
-          alt={title}
-          loading="lazy"
-          onError={handlePosterError}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-            display: 'block',
-          }}
-        />
+        <>
+          {!imageLoaded && (
+            <div
+              className="skeleton-shimmer"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: '#111827',
+              }}
+            />
+          )}
+          <img
+            src={currentPoster}
+            alt={title}
+            loading="lazy"
+            onLoad={() => setImageLoaded(true)}
+            onError={handlePosterError}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+              opacity: imageLoaded ? 1 : 0,
+              transition: 'opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          />
+        </>
       ) : (
         /* Netflix-style Elegant Fallback Card */
         <div style={{
@@ -485,3 +503,19 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     </div>
   );
 };
+
+export const MediaCard = React.memo(MediaCardComponent, (prev, next) => {
+  return (
+    prev.item?.id === next.item?.id &&
+    prev.item?.updated_at === next.item?.updated_at &&
+    prev.item?.poster_url === next.item?.poster_url &&
+    prev.group?.id === next.group?.id &&
+    prev.group?.posterUrl === next.group?.posterUrl &&
+    prev.group?.episodes.length === next.group?.episodes.length &&
+    prev.isOffline === next.isOffline &&
+    prev.episodeLabelBadge === next.episodeLabelBadge &&
+    prev.overrideProgress?.progressPercentage === next.overrideProgress?.progressPercentage &&
+    prev.overrideProgress?.completed === next.overrideProgress?.completed &&
+    prev.width === next.width
+  );
+});

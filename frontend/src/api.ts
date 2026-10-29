@@ -444,16 +444,30 @@ export function getMediaDisplayYear(item: MediaItem): number | undefined {
 
 export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'original' = 'w500'): string | undefined {
   if (item.poster_override && item.poster_override.trim()) {
-    return item.poster_override.trim();
+    const o = item.poster_override.trim();
+    if (o.includes('anilist.co') || o.includes('image.tmdb.org') || o.includes('googleusercontent.com')) {
+      return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(o)}`;
+    }
+    return o;
   }
   if (item.poster_url && item.poster_url.trim()) {
     const p = item.poster_url.trim();
-    if (p.startsWith('http://') || p.startsWith('https://')) return p;
+    if (p.startsWith('http://') || p.startsWith('https://')) {
+      if (p.includes('anilist.co') || p.includes('image.tmdb.org') || p.includes('googleusercontent.com')) {
+        return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(p)}`;
+      }
+      return p;
+    }
     if (p.startsWith('/')) return `${getApiBase()}${p}`;
   }
   if (item.canonical_metadata?.poster_path) {
     const path = item.canonical_metadata.poster_path;
-    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      if (path.includes('anilist.co') || path.includes('image.tmdb.org') || path.includes('googleusercontent.com')) {
+        return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(path)}`;
+      }
+      return path;
+    }
     const cleanPath = path.replace(/^\//, '');
     const tmdbUrl = `https://image.tmdb.org/t/p/${size}/${cleanPath}`;
     return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(tmdbUrl)}`;
@@ -461,10 +475,21 @@ export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'orig
   if (item.metadata_json) {
     try {
       const parsed = JSON.parse(item.metadata_json);
-      if (parsed.poster_url) return parsed.poster_url;
+      if (parsed.poster_url) {
+        const u = parsed.poster_url;
+        if (u.includes('anilist.co') || u.includes('image.tmdb.org') || u.includes('googleusercontent.com')) {
+          return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(u)}`;
+        }
+        return u;
+      }
       if (parsed.poster_path) {
         const p = parsed.poster_path;
-        if (p.startsWith('http://') || p.startsWith('https://')) return p;
+        if (p.startsWith('http://') || p.startsWith('https://')) {
+          if (p.includes('anilist.co') || p.includes('image.tmdb.org') || p.includes('googleusercontent.com')) {
+            return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(p)}`;
+          }
+          return p;
+        }
         const cleanPath = p.replace(/^\//, '');
         const tmdbUrl = `https://image.tmdb.org/t/p/${size}/${cleanPath}`;
         return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(tmdbUrl)}`;
@@ -478,11 +503,20 @@ export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'orig
 
 export function getMediaBackdropUrl(item: MediaItem, size: 'w780' | 'w1280' | 'original' = 'w1280'): string | undefined {
   if (item.backdrop_override && item.backdrop_override.trim()) {
-    return item.backdrop_override.trim();
+    const o = item.backdrop_override.trim();
+    if (o.includes('anilist.co') || o.includes('image.tmdb.org')) {
+      return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(o)}`;
+    }
+    return o;
   }
   if (item.canonical_metadata?.backdrop_path) {
     const path = item.canonical_metadata.backdrop_path;
-    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      if (path.includes('anilist.co') || path.includes('image.tmdb.org')) {
+        return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(path)}`;
+      }
+      return path;
+    }
     const cleanPath = path.replace(/^\//, '');
     const tmdbUrl = `https://image.tmdb.org/t/p/${size}/${cleanPath}`;
     return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(tmdbUrl)}`;
@@ -490,10 +524,21 @@ export function getMediaBackdropUrl(item: MediaItem, size: 'w780' | 'w1280' | 'o
   if (item.metadata_json) {
     try {
       const parsed = JSON.parse(item.metadata_json);
-      if (parsed.backdrop_url) return parsed.backdrop_url;
+      if (parsed.backdrop_url) {
+        const u = parsed.backdrop_url;
+        if (u.includes('anilist.co') || u.includes('image.tmdb.org')) {
+          return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(u)}`;
+        }
+        return u;
+      }
       if (parsed.backdrop_path) {
         const bp = parsed.backdrop_path;
-        if (bp.startsWith('http://') || bp.startsWith('https://')) return bp;
+        if (bp.startsWith('http://') || bp.startsWith('https://')) {
+          if (bp.includes('anilist.co') || bp.includes('image.tmdb.org')) {
+            return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(bp)}`;
+          }
+          return bp;
+        }
         const cleanPath = bp.replace(/^\//, '');
         const tmdbUrl = `https://image.tmdb.org/t/p/${size}/${cleanPath}`;
         return `${getApiBase()}/media/image-proxy?url=${encodeURIComponent(tmdbUrl)}`;

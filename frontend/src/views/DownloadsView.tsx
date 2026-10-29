@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import {
   ArrowDownCircle, Pause, Play, X, Wifi,
   WifiOff, Trash2, HardDrive, Cloud, RefreshCw,
-  RotateCw, CheckCircle2, AlertCircle, Clock, Loader2
+  RotateCw, CheckCircle2, AlertCircle, Clock, Loader2,
+  ExternalLink, Sparkles
 } from 'lucide-react';
 import type { DeviceDownload, MediaItem, TelegramTransfer } from '../types';
 import {
@@ -54,6 +55,25 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
 
   // Default to cloud transfers if any exist, or offline
   const [subTab, setSubTab] = useState<'cloud' | 'offline' | 'active'>('cloud');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'completed' | 'failed'>('all');
+  const completedTransfers = transfers.filter((t) => t.status === 'COMPLETED');
+  const failedTransfers = transfers.filter((t) => t.status === 'FAILED' || t.status === 'CANCELLED');
+
+  const filteredTransfers = transfers.filter((t) => {
+    if (filterStatus === 'active') {
+      return (
+        t.status === 'FETCHING_TELEGRAM' ||
+        t.status === 'UPLOADING_DRIVE' ||
+        t.status === 'VERIFYING' ||
+        t.status === 'QUEUED' ||
+        t.status === 'RETRYING'
+      );
+    }
+    if (filterStatus === 'completed') return t.status === 'COMPLETED';
+    if (filterStatus === 'failed') return t.status === 'FAILED' || t.status === 'CANCELLED';
+    return true;
+  });
+
   const [isSyncingDrive, setIsSyncingDrive] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [transferActionLoading, setTransferActionLoading] = useState<number | null>(null);
@@ -305,30 +325,176 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
             </div>
           )}
 
-          {transfers.length === 0 ? (
+          {/* Hero Pipeline Overview */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gap: '10px',
+              padding: '12px 14px',
+              borderRadius: '14px',
+              background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.45), rgba(15, 23, 42, 0.65))',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              backdropFilter: 'blur(16px)',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <span style={{ fontSize: '0.66rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Pipeline Status
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                <span
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: activeCloudTransfers.length > 0 ? '#10b981' : '#64748b',
+                    boxShadow: activeCloudTransfers.length > 0 ? '0 0 10px #10b981' : 'none',
+                  }}
+                />
+                <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#fff' }}>
+                  {activeCloudTransfers.length > 0 ? `${activeCloudTransfers.length} Active` : 'Idle · Ready'}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <span style={{ fontSize: '0.66rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Master Storage
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Cloud size={14} color="#818cf8" />
+                <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#fff' }}>
+                  Google Drive
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <span style={{ fontSize: '0.66rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Ingested Titles
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={14} color="#10b981" />
+                <span style={{ fontSize: '0.88rem', fontWeight: 800, color: '#fff' }}>
+                  {completedTransfers.length} Completed
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Pills */}
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '2px' }}>
+            {[
+              { id: 'all', label: 'All', count: transfers.length },
+              { id: 'active', label: 'Active', count: activeCloudTransfers.length },
+              { id: 'completed', label: 'Completed', count: completedTransfers.length },
+              { id: 'failed', label: 'Failed', count: failedTransfers.length },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFilterStatus(f.id as any)}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '20px',
+                  fontSize: '0.72rem',
+                  fontWeight: filterStatus === f.id ? 700 : 500,
+                  border: filterStatus === f.id ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.08)',
+                  background: filterStatus === f.id ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
+                  color: filterStatus === f.id ? '#a5b4fc' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {f.label}
+                <span
+                  style={{
+                    background: filterStatus === f.id ? '#6366f1' : 'rgba(255,255,255,0.08)',
+                    color: filterStatus === f.id ? '#fff' : 'var(--text-faint)',
+                    padding: '1px 6px',
+                    borderRadius: '10px',
+                    fontSize: '0.64rem',
+                  }}
+                >
+                  {f.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {filteredTransfers.length === 0 ? (
             <div
               style={{
-                padding: '60px 20px',
+                padding: '48px 20px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: '12px',
-                color: 'var(--text-faint)',
+                gap: '14px',
+                borderRadius: '16px',
+                border: '1px dashed rgba(255,255,255,0.12)',
+                background: 'rgba(255,255,255,0.02)',
+                textAlign: 'center',
               }}
             >
-              <Cloud size={46} style={{ opacity: 0.25 }} />
-              <p style={{ fontSize: '0.92rem', fontWeight: 700, color: '#fff' }}>No transfers recorded</p>
-              <p style={{ fontSize: '0.78rem', textAlign: 'center', maxWidth: '300px', lineHeight: 1.4 }}>
-                Forward or send video files to your Telegram Bot. They will automatically upload to Google Drive and appear in your StreamX library.
-              </p>
+              <div
+                style={{
+                  width: '54px',
+                  height: '54px',
+                  borderRadius: '50%',
+                  background: 'rgba(99, 102, 241, 0.12)',
+                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#818cf8',
+                }}
+              >
+                <Cloud size={26} />
+              </div>
+              <div>
+                <p style={{ fontSize: '0.94rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                  {filterStatus === 'all' ? 'No Cloud Transfers' : `No ${filterStatus} Transfers`}
+                </p>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '4px 0 0 0', maxWidth: '320px', lineHeight: 1.4 }}>
+                  Forward video files directly to your StreamX Telegram Bot. Files stream directly to Google Drive with 0 local disk usage.
+                </p>
+              </div>
+
+              <a
+                href="https://t.me/Stream1_X_bot"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                  color: '#fff',
+                  fontSize: '0.76rem',
+                  fontWeight: 700,
+                  textDecoration: 'none',
+                  boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
+                }}
+              >
+                <Sparkles size={14} />
+                <span>Open @Stream1_X_bot</span>
+                <ExternalLink size={12} />
+              </a>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {transfers.map((t) => {
+              {filteredTransfers.map((t) => {
                 const meta = parseMediaMetadata(t.filename);
                 const badge = getTransferStatusBadge(t.status);
                 const progressPct =
-                  t.size > 0 ? Math.min(100, Math.round(((t.bytes_transferred || 0) / t.size) * 100)) : 0;
+                  t.size > 0 ? Math.min(100, Math.round(((t.bytes_transferred || 0) / t.size) * 100)) : (t.status === 'COMPLETED' ? 100 : 0);
                 const isTransferring =
                   t.status === 'FETCHING_TELEGRAM' ||
                   t.status === 'UPLOADING_DRIVE' ||
@@ -336,7 +502,6 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                 const isRetryable =
                   t.status === 'FAILED' || t.status === 'CANCELLED' || t.status === 'QUEUED';
 
-                // Look up if this item already synced to library
                 const matchingMedia = Array.from(mediaMap.values()).find(
                   (m) => m.filename === t.filename
                 );
@@ -351,16 +516,23 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '10px',
-                      borderRadius: '12px',
-                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '14px',
+                      border: isTransferring
+                        ? '1px solid rgba(99, 102, 241, 0.45)'
+                        : '1px solid rgba(255,255,255,0.08)',
+                      background: isTransferring
+                        ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(15, 23, 42, 0.8))'
+                        : 'rgba(15, 23, 42, 0.6)',
+                      boxShadow: isTransferring ? '0 4px 20px rgba(99, 102, 241, 0.15)' : 'none',
+                      transition: 'all 0.2s ease',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       {/* Thumbnail or Cloud icon */}
                       <div
                         style={{
-                          width: '46px',
-                          height: '64px',
+                          width: '48px',
+                          height: '66px',
                           borderRadius: '8px',
                           flexShrink: 0,
                           overflow: 'hidden',
@@ -368,6 +540,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
+                          border: '1px solid rgba(255,255,255,0.08)',
                         }}
                       >
                         {posterUrl ? (
@@ -377,13 +550,13 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           />
                         ) : (
-                          <Cloud size={20} color="#818cf8" />
+                          <Cloud size={22} color="#818cf8" />
                         )}
                       </div>
 
                       {/* Info & details */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
                           <span
                             style={{
                               display: 'inline-flex',
@@ -401,6 +574,35 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                             {badge.icon}
                             {badge.label}
                           </span>
+                          {(matchingMedia?.season !== undefined && matchingMedia?.episode !== undefined) ? (
+                            <span
+                              style={{
+                                fontSize: '0.64rem',
+                                color: '#a5b4fc',
+                                background: 'rgba(99, 102, 241, 0.15)',
+                                border: '1px solid rgba(99, 102, 241, 0.3)',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                fontWeight: 700,
+                              }}
+                            >
+                              S{matchingMedia.season} · E{matchingMedia.episode}
+                            </span>
+                          ) : meta.seasonEpisode ? (
+                            <span
+                              style={{
+                                fontSize: '0.64rem',
+                                color: '#a5b4fc',
+                                background: 'rgba(99, 102, 241, 0.15)',
+                                border: '1px solid rgba(99, 102, 241, 0.3)',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                fontWeight: 700,
+                              }}
+                            >
+                              {meta.seasonEpisode}
+                            </span>
+                          ) : null}
                           {meta.quality && (
                             <span
                               style={{
@@ -418,7 +620,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
 
                         <p
                           style={{
-                            fontSize: '0.84rem',
+                            fontSize: '0.86rem',
                             fontWeight: 700,
                             color: '#fff',
                             whiteSpace: 'nowrap',
@@ -428,7 +630,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                           }}
                           title={t.filename}
                         >
-                          {meta.cleanTitle}
+                          {meta.cleanTitle || t.filename}
                         </p>
 
                         <div
@@ -445,7 +647,9 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                             {formatBytes(t.bytes_transferred || 0)} / {formatBytes(t.size)}
                           </span>
                           <span>·</span>
-                          <span>{progressPct}%</span>
+                          <span style={{ color: isTransferring ? '#818cf8' : 'inherit', fontWeight: isTransferring ? 700 : 'normal' }}>
+                            {progressPct}%
+                          </span>
                           {t.error_message && (
                             <>
                               <span>·</span>
@@ -475,21 +679,25 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                             aria-label="Play with VLC"
                             title="Play in VLC"
                             style={{
-                              width: '34px',
                               height: '34px',
-                              borderRadius: '50%',
+                              padding: '0 12px',
+                              borderRadius: '17px',
                               border: 'none',
                               background: '#ffffff',
-                              boxShadow: '0 2px 10px rgba(255,255,255,0.2)',
+                              boxShadow: '0 2px 10px rgba(255,255,255,0.25)',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
+                              gap: '5px',
                               cursor: 'pointer',
                               color: '#090d16',
+                              fontSize: '0.74rem',
+                              fontWeight: 800,
                               transition: 'all 0.15s ease',
                             }}
                           >
-                            <Play size={13} fill="#090d16" style={{ marginLeft: '1px' }} />
+                            <Play size={12} fill="#090d16" />
+                            <span>VLC</span>
                           </button>
                         )}
 
@@ -544,14 +752,23 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
 
                     {/* Progress Bar for In-flight Transfers */}
                     {isTransferring && (
-                      <div className="progress-track" style={{ height: '4px', marginTop: '2px' }}>
-                        <div
-                          className="progress-fill"
-                          style={{
-                            width: `${progressPct}%`,
-                            background: 'linear-gradient(90deg, #6366f1, #818cf8)',
-                          }}
-                        />
+                      <div style={{ marginTop: '2px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#a5b4fc', marginBottom: '4px', fontWeight: 600 }}>
+                          <span>Streaming to Google Drive...</span>
+                          <span>{progressPct}%</span>
+                        </div>
+                        <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              height: '100%',
+                              width: `${progressPct}%`,
+                              background: 'linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899)',
+                              borderRadius: '3px',
+                              transition: 'width 0.3s ease',
+                              boxShadow: '0 0 10px rgba(99, 102, 241, 0.6)',
+                            }}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>

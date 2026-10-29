@@ -45,7 +45,13 @@ from app.utils.logging import log_event, logger
 
 
 from app.utils.filename_parser import parse_filename
-from app.utils.media_classifier import classify_media, is_media_file
+from app.utils.media_classifier import (
+    classify_media,
+    has_anime_signals,
+    has_episodic_signals,
+    is_media_file,
+    MediaTaxonomy,
+)
 
 
 # How far back the worker scans a channel when a direct message-id lookup fails.
@@ -85,6 +91,99 @@ class TransferWorker:
             log_event("TRANSFER_CANCELLED_BY_USER", transfer_id=transfer_id)
             return True
         return False
+
+    _last_edge_sync: float = 0.0
+
+    async def broadcast_transfers_to_edge(self) -> None:
+        """Push real-time transfer progress to Cloudflare edge worker so Vercel production site reflects live downloads."""
+        now = time.time()
+        if now - TransferWorker._last_edge_sync < 1.5:
+            return
+        TransferWorker._last_edge_sync = now
+
+        try:
+            async with AsyncSessionLocal() as session:
+                stmt = (
+                    select(TelegramTransfer)
+                    .where(TelegramTransfer.is_deleted.is_(False))
+                    .order_by(TelegramTransfer.id.desc())
+                    .limit(30)
+                )
+                rows = (await session.execute(stmt)).scalars().all()
+                payload = [
+                    {
+                        "id": t.id,
+                        "filename": t.filename,
+                        "size": t.size,
+                        "status": t.status.value,
+                        "bytes_transferred": t.bytes_transferred or 0,
+                        "error_message": t.error_message,
+                        "telegram_chat_id": t.telegram_chat_id,
+                        "telegram_message_id": t.telegram_message_id,
+                        "created_at": t.created_at.isoformat() if t.created_at else None,
+                        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+                    }
+                    for t in rows
+                ]
+
+            worker_url = "https://streamx-worker.siddiqsiddiq00012.workers.dev/api/transfers/sync"
+            headers = {"Content-Type": "application/json"}
+            if settings.TELEGRAM_WEBHOOK_SECRET:
+                headers["X-Telegram-Bot-Api-Secret-Token"] = settings.TELEGRAM_WEBHOOK_SECRET
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(worker_url, json={"transfers": payload}, headers=headers)
+        except Exception as e:
+            logger.debug(f"Edge transfer sync notice: {e}")
+
+    async def resolve_transfer_category(self, filename: str, parsed) -> str:
+        """Deterministically resolve category with sibling and Drive folder cascading."""
+        cat = detect_category(filename)
+        if cat in ("Anime", "Anime Movies") or not has_episodic_signals(parsed, raw_filename=filename):
+            return cat
+
+        clean_title = (parsed.clean_title or "").lower().strip()
+        if not clean_title:
+            return cat
+
+        # Check 1: Do we already have an existing folder for this show in Anime on Drive?
+        try:
+            anime_folder_id = await drive_service.get_folder_id("Anime")
+            if anime_folder_id:
+                creds = await drive_service.get_credentials()
+                service = drive_service._get_drive_client(creds)
+                query = f"'{anime_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+                res = service.files().list(q=query, fields="files(name)").execute()
+                for f in res.get("files", []):
+                    fn = f.get("name", "").lower().strip()
+                    if fn == clean_title or clean_title in fn or fn in clean_title:
+                        return "Anime"
+        except Exception as e:
+            logger.debug(f"Drive folder category check warning: {e}")
+
+        # Check 2: Does any other transfer in queue or media in library share this clean_title and is Anime?
+        async with AsyncSessionLocal() as session:
+            t_stmt = select(TelegramTransfer.filename).where(
+                TelegramTransfer.is_deleted.is_(False),
+                TelegramTransfer.status.notin_([TransferStatus.CANCELLED, TransferStatus.FAILED]),
+            )
+            t_rows = (await session.execute(t_stmt)).scalars().all()
+            for fn in t_rows:
+                p = parse_filename(fn)
+                if p.clean_title.lower().strip() == clean_title:
+                    if has_anime_signals(p, raw_filename=fn):
+                        return "Anime"
+
+            m_stmt = select(Media.filename, Media.category).where(
+                Media.is_deleted.is_(False),
+            )
+            m_rows = (await session.execute(m_stmt)).all()
+            for fn, m_cat in m_rows:
+                p = parse_filename(fn)
+                if p.clean_title.lower().strip() == clean_title:
+                    if m_cat == "Anime" or has_anime_signals(p, raw_filename=fn):
+                        return "Anime"
+
+        return cat
 
     async def reconcile_incomplete_transfers(self) -> None:
         """Section 37: Reconcile transfers left incomplete by dead or restarted processes."""
@@ -471,8 +570,8 @@ class TransferWorker:
 
         actual_size = getattr(target_message.file, "size", expected_size)
         mime_type = resolve_mime_type(filename)
-        category = detect_category(filename)
         parsed = parse_filename(filename)
+        category = await self.resolve_transfer_category(filename, parsed)
         show_name = parsed.clean_title
 
         # 3. Check / Initialize Google Drive Resumable Session
@@ -632,6 +731,7 @@ class TransferWorker:
                             if t:
                                 t.bytes_transferred = current_offset
                                 await session.commit()
+                        asyncio.create_task(self.broadcast_transfers_to_edge())
 
                         if completed:
                             drive_file_id = file_id
@@ -682,6 +782,9 @@ class TransferWorker:
         media_id = None
         parsed_tech = parse_filename(filename)
         taxonomy_type, shelf_cat = classify_media(parsed_tech, raw_filename=filename, mime_type=mime_type)
+        if category in ("Anime", "Anime Movies") and shelf_cat not in ("Anime", "Anime Movies"):
+            shelf_cat = "Anime"
+            taxonomy_type = MediaTaxonomy.ANIME_EPISODE
         is_media = is_media_file(filename, mime_type)
 
         from app.services.metadata_service import metadata_service
@@ -714,15 +817,18 @@ class TransferWorker:
             await session.commit()
             await session.refresh(media)
             media_id = media.id
+        asyncio.create_task(self.broadcast_transfers_to_edge())
 
         # For non-media files, export catalog immediately since no enrichment will run
         if not is_media:
             asyncio.create_task(self._auto_export_catalog_snapshot())
 
-        # Automatically enqueue metadata enrichment job ONLY for video media
+        # Automatically enqueue and IMMEDIATELY process metadata enrichment for video media
         if media_id and is_media:
             try:
                 await metadata_service.enqueue_media_for_enrichment(media_id)
+                # Immediately process metadata in background with zero delay so posters populate instantly
+                asyncio.create_task(self._process_media_enrichment_immediate(media_id))
             except Exception as e:
                 logger.warning(f"Failed to enqueue metadata job for media #{media_id}: {e}")
 
@@ -741,8 +847,58 @@ class TransferWorker:
             ),
         )
 
+    async def _process_media_enrichment_immediate(self, media_id: int) -> None:
+        """Immediately processes metadata for newly ingested media, cascades siblings, and updates edge snapshot."""
+        try:
+            from app.services.metadata_service import metadata_service
+            from app.db.models import MetadataJob, MetadataJobStatus
+            log_event("IMMEDIATE_METADATA_ENRICHMENT_STARTED", media_id=media_id)
+            success = await metadata_service.process_media_metadata(media_id)
+
+            # Reconcile any pending MetadataJob records for this media
+            async with AsyncSessionLocal() as session:
+                stmt = select(MetadataJob).where(
+                    MetadataJob.media_id == media_id,
+                    MetadataJob.status.in_([MetadataJobStatus.PENDING, MetadataJobStatus.PROCESSING])
+                )
+                res = await session.execute(stmt)
+                jobs = res.scalars().all()
+                for j in jobs:
+                    if success:
+                        j.status = MetadataJobStatus.COMPLETED
+                        j.completed_at = utc_now()
+                        j.last_error = None
+                await session.commit()
+
+            log_event("IMMEDIATE_METADATA_ENRICHMENT_FINISHED", media_id=media_id, success=success)
+            # Re-export and sync catalog to edge worker
+            await self._auto_export_catalog_snapshot()
+        except Exception as e:
+            logger.warning(f"Immediate metadata enrichment error for media #{media_id}: {e}")
+
+    async def broadcast_catalog_to_edge(self) -> None:
+        """Push latest catalog snapshot to Cloudflare edge worker so edge has real-time posters & metadata."""
+        try:
+            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            snapshot_path = os.path.join(repo_root, "scripts", "catalog_snapshot.json")
+            if not os.path.exists(snapshot_path):
+                return
+            with open(snapshot_path, "r", encoding="utf-8") as f:
+                catalog_data = json.load(f)
+
+            worker_url = "https://streamx-worker.siddiqsiddiq00012.workers.dev/api/catalog/sync"
+            headers = {"Content-Type": "application/json"}
+            if settings.TELEGRAM_WEBHOOK_SECRET:
+                headers["X-Telegram-Bot-Api-Secret-Token"] = settings.TELEGRAM_WEBHOOK_SECRET
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                res = await client.post(worker_url, json={"catalog": catalog_data}, headers=headers)
+                log_event("EDGE_CATALOG_SYNC_RESULT", status_code=res.status_code, items_count=len(catalog_data))
+        except Exception as e:
+            logger.debug(f"Edge catalog sync notice: {e}")
+
     async def _auto_export_catalog_snapshot(self) -> None:
-        """Atomically dumps updated library to scripts/catalog_snapshot.json with zero git side-effects."""
+        """Atomically dumps updated library to scripts/catalog_snapshot.json and syncs edge worker."""
         try:
             repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
             if repo_root not in sys.path:
@@ -750,6 +906,7 @@ class TransferWorker:
             from scripts.export_snapshot import export_catalog_snapshot
 
             await export_catalog_snapshot()
+            await self.broadcast_catalog_to_edge()
         except Exception as e:
             logger.debug(f"Catalog auto-export note: {e}")
 

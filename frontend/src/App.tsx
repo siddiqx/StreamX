@@ -172,7 +172,20 @@ export const App: React.FC = () => {
       const mediaRes = await fetchMedia();
       if (mediaRes && mediaRes.length > 0) {
         setMedia((prev) => {
-          if (prev.length === mediaRes.length && prev[0]?.id === mediaRes[0]?.id) {
+          if (
+            prev.length === mediaRes.length &&
+            prev[0]?.id === mediaRes[0]?.id &&
+            prev.every((m, idx) => {
+              const next = mediaRes[idx];
+              return (
+                next &&
+                m.id === next.id &&
+                m.poster_url === next.poster_url &&
+                m.metadata_status === next.metadata_status &&
+                m.updated_at === next.updated_at
+              );
+            })
+          ) {
             return prev;
           }
           return mediaRes;
@@ -199,11 +212,15 @@ export const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [transfers]);
 
-  // Periodic background media catalog check (every 60s)
+  // Dynamic media catalog check: 4s while any item lacks posters or is enriching, 45s once steady
   useEffect(() => {
-    const interval = setInterval(refreshMedia, 60000);
+    const hasUnenriched = media.some(
+      (m) => !m.poster_url || m.metadata_status === 'PENDING' || m.metadata_status === 'PROCESSING'
+    );
+    const intervalMs = hasUnenriched ? 4000 : 45000;
+    const interval = setInterval(refreshMedia, intervalMs);
     return () => clearInterval(interval);
-  }, []);
+  }, [media]);
 
   // Save downloads to localStorage
   useEffect(() => {

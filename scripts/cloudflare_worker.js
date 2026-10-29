@@ -231,7 +231,7 @@ async function getDynamicCatalog(env) {
   try {
     const token = await getGoogleAccessToken(env);
     if (token) {
-      const driveUrl = "https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=files(id,name,size,mimeType,createdTime,modifiedTime)&q=trashed=false";
+      const driveUrl = "https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=files(id,name,size,mimeType,createdTime,modifiedTime,thumbnailLink)&q=trashed=false";
       const driveRes = await fetch(driveUrl, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(6000),
@@ -276,18 +276,45 @@ async function getDynamicCatalog(env) {
               };
             }
 
-            // Fallback heuristics for brand-new files not yet in snapshot
-            const isAnime = lowerName.includes("s0") || lowerName.includes("ep") || lowerName.includes("sub") || lowerName.includes("dual");
+            // Sibling & canonical metadata cascade on Edge
+            const cleanTitle = fname
+              .replace(/\[[^\]]*\]/g, "")
+              .replace(/\([^\)]*\)/g, "")
+              .replace(/\b(EP?\d+|S\d+E\d+|S\d+|\d+p|1080p|720p|4k|2160p|Sub|Dual|AAC|HEVC|x264|x265|WEB-DL|BluRay|HDTV)\b/gi, "")
+              .replace(/[-_.]+/g, " ")
+              .trim()
+              .toLowerCase();
+
+            // Match against any sibling item in snapshotList sharing the series title
+            const siblingMatch = snapshotList.find((item) => {
+              if (!item) return false;
+              const itemTitle = (item.canonical_metadata?.title || item.title || item.clean_title || "").toLowerCase().trim();
+              const itemFn = (item.filename || "").toLowerCase();
+              return (
+                (cleanTitle.length >= 3 && itemTitle && (itemTitle.includes(cleanTitle) || cleanTitle.includes(itemTitle))) ||
+                (cleanTitle.length >= 3 && itemFn && itemFn.includes(cleanTitle))
+              );
+            });
+
+            const isAnime = lowerName.includes("s0") || lowerName.includes("ep") || lowerName.includes("sub") || lowerName.includes("dual") || (siblingMatch && siblingMatch.category === "Anime");
+            const driveThumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+/, "=s600") : null;
+            const poster = (siblingMatch && siblingMatch.poster_url) ? siblingMatch.poster_url : driveThumb;
+            const backdrop = (siblingMatch && (siblingMatch.backdrop_url || siblingMatch.canonical_metadata?.backdrop_path))
+              ? (siblingMatch.backdrop_url || siblingMatch.canonical_metadata?.backdrop_path)
+              : null;
+
             return {
               id: idx + 1,
               drive_file_id: f.id,
               filename: fname,
               size: size,
               mime_type: f.mimeType || "video/x-matroska",
-              category: isAnime ? "Anime" : "Movies",
-              media_type: isAnime ? "ANIME_EPISODE" : "MOVIE",
-              poster_url: null,
-              canonical_metadata: null,
+              category: siblingMatch ? siblingMatch.category : (isAnime ? "Anime" : "Movies"),
+              media_type: siblingMatch ? siblingMatch.media_type : (isAnime ? "ANIME_EPISODE" : "MOVIE"),
+              series_key: siblingMatch?.series_key || null,
+              poster_url: poster,
+              backdrop_url: backdrop,
+              canonical_metadata: siblingMatch?.canonical_metadata || null,
               created_at: f.createdTime || new Date().toISOString(),
               updated_at: f.modifiedTime || new Date().toISOString(),
             };
@@ -474,27 +501,92 @@ async function handleTelegramWebhook(request, env, rawBase) {
       return new Response("OK", { status: 200 });
     }
 
-    if (cmd === "/status" || cmd === "/queue") {
+    if (["/queue", "/downloads", "/download", "/transfers", "/transfer", "/progress"].includes(cmd)) {
+      if (edgeTransfersQueue.length === 0) {
+        await sendTelegram(
+          chatId,
+          `✨ <b>StreamX — Transfer Queue Clear</b>\n\n` +
+          `No active downloads in progress. All transfers have finished uploading to Google Drive.\n\n` +
+          `• <b>Add More:</b> Forward any video file to start downloading.\n` +
+          `• <b>Browse Library:</b> Type /library to see your collection.`,
+          msgId
+        );
+      } else {
+        const lines = [`⏳ <b>StreamX Download Queue (${edgeTransfersQueue.length} files)</b>\n`];
+        for (const t of edgeTransfersQueue.slice(0, 8)) {
+          const sizeStr = t.size ? `${(t.size / (1024 * 1024)).toFixed(1)} MB` : "Unknown";
+          const progressPct = t.size && t.bytes_transferred ? Math.min(100, Math.round((t.bytes_transferred / t.size) * 100)) : (t.status === "COMPLETED" ? 100 : 0);
+          const emoji = t.status === "COMPLETED" ? "✅" : (t.status === "UPLOADING_DRIVE" ? "☁️" : (t.status === "FAILED" ? "❌" : "⏳"));
+          lines.push(`• ${emoji} <b>${t.filename}</b>\n  <code>${t.status}</code> · ${progressPct}% (${sizeStr})`);
+        }
+        if (edgeTransfersQueue.length > 8) {
+          lines.push(`\n<i>...and ${edgeTransfersQueue.length - 8} more in queue</i>`);
+        }
+        await sendTelegram(chatId, lines.join("\n\n"), msgId);
+      }
+      return new Response("OK", { status: 200 });
+    }
+
+    if (["/status", "/stats", "/health", "/system"].includes(cmd)) {
       const catalog = await getDynamicCatalog(env);
+      const activeTransfers = edgeTransfersQueue.filter(t => !["COMPLETED", "FAILED", "CANCELLED"].includes(t.status)).length;
       await sendTelegram(
         chatId,
         `📊 <b>StreamX System Status</b>\n\n` +
         `🟢 <b>Edge Bot Engine:</b> Active 24/7 (Always Responding)\n` +
+        `☁️ <b>Google Drive:</b> Connected & Ready\n` +
         `📚 <b>Library Count:</b> ${catalog.length} files on Google Drive\n` +
-        `☁️ <b>Google Drive:</b> Connected 24/7\n` +
-        `📥 <b>Cloud Queue:</b> ${edgeTransfersQueue.length} items awaiting download`,
+        `⏳ <b>Active Queue:</b> ${activeTransfers} downloads running\n` +
+        `⚡ <b>Streaming Mode:</b> Direct 206 Partial Content / Native VLC`,
         msgId
       );
       return new Response("OK", { status: 200 });
     }
 
-    if (cmd === "/library") {
+    if (["/library", "/catalog", "/list"].includes(cmd)) {
       const catalog = await getDynamicCatalog(env);
+      const topItems = catalog.slice(0, 5).map(m => `• <code>${m.filename}</code>`).join("\n");
       await sendTelegram(
         chatId,
         `📚 <b>StreamX Media Library</b>\n\n` +
-        `You have <b>${catalog.length}</b> media files available 24/7 on Google Drive.\n` +
-        `Open the StreamX web app or PWA to stream directly in VLC.`,
+        `You have <b>${catalog.length}</b> media files available 24/7 on Google Drive.\n\n` +
+        `<b>Recent Additions:</b>\n${topItems || "• No files yet"}\n\n` +
+        `Open the StreamX web app to watch anytime with instant VLC playback.`,
+        msgId
+      );
+      return new Response("OK", { status: 200 });
+    }
+
+    if (["/drive", "/storage"].includes(cmd)) {
+      const catalog = await getDynamicCatalog(env);
+      const totalBytes = catalog.reduce((acc, m) => acc + (m.size || 0), 0);
+      const totalGb = (totalBytes / (1024 * 1024 * 1024)).toFixed(2);
+      await sendTelegram(
+        chatId,
+        `☁️ <b>StreamX Google Drive Storage</b>\n\n` +
+        `📦 <b>Vault Size:</b> ${totalGb} GB (${catalog.length} items)\n` +
+        `📁 <b>Hierarchy:</b>\n` +
+        `  • StreamX/Anime\n` +
+        `  • StreamX/TV Shows\n` +
+        `  • StreamX/Movies\n` +
+        `  • StreamX/Other\n\n` +
+        `All media is permanently stored in your Google Drive master vault.`,
+        msgId
+      );
+      return new Response("OK", { status: 200 });
+    }
+
+    if (cmd.startsWith("/")) {
+      await sendTelegram(
+        chatId,
+        `❓ <b>Unrecognized Command:</b> <code>${cmd}</code>\n\n` +
+        `<b>Available Commands:</b>\n` +
+        `• /queue (or /downloads) — View active download progress\n` +
+        `• /status — System health & active downloads count\n` +
+        `• /library — Browse uploaded Google Drive collection\n` +
+        `• /drive — Storage usage & vault hierarchy\n` +
+        `• /ping — Latency & edge responsiveness check\n` +
+        `• /help — Full usage instructions`,
         msgId
       );
       return new Response("OK", { status: 200 });
@@ -604,6 +696,64 @@ export default {
       });
     }
 
+    // Edge Transfers Synchronization Endpoint (keeps Vercel download page in real-time sync with backend)
+    if ((url.pathname === "/api/transfers/sync" || url.pathname === "/transfers/sync") && request.method === "POST") {
+      const secret = request.headers.get("X-StreamX-Secret") || request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+      if (env?.TELEGRAM_WEBHOOK_SECRET && secret && secret !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        });
+      }
+      try {
+        const body = await request.json();
+        const incoming = Array.isArray(body) ? body : body?.transfers;
+        if (Array.isArray(incoming)) {
+          edgeTransfersQueue.length = 0;
+          for (const item of incoming) {
+            edgeTransfersQueue.push(item);
+          }
+          return new Response(JSON.stringify({ ok: true, count: edgeTransfersQueue.length }), {
+            status: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+          });
+        }
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        });
+      }
+    }
+
+    // Edge Catalog Snapshot Synchronization Endpoint (pushes enriched metadata directly to edge memory)
+    if ((url.pathname === "/api/catalog/sync" || url.pathname === "/catalog/sync") && request.method === "POST") {
+      const secret = request.headers.get("X-StreamX-Secret") || request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+      if (env?.TELEGRAM_WEBHOOK_SECRET && secret && secret !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        });
+      }
+      try {
+        const body = await request.json();
+        const incoming = Array.isArray(body) ? body : body?.catalog;
+        if (Array.isArray(incoming) && incoming.length > 0) {
+          cachedCatalog = incoming;
+          cachedCatalogTime = Date.now();
+          return new Response(JSON.stringify({ ok: true, count: cachedCatalog.length }), {
+            status: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+          });
+        }
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        });
+      }
+    }
+
     const rawBase = await getLiveBackendUrl(env);
 
     // 24/7 Telegram Webhook handler
@@ -622,8 +772,9 @@ export default {
       }
       try {
         const parsedImg = new URL(targetImg);
-        const allowedHosts = ["image.tmdb.org", "s4.anilist.co", "anilist.co", "m.media-amazon.com"];
-        if (parsedImg.protocol === "https:" && allowedHosts.includes(parsedImg.hostname.toLowerCase())) {
+        const allowedHosts = ["image.tmdb.org", "s4.anilist.co", "anilist.co", "m.media-amazon.com", "drive.google.com", "lh3.googleusercontent.com", "googleusercontent.com"];
+        const host = parsedImg.hostname.toLowerCase();
+        if (parsedImg.protocol === "https:" && (allowedHosts.includes(host) || host.endsWith(".googleusercontent.com"))) {
           const imgRes = await fetch(targetImg, {
             headers: { "User-Agent": "Mozilla/5.0 StreamX-Edge/1.0" },
           });

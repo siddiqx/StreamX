@@ -61,11 +61,11 @@ async def _run_metadata_worker_supervisor() -> None:
 
 
 async def _run_telegram_sync_supervisor() -> None:
-    """Watchdog loop to keep MTProto sync scanning for queued media every 30s."""
-    await asyncio.sleep(5)
+    """Watchdog loop to keep MTProto sync scanning for queued media immediately on boot and every 30s."""
     while True:
         try:
-            await bot_service.sync_forwarded_messages()
+            if bot_service.is_configured() and mtproto_service.is_configured():
+                await bot_service.sync_forwarded_messages()
         except asyncio.CancelledError:
             break
         except Exception as e:

@@ -359,7 +359,7 @@ class MetadataService:
 
             # If still not matched or low confidence, check if any library sibling episode
             # from the same series has already established a canonical entity.
-            if status_str != "MATCHED" and parsed.media_type == "tv" and candidates_by_id:
+            if status_str != "MATCHED":
                 current_series_key = self.get_series_key(media.filename)
                 async with AsyncSessionLocal() as session:
                     s_stmt = select(Media).where(

@@ -59,6 +59,10 @@ async def export_catalog_snapshot(
     from app.db.models import Media
     from app.api.media import format_media_item
 
+    if output_path is None and (settings.STREAMX_ENV == "testing" or os.getenv("STREAMX_ENV") == "testing"):
+        logger.debug("Skipping production catalog_snapshot overwrite in testing environment.")
+        return 0, str(SCRIPT_DIR / "catalog_snapshot.json")
+
     target_path = Path(output_path) if output_path else (SCRIPT_DIR / "catalog_snapshot.json")
     target_path = target_path.resolve()
     target_path.parent.mkdir(parents=True, exist_ok=True)

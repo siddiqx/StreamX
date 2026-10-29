@@ -132,7 +132,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   }, [posterUrl]);
 
   const handleBackdropError = () => {
-    if (!hasTriedBackdropProxy && backdropUrl && backdropUrl.includes('image.tmdb.org')) {
+    if (!hasTriedBackdropProxy && backdropUrl && (backdropUrl.startsWith('http://') || backdropUrl.startsWith('https://')) && !backdropUrl.includes('image-proxy')) {
       setHasTriedBackdropProxy(true);
       setCurrentBackdrop(`${API_BASE}/media/image-proxy?url=${encodeURIComponent(backdropUrl)}`);
     } else {
@@ -141,7 +141,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   };
 
   const handlePosterError = () => {
-    if (!hasTriedPosterProxy && posterUrl && posterUrl.includes('image.tmdb.org')) {
+    if (!hasTriedPosterProxy && posterUrl && (posterUrl.startsWith('http://') || posterUrl.startsWith('https://')) && !posterUrl.includes('image-proxy')) {
       setHasTriedPosterProxy(true);
       setCurrentPoster(`${API_BASE}/media/image-proxy?url=${encodeURIComponent(posterUrl)}`);
     } else {

@@ -205,10 +205,18 @@ async def proxy_image(url: str = Query(..., description="The TMDB or CDN image U
     if parsed.scheme not in ("https", "http"):
         raise HTTPException(status_code=400, detail="Invalid URL scheme")
 
-    allowed_hosts = {"image.tmdb.org", "s4.anilist.co", "anilist.co"}
+    allowed_hosts = {
+        "image.tmdb.org",
+        "s4.anilist.co",
+        "anilist.co",
+        "m.media-amazon.com",
+        "drive.google.com",
+        "lh3.googleusercontent.com",
+        "googleusercontent.com",
+    }
     hostname = (parsed.hostname or "").lower()
-    if hostname not in allowed_hosts:
-        raise HTTPException(status_code=400, detail="Only official TMDB or AniList images can be proxied")
+    if hostname not in allowed_hosts and not hostname.endswith(".googleusercontent.com"):
+        raise HTTPException(status_code=400, detail="Only official TMDB, AniList, or Drive thumbnails can be proxied")
 
     if parsed.port and parsed.port not in (80, 443):
         raise HTTPException(status_code=400, detail="Invalid port")
