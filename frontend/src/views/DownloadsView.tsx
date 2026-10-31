@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import {
   ArrowDownCircle, Pause, Play, X,
-  WifiOff, Trash2, HardDrive, Cloud, RefreshCw,
-  RotateCw, CheckCircle2, AlertCircle, Clock, Loader2,
+  WifiOff, Trash2, HardDrive, Cloud,
+  RotateCw, AlertCircle, Clock, Loader2,
   ShieldCheck, Film, Tv
 } from 'lucide-react';
 import type { DeviceDownload, MediaItem, TelegramTransfer } from '../types';
@@ -13,9 +13,7 @@ import {
   getMediaPosterUrl,
   retryTransfer,
   deleteTransfer,
-  syncDriveLibrary,
 } from '../api';
-import { launchVlcWithTracking } from '../utils/playerSettings';
 
 interface DownloadsViewProps {
   downloads: DeviceDownload[];
@@ -37,7 +35,6 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
   onResume,
   onCancel,
   onDeleteDownload,
-  onPlay,
   mediaMap,
   isWifiOnly,
   onRefreshData,
@@ -77,29 +74,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
     });
   }, [transfers, filterStatus]);
 
-  const [isSyncingDrive, setIsSyncingDrive] = useState(false);
-  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [transferActionLoading, setTransferActionLoading] = useState<number | null>(null);
-
-  const handleSyncDrive = async () => {
-    setIsSyncingDrive(true);
-    setSyncFeedback('Syncing library with Google Drive...');
-    try {
-      const res = await syncDriveLibrary();
-      if (res && res.status === 'ok') {
-        setSyncFeedback(`Drive synced (${res.synced_count ?? 0} updated)`);
-        if (onRefreshData) onRefreshData();
-      } else {
-        setSyncFeedback('Drive sync completed');
-        if (onRefreshData) onRefreshData();
-      }
-    } catch {
-      setSyncFeedback('Failed to sync Drive');
-    } finally {
-      setIsSyncingDrive(false);
-      setTimeout(() => setSyncFeedback(null), 3500);
-    }
-  };
 
   const handleRetryTransfer = async (transferId: number) => {
     setTransferActionLoading(transferId);
@@ -125,7 +100,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
     }
   };
 
-  // Robust multi-strategy matching of transfer to canonical MediaItem
+  // Multi-strategy matching of transfer to canonical MediaItem
   const mediaItemsList = useMemo(() => Array.from(mediaMap.values()), [mediaMap]);
 
   const findMatchingMedia = (t: TelegramTransfer): MediaItem | undefined => {
@@ -133,15 +108,15 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
     const tRaw = t.filename.trim();
     const tLower = tRaw.toLowerCase();
 
-    // 1. Direct filename exact match
+    // 1. Exact filename match
     let m = mediaItemsList.find((x) => x.filename === tRaw);
     if (m) return m;
 
-    // 2. Direct filename case-insensitive match
+    // 2. Case-insensitive filename match
     m = mediaItemsList.find((x) => (x.filename || '').trim().toLowerCase() === tLower);
     if (m) return m;
 
-    // 3. Match by parsed title and episode/season
+    // 3. Match by parsed title
     const meta = parseMediaMetadata(tRaw);
     if (meta.cleanTitle) {
       const cleanLower = meta.cleanTitle.toLowerCase();
@@ -162,13 +137,8 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
   const getTransferStatusBadge = (status: string) => {
     switch (status) {
       case 'COMPLETED':
-        return {
-          bg: 'rgba(16, 185, 129, 0.12)',
-          border: 'rgba(16, 185, 129, 0.3)',
-          color: '#34d399',
-          label: 'In Cloud Drive',
-          icon: <CheckCircle2 size={11} />,
-        };
+        // Removed "In Cloud" label as requested
+        return null;
       case 'UPLOADING_DRIVE':
         return {
           bg: 'rgba(99, 102, 241, 0.18)',
@@ -212,13 +182,7 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
           icon: <AlertCircle size={11} />,
         };
       default:
-        return {
-          bg: 'rgba(148, 163, 184, 0.12)',
-          border: 'rgba(148, 163, 184, 0.25)',
-          color: '#cbd5e1',
-          label: status,
-          icon: <Clock size={11} />,
-        };
+        return null;
     }
   };
 
@@ -239,78 +203,30 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
       margin: '0 auto',
       width: '100%',
     }}>
-      {/* 1. CLEAN SLEEK HEADER */}
+      {/* 1. CLEAN SLEEK HEADER (Sync Drive option removed) */}
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
         padding: '8px 0 4px',
       }}>
-        <div>
-          <h1 style={{
-            fontSize: '1.45rem',
-            fontWeight: 800,
-            color: '#fff',
-            margin: 0,
-            fontFamily: 'var(--font-display, inherit)',
-            letterSpacing: '-0.02em',
-          }}>
-            Downloads
-          </h1>
-          <p style={{
-            fontSize: '0.74rem',
-            color: 'var(--text-muted, #94a3b8)',
-            margin: '2px 0 0',
-          }}>
-            Manage cloud transfers and offline media
-          </p>
-        </div>
-
-        {/* Sync Drive Icon Action Button */}
-        <button
-          onClick={handleSyncDrive}
-          disabled={isSyncingDrive}
-          title="Synchronize Google Drive master files"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '7px 13px',
-            borderRadius: '999px',
-            border: '1px solid rgba(99, 102, 241, 0.35)',
-            background: 'rgba(99, 102, 241, 0.14)',
-            color: '#c7d2fe',
-            fontSize: '0.74rem',
-            fontWeight: 700,
-            cursor: isSyncingDrive ? 'not-allowed' : 'pointer',
-            transition: 'all 0.2s ease',
-          }}
-        >
-          <RefreshCw size={12} className={isSyncingDrive ? 'spin-animation' : ''} />
-          <span>{isSyncingDrive ? 'Syncing...' : 'Sync Drive'}</span>
-        </button>
+        <h1 style={{
+          fontSize: '1.45rem',
+          fontWeight: 800,
+          color: '#fff',
+          margin: 0,
+          fontFamily: 'var(--font-display, inherit)',
+          letterSpacing: '-0.02em',
+        }}>
+          Downloads
+        </h1>
+        <p style={{
+          fontSize: '0.74rem',
+          color: 'var(--text-muted, #94a3b8)',
+          margin: '2px 0 0',
+        }}>
+          Manage cloud transfers and offline media
+        </p>
       </div>
 
-      {/* Sync Status Banner */}
-      {syncFeedback && (
-        <div style={{
-          padding: '8px 14px',
-          borderRadius: '10px',
-          background: 'rgba(99, 102, 241, 0.16)',
-          border: '1px solid rgba(99, 102, 241, 0.3)',
-          color: '#e0e7ff',
-          fontSize: '0.74rem',
-          fontWeight: 600,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}>
-          <CheckCircle2 size={13} color="#a5b4fc" />
-          <span>{syncFeedback}</span>
-        </div>
-      )}
-
-      {/* 2. SEGMENTED TABS (Cloud Queue vs Offline Files) */}
+      {/* 2. SEGMENTED TABS (Cloud Transfers vs Offline Files) */}
       <div style={{
         display: 'flex',
         background: 'rgba(15, 23, 42, 0.65)',
@@ -508,11 +424,8 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      {/* Compact Poster Thumbnail */}
+                      {/* Compact Poster Thumbnail (No playback trigger here) */}
                       <div
-                        onClick={() => {
-                          if (matchingMedia && onPlay) onPlay(matchingMedia);
-                        }}
                         style={{
                           width: '46px',
                           height: '66px',
@@ -524,7 +437,6 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                           alignItems: 'center',
                           justifyContent: 'center',
                           border: '1px solid rgba(255, 255, 255, 0.1)',
-                          cursor: matchingMedia ? 'pointer' : 'default',
                         }}
                       >
                         {posterUrl ? (
@@ -556,21 +468,24 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                       {/* Info & Metadata */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            padding: '1px 7px',
-                            borderRadius: '999px',
-                            background: badge.bg,
-                            border: `1px solid ${badge.border}`,
-                            color: badge.color,
-                            fontSize: '0.64rem',
-                            fontWeight: 800,
-                          }}>
-                            {badge.icon}
-                            {badge.label}
-                          </span>
+                          {/* Active state badge only (No "In Cloud" badge when completed) */}
+                          {badge && (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              padding: '1px 7px',
+                              borderRadius: '999px',
+                              background: badge.bg,
+                              border: `1px solid ${badge.border}`,
+                              color: badge.color,
+                              fontSize: '0.64rem',
+                              fontWeight: 800,
+                            }}>
+                              {badge.icon}
+                              {badge.label}
+                            </span>
+                          )}
 
                           {(matchingMedia?.season !== undefined && matchingMedia?.episode !== undefined) ? (
                             <span style={{
@@ -656,35 +571,8 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Action Buttons */}
+                      {/* Action Controls (Play button removed; clean Retry and Delete only) */}
                       <div style={{ display: 'flex', gap: '6px', flexShrink: 0, alignItems: 'center' }}>
-                        {matchingMedia && t.status === 'COMPLETED' && (
-                          <button
-                            onClick={() => launchVlcWithTracking(matchingMedia)}
-                            aria-label="Play with VLC"
-                            title="Play in VLC"
-                            style={{
-                              height: '32px',
-                              padding: '0 12px',
-                              borderRadius: '999px',
-                              border: 'none',
-                              background: '#ffffff',
-                              boxShadow: '0 2px 8px rgba(255, 255, 255, 0.25)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: '4px',
-                              cursor: 'pointer',
-                              color: '#090d16',
-                              fontSize: '0.72rem',
-                              fontWeight: 800,
-                            }}
-                          >
-                            <Play size={11} fill="#090d16" />
-                            <span>VLC</span>
-                          </button>
-                        )}
-
                         {isRetryable && (
                           <button
                             onClick={() => handleRetryTransfer(t.id)}
@@ -938,52 +826,14 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
                         {displayTitle}
                       </p>
                       <div style={{ display: 'flex', gap: '5px', marginTop: '3px', alignItems: 'center' }}>
-                        <span style={{
-                          fontSize: '0.62rem',
-                          color: '#34d399',
-                          background: 'rgba(16, 185, 129, 0.12)',
-                          border: '1px solid rgba(16, 185, 129, 0.28)',
-                          padding: '1px 6px',
-                          borderRadius: '999px',
-                          fontWeight: 800,
-                        }}>
-                          Offline
-                        </span>
-                        <span style={{ fontSize: '0.66rem', color: 'var(--text-faint, #64748b)' }}>·</span>
                         <span style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', fontWeight: 600 }}>
                           {formatBytes(d.size)}
                         </span>
                       </div>
                     </div>
 
-                    {/* Action Controls */}
+                    {/* Action Controls (Play button removed; clean Delete only) */}
                     <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                      {mediaItem && (
-                        <button
-                          onClick={() => launchVlcWithTracking(mediaItem)}
-                          aria-label="Play in VLC"
-                          title="Play in VLC"
-                          style={{
-                            height: '32px',
-                            padding: '0 12px',
-                            borderRadius: '999px',
-                            border: 'none',
-                            background: '#ffffff',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '4px',
-                            cursor: 'pointer',
-                            color: '#090d16',
-                            fontSize: '0.72rem',
-                            fontWeight: 800,
-                          }}
-                        >
-                          <Play size={11} fill="#090d16" />
-                          <span>Play</span>
-                        </button>
-                      )}
-
                       {mediaItem && (
                         <button
                           onClick={() => onDeleteDownload(mediaItem)}

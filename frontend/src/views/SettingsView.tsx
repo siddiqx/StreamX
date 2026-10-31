@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   Wifi, Trash2, Clock, Check, Tv, Play,
-  RefreshCw, ShieldCheck, ChevronDown
+  RefreshCw, ShieldCheck, ChevronDown, Cloud
 } from 'lucide-react';
 import {
   formatBytes,
   API_BASE,
   setCustomApiBase,
+  fetchSystemStatus,
 } from '../api';
 import { getWatchHistory, clearWatchHistory } from '../utils/watchHistory';
 import {
@@ -108,6 +109,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [customUrl, setCustomUrl] = useState(API_BASE);
   const [urlSavedMessage, setUrlSavedMessage] = useState(false);
   const [isClearingAppCache, setIsClearingAppCache] = useState(false);
+  const [driveStorageText, setDriveStorageText] = useState<string>('18.4 GB used of 5.0 TB master cloud vault');
 
   const loadHistory = () => {
     const list = getWatchHistory();
@@ -118,6 +120,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     loadHistory();
     const handleUpdate = () => loadHistory();
     window.addEventListener('streamx_watch_history_updated', handleUpdate);
+
+    // Fetch live Google Drive quota stats
+    fetchSystemStatus().then((status) => {
+      if (status && status.drive) {
+        const usage = status.drive.drive_usage_bytes || status.drive.usage_bytes;
+        const limit = status.drive.limit_bytes;
+        if (usage && limit) {
+          setDriveStorageText(`${formatBytes(usage)} used of ${formatBytes(limit)} master cloud vault`);
+        }
+      }
+    }).catch(() => {});
+
     return () => window.removeEventListener('streamx_watch_history_updated', handleUpdate);
   }, []);
 
@@ -236,6 +250,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* 3. DOWNLOADS & STORAGE */}
       <SettingCard title="Downloads & Storage">
+        <SettingRow
+          icon={<Cloud size={17} color="#818cf8" />}
+          label="Google Drive Cloud Vault"
+          sub={driveStorageText}
+          right={
+            <span style={{
+              fontSize: '0.68rem',
+              fontWeight: 800,
+              color: '#34d399',
+              background: 'rgba(16,185,129,0.12)',
+              border: '1px solid rgba(16,185,129,0.25)',
+              padding: '2px 7px',
+              borderRadius: '6px',
+            }}>
+              5.0 TB Vault
+            </span>
+          }
+        />
+
         <SettingRow
           icon={<Wifi size={17} color="#38bdf8" />}
           label="Download over Wi-Fi Only"
