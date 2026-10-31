@@ -383,15 +383,40 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
   };
 
-  const sections: Section[] = [
-    { title: 'Recently Added', icon: <Clock size={16} color="#818cf8" />, items: library.allGroups.slice(0, 15), cat: '' },
-    ...library.genreShelves.map((shelf) => ({
-      title: shelf.title,
-      icon: getShelfIcon(shelf.iconName),
-      items: shelf.items,
-      cat: shelf.categoryFilter || '',
-    })),
-  ].filter(s => s.items.length > 0);
+  // Curate clean, distinct shelves on Home without repeating the same anime across multiple rows
+  const sections: Section[] = useMemo(() => {
+    const list: Section[] = [];
+    const shownGroupIds = new Set<string>();
+
+    // 1. Recently Added (Newest arrivals, capped at 10 items)
+    const recentItems = library.allGroups.slice(0, 10);
+    if (recentItems.length > 0) {
+      list.push({
+        title: 'Recently Added',
+        icon: <Clock size={16} color="#818cf8" />,
+        items: recentItems,
+        cat: '',
+      });
+      recentItems.forEach((g) => shownGroupIds.add(g.id));
+    }
+
+    // 2. Distinct Category Shelves (Anime, Movies, TV Series)
+    // Only includes items not already featured in Recently Added so no show repeats!
+    for (const shelf of library.genreShelves) {
+      const uniqueItems = shelf.items.filter((g) => !shownGroupIds.has(g.id));
+      if (uniqueItems.length > 0) {
+        list.push({
+          title: shelf.title,
+          icon: getShelfIcon(shelf.iconName),
+          items: uniqueItems,
+          cat: shelf.categoryFilter || '',
+        });
+        uniqueItems.forEach((g) => shownGroupIds.add(g.id));
+      }
+    }
+
+    return list;
+  }, [library]);
 
   return (
     <div className="home-container" style={{ display: 'flex', flexDirection: 'column', paddingBottom: '28px' }}>

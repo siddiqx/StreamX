@@ -268,44 +268,39 @@ body {
   .desktop-nav-links {
     display: flex !important;
   }
-  .desktop-search-trigger {
-    display: flex !important;
-  }
-  .mobile-search-trigger {
-    display: none !important;
-  }
   .mobile-bottom-nav {
     display: none !important;
   }
   .main-content {
-    padding-top: 26px !important;
-    padding-bottom: 64px !important;
+    padding-top: 22px !important;
+    padding-bottom: 60px !important;
   }
   .hero-spotlight {
-    min-height: clamp(380px, 44vh, 480px) !important;
-    border-radius: 24px !important;
-    margin: 0 clamp(20px, 3.5vw, 44px) !important;
+    min-height: 270px !important;
+    max-height: 310px !important;
+    border-radius: 18px !important;
+    margin: 0 clamp(16px, 3vw, 36px) !important;
   }
   .hero-content-box {
-    padding: 32px 36px !important;
-    gap: 12px !important;
-    max-width: 65% !important;
+    padding: 20px 24px !important;
+    gap: 8px !important;
+    max-width: 70% !important;
   }
   .hero-title-text {
-    font-size: clamp(2rem, 3.2vw, 2.85rem) !important;
-    line-height: 1.12 !important;
+    font-size: 1.65rem !important;
+    line-height: 1.18 !important;
   }
   .hero-action-btn-primary {
-    height: 44px !important;
-    padding: 0 26px !important;
-    font-size: 0.94rem !important;
-    border-radius: 12px !important;
+    height: 38px !important;
+    padding: 0 22px !important;
+    font-size: 0.88rem !important;
+    border-radius: 10px !important;
   }
   .hero-action-btn-secondary {
-    height: 44px !important;
-    padding: 0 20px !important;
-    font-size: 0.9rem !important;
-    border-radius: 12px !important;
+    height: 38px !important;
+    padding: 0 14px !important;
+    font-size: 0.82rem !important;
+    border-radius: 10px !important;
   }
   .section-header {
     margin-bottom: 12px !important;
@@ -315,7 +310,7 @@ body {
     font-size: 1.16rem !important;
   }
   .scroll-row {
-    padding: 10px clamp(20px, 3.5vw, 44px) 22px !important;
+    padding: 8px clamp(20px, 3.5vw, 44px) 20px !important;
   }
   .media-card-shell {
     border-radius: 14px !important;
@@ -363,30 +358,31 @@ body {
 
 @media (min-width: 1024px) {
   .main-content {
-    padding-top: 32px !important;
-    padding-bottom: 72px !important;
+    padding-top: 26px !important;
+    padding-bottom: 64px !important;
   }
   .hero-spotlight {
-    min-height: clamp(420px, 48vh, 520px) !important;
-    margin: 0 clamp(24px, 4vw, 48px) !important;
+    min-height: 285px !important;
+    max-height: 320px !important;
+    margin: 0 clamp(20px, 3.5vw, 44px) !important;
   }
   .hero-content-box {
-    padding: 40px 48px !important;
-    gap: 14px !important;
-    max-width: 58% !important;
+    padding: 24px 30px !important;
+    gap: 8px !important;
+    max-width: 65% !important;
   }
   .hero-title-text {
-    font-size: clamp(2.3rem, 3.4vw, 3.2rem) !important;
+    font-size: 1.85rem !important;
   }
   .section-header {
     margin-bottom: 14px !important;
     padding: 0 clamp(24px, 4vw, 48px) !important;
   }
   .section-title {
-    font-size: 1.25rem !important;
+    font-size: 1.22rem !important;
   }
   .scroll-row {
-    padding: 10px clamp(24px, 4vw, 48px) 24px !important;
+    padding: 8px clamp(24px, 4vw, 48px) 22px !important;
   }
 }
 

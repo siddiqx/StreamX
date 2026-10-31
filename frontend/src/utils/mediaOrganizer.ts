@@ -703,7 +703,7 @@ export function organizeMediaLibrary(
   const tvSeries = seriesGroups.filter((g) => g.category === 'TV Shows');
   const liveActionMovies = movieGroups.filter((g) => g.category === 'Movies');
 
-  // Dynamic Curated Shelves
+  // Curated, non-redundant media shelves
   const genreShelves: GenreShelf[] = [];
 
   // 1. Anime Series Shelf
@@ -717,14 +717,14 @@ export function organizeMediaLibrary(
     });
   }
 
-  // 2. Anime Movies Shelf
-  if (animeMovies.length > 0) {
+  // 2. Movies Shelf (Combines Anime Movies and Feature Films into one dedicated cinema shelf)
+  if (movieGroups.length > 0) {
     genreShelves.push({
-      id: 'anime_movies',
-      title: 'Anime Movies',
+      id: 'all_movies',
+      title: 'Movies',
       iconName: 'Film',
-      items: animeMovies,
-      categoryFilter: 'Anime Movies',
+      items: movieGroups,
+      categoryFilter: 'Movies',
     });
   }
 
@@ -736,68 +736,6 @@ export function organizeMediaLibrary(
       iconName: 'Tv',
       items: tvSeries,
       categoryFilter: 'TV Shows',
-    });
-  }
-
-  // 4. Feature Films & Movies Shelf
-  if (liveActionMovies.length > 0) {
-    genreShelves.push({
-      id: 'live_movies',
-      title: 'Movies',
-      iconName: 'Film',
-      items: liveActionMovies,
-      categoryFilter: 'Movies',
-    });
-  }
-
-  // 5. Romance & Drama
-  const romanceShelf = allGroups.filter((g) =>
-    g.genres.some((gn) => {
-      const gl = gn.toLowerCase();
-      return gl.includes('romance') || gl.includes('drama');
-    })
-  );
-  if (romanceShelf.length > 0) {
-    genreShelves.push({
-      id: 'romance_shelf',
-      title: 'Romance & Drama',
-      iconName: 'Heart',
-      items: romanceShelf,
-      categoryFilter: 'Romance',
-    });
-  }
-
-  // 6. Action & Adventure
-  const actionShelf = allGroups.filter((g) =>
-    g.genres.some((gn) => {
-      const gl = gn.toLowerCase();
-      return gl.includes('action') || gl.includes('adventure');
-    })
-  );
-  if (actionShelf.length > 0) {
-    genreShelves.push({
-      id: 'action_shelf',
-      title: 'Action & Adventure',
-      iconName: 'Flame',
-      items: actionShelf,
-      categoryFilter: 'Action',
-    });
-  }
-
-  // 7. Sci-Fi & Fantasy
-  const scifiShelf = allGroups.filter((g) =>
-    g.genres.some((gn) => {
-      const gl = gn.toLowerCase();
-      return gl.includes('sci-fi') || gl.includes('science fiction') || gl.includes('fantasy');
-    })
-  );
-  if (scifiShelf.length > 0) {
-    genreShelves.push({
-      id: 'scifi_shelf',
-      title: 'Sci-Fi & Fantasy',
-      iconName: 'Compass',
-      items: scifiShelf,
-      categoryFilter: 'Sci-Fi',
     });
   }
 
