@@ -333,9 +333,9 @@ export const App: React.FC = () => {
 
       <main style={{
         flex: 1,
-        paddingTop: currentTab === 'home' ? '0' : '16px',
+        paddingTop: '12px',
         paddingBottom: 'calc(var(--bottomnav-h) + max(env(safe-area-inset-bottom, 0px), 8px) + 20px)',
-        maxWidth: '1440px',
+        maxWidth: '1200px',
         width: '100%',
         margin: '0 auto',
         overflowX: 'hidden',

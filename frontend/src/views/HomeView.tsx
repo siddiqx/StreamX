@@ -14,6 +14,7 @@ import {
   getMediaBackdropUrl,
   getMediaDisplayName,
   getMediaDisplayYear,
+  getMediaPosterUrl,
   type ApiHealthStatus,
 } from '../api';
 
@@ -215,6 +216,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const featured = featuredGroup?.featuredItem || media[0] || null;
   const featuredTitle = featuredGroup ? featuredGroup.title : (featured ? getMediaDisplayName(featured) : '');
   const featuredYear = featuredGroup ? featuredGroup.year : (featured ? getMediaDisplayYear(featured) : null);
+  const featuredPosterUrl = featuredGroup ? featuredGroup.posterUrl : (featured ? getMediaPosterUrl(featured) : undefined);
 
   const goToNextHero = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -315,7 +317,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '28px' }}>
 
-      {/* Netflix-Style Featured Spotlight Hero with Animated Recommendations */}
+      {/* Anime Recommendation Spotlight (Cinema Glass Widescreen Showcase) */}
       {featured ? (
         <section
           className="hero-spotlight animate-fade-in"
@@ -323,137 +325,80 @@ export const HomeView: React.FC<HomeViewProps> = ({
           onMouseLeave={() => setIsHeroPaused(false)}
           onTouchStart={handleHeroTouchStart}
           onTouchEnd={handleHeroTouchEnd}
+          onClick={handleHeroClick}
+          style={{
+            cursor: 'pointer',
+            position: 'relative',
+            margin: '0 clamp(14px, 3.5vw, 24px)',
+            borderRadius: '20px',
+            overflow: 'hidden',
+            background: 'linear-gradient(145deg, rgba(22, 29, 44, 0.94) 0%, rgba(10, 14, 22, 0.98) 100%)',
+            border: '1px solid rgba(255, 255, 255, 0.09)',
+            boxShadow: '0 16px 40px -8px rgba(0, 0, 0, 0.85), 0 0 24px rgba(99, 102, 241, 0.12)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            userSelect: 'none',
+          }}
         >
-          {/* Multi-layered cinematic cross-dissolve artwork */}
-          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+          {/* Subtle Ambient Artwork Blur Background */}
+          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
             {recommendedGroups.slice(0, 8).map((grp, idx) => {
               const bgUrl = grp.backdropUrl || (grp.featuredItem ? getMediaBackdropUrl(grp.featuredItem, 'w1280') : undefined) || grp.posterUrl;
               if (!bgUrl) return null;
               const isCurrent = idx === safeIndex;
               return (
-                <img
+                <div
                   key={grp.id || idx}
-                  src={bgUrl}
-                  alt={grp.title}
-                  loading="eager"
                   style={{
                     position: 'absolute',
                     inset: 0,
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    objectPosition: 'center 22%',
-                    opacity: isCurrent ? 0.72 : 0,
-                    transform: isCurrent ? 'scale(1)' : 'scale(1.04)',
-                    transition: 'opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1), transform 1.8s cubic-bezier(0.2, 0.8, 0.2, 1)',
-                    pointerEvents: 'none',
+                    opacity: isCurrent ? 0.32 : 0,
+                    transition: 'opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1)',
                   }}
-                />
+                >
+                  <img
+                    src={bgUrl}
+                    alt=""
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      objectPosition: 'center 30%',
+                      filter: 'blur(32px) saturate(180%)',
+                      transform: 'scale(1.25)',
+                    }}
+                  />
+                </div>
               );
             })}
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'linear-gradient(to right, rgba(7,9,14,0.96) 0%, rgba(7,9,14,0.65) 50%, rgba(7,9,14,0.85) 100%)',
+            }} />
           </div>
-
-          {/* Deep ambient fallback if backdrop fails to load */}
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'radial-gradient(circle at 65% 25%, rgba(99,102,241,0.22) 0%, rgba(7,9,14,0.92) 80%)',
-            zIndex: 0,
-            pointerEvents: 'none',
-          }} />
-
-          {/* Vignette Gradients for cinematic contrast and text readability */}
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.85) 35%, rgba(7,9,14,0.3) 65%, transparent 100%)',
-            zIndex: 2,
-            pointerEvents: 'none',
-          }} />
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(to right, rgba(7,9,14,0.82) 0%, transparent 65%)',
-            zIndex: 2,
-            pointerEvents: 'none',
-          }} />
-
-          {/* Side Next / Prev Chevrons (Desktop Only) */}
-          {recommendedGroups.length > 1 && (
-            <>
-              <button
-                onClick={goToPrevHero}
-                aria-label="Previous title"
-                className="hero-chevron-btn"
-                style={{
-                  position: 'absolute',
-                  left: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  zIndex: 20,
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.45)',
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.14)',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  opacity: 0.7,
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-              >
-                <ChevronLeft size={18} />
-              </button>
-
-              <button
-                onClick={goToNextHero}
-                aria-label="Next title"
-                className="hero-chevron-btn"
-                style={{
-                  position: 'absolute',
-                  right: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  zIndex: 20,
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.45)',
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.14)',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  opacity: 0.7,
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-              >
-                <ChevronRight size={18} />
-              </button>
-            </>
-          )}
 
           {/* Minimalist Top-Right Pagination Dots */}
           {recommendedGroups.length > 1 && (
-            <div style={{
-              position: 'absolute',
-              top: '16px',
-              right: '16px',
-              zIndex: 15,
-              display: 'flex',
-              gap: '6px',
-              alignItems: 'center',
-              padding: '6px 11px',
-              background: 'rgba(0,0,0,0.45)',
-              backdropFilter: 'blur(14px)',
-              WebkitBackdropFilter: 'blur(14px)',
-              borderRadius: '999px',
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}>
+            <div
+              style={{
+                position: 'absolute',
+                top: '12px',
+                right: '14px',
+                zIndex: 20,
+                display: 'flex',
+                gap: '5px',
+                alignItems: 'center',
+                padding: '4px 8px',
+                background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                borderRadius: '999px',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
+              onClick={e => e.stopPropagation()}
+            >
               {recommendedGroups.slice(0, 6).map((_, idx) => (
                 <button
                   key={idx}
@@ -463,150 +408,273 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     width: idx === safeIndex ? '16px' : '5px',
                     height: '5px',
                     borderRadius: '999px',
-                    background: idx === safeIndex ? '#ffffff' : 'rgba(255,255,255,0.3)',
+                    background: idx === safeIndex ? '#6366f1' : 'rgba(255,255,255,0.3)',
                     border: 'none',
                     cursor: 'pointer',
                     padding: 0,
-                    transition: 'all 0.35s cubic-bezier(0.4,0,0.2,1)',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                   }}
                 />
               ))}
             </div>
           )}
 
-          {/* Hero Content with Smooth Keyframe Transition */}
+          {/* Side Chevrons (Desktop Only) */}
+          {recommendedGroups.length > 1 && (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); goToPrevHero(e); }}
+                aria-label="Previous title"
+                className="hero-chevron-btn"
+                style={{
+                  position: 'absolute',
+                  left: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  zIndex: 25,
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.55)',
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,255,255,0.14)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  opacity: 0.8,
+                  transition: 'opacity 0.2s ease',
+                }}
+              >
+                <ChevronLeft size={16} />
+              </button>
+
+              <button
+                onClick={(e) => { e.stopPropagation(); goToNextHero(e); }}
+                aria-label="Next title"
+                className="hero-chevron-btn"
+                style={{
+                  position: 'absolute',
+                  right: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  zIndex: 25,
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.55)',
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255,255,255,0.14)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  opacity: 0.8,
+                  transition: 'opacity 0.2s ease',
+                }}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </>
+          )}
+
+          {/* Content Body: Split Poster + Details */}
           <div
             key={safeIndex}
             style={{
               position: 'relative',
               zIndex: 10,
-              padding: '28px clamp(16px, 3.5vw, 28px)',
+              padding: '16px clamp(14px, 2.5vw, 24px)',
               display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-              animation: 'heroContentFade 0.45s cubic-bezier(0.16,1,0.3,1)',
+              alignItems: 'center',
+              gap: 'clamp(14px, 2.5vw, 22px)',
+              animation: 'heroContentFade 0.35s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
-            {/* Metadata Badges strip */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
-              <span className="badge-spec accent-purple">{featured.category}</span>
-              {featuredGroup?.type === 'series' && (
-                <span className="badge-spec accent-cyan">
-                  {featuredGroup.episodes.length} {featuredGroup.episodes.length === 1 ? 'Episode' : 'Episodes'}
-                </span>
-              )}
-              {featuredYear && (
-                <span className="badge-spec accent-cyan">{featuredYear}</span>
-              )}
-              {featuredRuntime && (
-                <span className="badge-spec accent-emerald">{featuredRuntime}</span>
-              )}
-              {featuredRating && (
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '3px',
-                  background: 'rgba(251,191,36,0.18)', border: '1px solid rgba(251,191,36,0.35)',
-                  color: '#fbbf24', padding: '2px 7px', borderRadius: '5px',
-                  fontSize: '0.66rem', fontWeight: 800,
+            {/* Crisp Portrait Poster (Native 2:3 Aspect Ratio) */}
+            <div style={{
+              width: 'clamp(96px, 26vw, 130px)',
+              aspectRatio: '2/3',
+              borderRadius: '12px',
+              overflow: 'hidden',
+              flexShrink: 0,
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.75)',
+              border: '1px solid rgba(255, 255, 255, 0.14)',
+              backgroundColor: '#0c1017',
+            }}>
+              {featuredPosterUrl ? (
+                <img
+                  src={featuredPosterUrl}
+                  alt={featuredTitle}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                />
+              ) : (
+                <div style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'linear-gradient(135deg, #1e1b4b, #0f172a)',
                 }}>
-                  <Star size={10} fill="#fbbf24" strokeWidth={0} />
-                  {featuredRating.toFixed(1)}
-                </span>
+                  <Sparkles size={24} color="#818cf8" />
+                </div>
               )}
-              {featuredGenres.slice(0, 2).map(g => (
-                <span key={g} style={{
-                  background: 'rgba(255,255,255,0.08)', color: '#cbd5e1',
-                  padding: '2px 6px', borderRadius: '5px', fontSize: '0.64rem', fontWeight: 700,
-                }}>
-                  {g}
-                </span>
-              ))}
             </div>
 
-            {/* Canonical Title */}
-            <h1 style={{
-              fontSize: 'clamp(1.4rem, 5.2vw, 2.3rem)',
-              fontWeight: 900,
-              fontFamily: 'var(--font-display, inherit)',
-              letterSpacing: '-0.03em',
-              lineHeight: 1.15,
-              color: '#fff',
-              margin: 0,
-              textShadow: '0 2px 14px rgba(0,0,0,0.95)',
-            }}>
-              {featuredTitle}
-            </h1>
+            {/* Right: Rich Anime Information & Actions */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {/* Badges strip */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '5px' }}>
+                <span style={{
+                  background: 'rgba(99, 102, 241, 0.2)',
+                  border: '1px solid rgba(99, 102, 241, 0.4)',
+                  color: '#a5b4fc',
+                  fontSize: '0.62rem',
+                  fontWeight: 800,
+                  padding: '2px 6px',
+                  borderRadius: '5px',
+                  letterSpacing: '0.02em',
+                }}>
+                  Spotlight
+                </span>
 
-            {/* Overview excerpt */}
-            {featuredOverview && (
-              <p style={{
-                fontSize: '0.78rem',
-                color: 'rgba(241,245,249,0.85)',
-                lineHeight: 1.45,
+                <span style={{
+                  color: '#c084fc',
+                  fontSize: '0.66rem',
+                  fontWeight: 700,
+                }}>
+                  {featuredGenres.length > 0 ? featuredGenres[0] : featured.category}
+                </span>
+
+                {featuredRating && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '2px',
+                    color: '#fbbf24',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                  }}>
+                    <Star size={9} fill="#fbbf24" strokeWidth={0} />
+                    {featuredRating.toFixed(1)}
+                  </span>
+                )}
+
+                {featuredYear && (
+                  <span style={{ color: '#94a3b8', fontSize: '0.66rem', fontWeight: 600 }}>
+                    {featuredYear}
+                  </span>
+                )}
+
+                {featuredRuntime && (
+                  <span style={{ color: '#94a3b8', fontSize: '0.66rem', fontWeight: 600 }}>
+                    {featuredRuntime}
+                  </span>
+                )}
+
+                {featuredGroup?.type === 'series' && featuredGroup.episodes.length > 0 && (
+                  <span style={{ color: '#67e8f9', fontSize: '0.66rem', fontWeight: 700 }}>
+                    {featuredGroup.episodes.length} {featuredGroup.episodes.length === 1 ? 'Ep' : 'Eps'}
+                  </span>
+                )}
+              </div>
+
+              {/* Title */}
+              <h2 style={{
+                fontSize: 'clamp(1.05rem, 3.2vw, 1.45rem)',
+                fontWeight: 900,
+                fontFamily: 'var(--font-display, inherit)',
+                letterSpacing: '-0.02em',
+                lineHeight: 1.2,
+                color: '#fff',
                 margin: 0,
                 display: '-webkit-box',
                 WebkitLineClamp: 2,
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
-                textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-                maxWidth: '520px',
+                textShadow: '0 2px 8px rgba(0,0,0,0.8)',
               }}>
-                {featuredOverview}
-              </p>
-            )}
+                {featuredTitle}
+              </h2>
 
-            {/* Action Buttons: Direct Play in VLC & Details */}
-            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-              <button
-                className="btn-primary"
-                style={{
-                  flex: 1,
-                  height: '46px',
-                  minHeight: '46px',
-                  fontSize: '0.94rem',
-                  fontWeight: 800,
-                  background: '#ffffff',
-                  color: '#090d16',
-                  boxShadow: '0 4px 18px rgba(255,255,255,0.22), 0 2px 8px rgba(0,0,0,0.5)',
-                  border: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  cursor: 'pointer',
-                  borderRadius: '12px',
-                  transition: 'all 0.15s ease',
-                  letterSpacing: '0.01em',
-                }}
-                onClick={handleHeroStream}
-              >
-                <Play size={18} fill="#090d16" />
-                Play
-              </button>
+              {/* Overview (Clean 1-2 lines) */}
+              {featuredOverview && (
+                <p style={{
+                  fontSize: '0.74rem',
+                  color: 'rgba(226, 232, 240, 0.8)',
+                  lineHeight: 1.4,
+                  margin: 0,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }}>
+                  {featuredOverview}
+                </p>
+              )}
 
-              <button
-                onClick={handleHeroClick}
-                aria-label="Details"
-                title="Details"
-                style={{
-                  width: '46px',
-                  height: '46px',
-                  minWidth: '46px',
-                  borderRadius: '12px',
-                  background: 'rgba(255,255,255,0.14)',
-                  backdropFilter: 'blur(16px)',
-                  WebkitBackdropFilter: 'blur(16px)',
-                  border: '1px solid rgba(255,255,255,0.22)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  color: '#ffffff',
-                  flexShrink: 0,
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <Info size={19} strokeWidth={2.4} />
-              </button>
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button
+                  className="btn-primary"
+                  style={{
+                    flex: '0 0 auto',
+                    padding: '0 18px',
+                    height: '38px',
+                    minHeight: '38px',
+                    fontSize: '0.86rem',
+                    fontWeight: 800,
+                    background: '#ffffff',
+                    color: '#090d16',
+                    boxShadow: '0 4px 14px rgba(255,255,255,0.2), 0 2px 6px rgba(0,0,0,0.4)',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    cursor: 'pointer',
+                    borderRadius: '10px',
+                    letterSpacing: '0.01em',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleHeroStream();
+                  }}
+                >
+                  <Play size={15} fill="#090d16" />
+                  Play
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleHeroClick();
+                  }}
+                  aria-label="Details"
+                  title="Details"
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    background: 'rgba(255,255,255,0.12)',
+                    backdropFilter: 'blur(12px)',
+                    WebkitBackdropFilter: 'blur(12px)',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: '#ffffff',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Info size={16} strokeWidth={2.4} />
+                </button>
+              </div>
             </div>
           </div>
         </section>

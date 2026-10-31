@@ -135,31 +135,15 @@ body {
   }
 }
 
-/* Hero Spotlight Responsive Architecture */
+/* Hero Recommendation Spotlight Architecture */
 .hero-spotlight {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  justifyContent: flex-end;
-  overflow: hidden;
-  user-select: none;
-  touch-action: pan-y pinch-zoom;
-  /* Mobile: Full-bleed vertical cinema showcase (never an awkward square box!) */
-  margin: 0;
-  min-height: clamp(450px, 66vh, 560px);
-  border-radius: 0 0 28px 28px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
-@media (min-width: 768px) {
-  .hero-spotlight {
-    /* Tablet & Desktop: Floating widescreen cinema banner */
-    margin: 6px clamp(16px, 3vw, 28px) 0;
-    min-height: clamp(380px, 42vh, 480px);
-    border-radius: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(99, 102, 241, 0.15);
+@media (hover: hover) and (pointer: fine) {
+  .hero-spotlight:hover {
+    box-shadow: 0 20px 48px -6px rgba(0, 0, 0, 0.9), 0 0 28px rgba(99, 102, 241, 0.2) !important;
+    border-color: rgba(99, 102, 241, 0.35) !important;
   }
 }
 
