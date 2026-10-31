@@ -165,6 +165,9 @@ body {
     transform: scale(1.05);
   }
 }
+.main-content {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}
 .scroll-row { display:flex; gap:12px; overflow-x:auto; padding:4px var(--page-gutter) 12px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-behavior:smooth; contain:layout style; }
 .scroll-row::-webkit-scrollbar { display:none; }
 .scroll-row > * { scroll-snap-align:start; flex-shrink:0; }

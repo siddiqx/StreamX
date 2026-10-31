@@ -499,22 +499,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
             pointerEvents: 'none',
           }} />
 
-          {/* Minimalist Bottom-Right Pagination Dots */}
+          {/* Minimalist Top-Right Pagination Dots */}
           {recommendedGroups.length > 1 && (
             <div style={{
               position: 'absolute',
-              bottom: '16px',
-              right: '20px',
+              top: '14px',
+              right: '14px',
               zIndex: 15,
               display: 'flex',
-              gap: '6px',
+              gap: '5px',
               alignItems: 'center',
-              padding: '6px 12px',
-              background: 'rgba(7,9,14,0.65)',
-              backdropFilter: 'blur(16px)',
-              WebkitBackdropFilter: 'blur(16px)',
+              padding: '5px 10px',
+              background: 'rgba(0,0,0,0.45)',
+              backdropFilter: 'blur(14px)',
+              WebkitBackdropFilter: 'blur(14px)',
               borderRadius: '999px',
-              border: '1px solid rgba(255,255,255,0.14)',
+              border: '1px solid rgba(255,255,255,0.1)',
             }}>
               {recommendedGroups.map((_, idx) => (
                 <button
@@ -522,10 +522,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onClick={(e) => selectHero(idx, e)}
                   aria-label={`Slide ${idx + 1}`}
                   style={{
-                    width: idx === safeIndex ? '18px' : '6px',
+                    width: idx === safeIndex ? '16px' : '5px',
                     height: '5px',
                     borderRadius: '999px',
-                    background: idx === safeIndex ? '#ffffff' : 'rgba(255,255,255,0.35)',
+                    background: idx === safeIndex ? '#ffffff' : 'rgba(255,255,255,0.3)',
                     border: 'none',
                     cursor: 'pointer',
                     padding: 0,
@@ -813,6 +813,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 justifyContent: 'center',
                 width: '24px',
                 height: '24px',
+                flexShrink: 0,
                 borderRadius: '7px',
                 background: 'rgba(99, 102, 241, 0.15)',
                 border: '1px solid rgba(99, 102, 241, 0.25)',
@@ -862,6 +863,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 justifyContent: 'center',
                 width: '24px',
                 height: '24px',
+                flexShrink: 0,
                 borderRadius: '7px',
                 background: 'rgba(255, 255, 255, 0.05)',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
