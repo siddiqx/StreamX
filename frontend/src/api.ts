@@ -5,12 +5,20 @@ export const CLOUD_BACKEND_URL = 'https://streamx-worker.siddiqsiddiq00012.worke
 export const getApiBase = (): string => {
   if (typeof window !== 'undefined') {
     // If running in local development or local network, connect directly to local backend
-    if (
+    const isLocalNetwork =
       window.location.hostname === 'localhost' ||
       window.location.hostname === '127.0.0.1' ||
-      window.location.hostname === '0.0.0.0'
-    ) {
-      return 'http://localhost:8000';
+      window.location.hostname === '0.0.0.0' ||
+      window.location.hostname.startsWith('192.168.') ||
+      window.location.hostname.startsWith('10.') ||
+      window.location.hostname.startsWith('172.') ||
+      window.location.hostname.endsWith('.local');
+
+    if (isLocalNetwork) {
+      const host = (window.location.hostname === '0.0.0.0' || window.location.hostname === 'localhost')
+        ? 'localhost'
+        : window.location.hostname;
+      return `http://${host}:8000`;
     }
 
     const saved = localStorage.getItem('streamx_api_url') || localStorage.getItem('streamx_api_base');
