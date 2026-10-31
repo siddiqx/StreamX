@@ -33,7 +33,7 @@ interface HomeViewProps {
   onRetry?: () => void;
 }
 
-const CARD_W = 'clamp(126px, 34vw, 150px)';
+const CARD_W = 'var(--card-width)';
 
 export const HomeView: React.FC<HomeViewProps> = ({
   media,
@@ -753,7 +753,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       {/* Continue Watching Row (Active Watch Progress - Collapsed by Series) */}
       {continueWatchingList.length > 0 && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div className="section-header" style={{ padding: '0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="section-header" style={{ padding: '0 clamp(16px, 3vw, 28px)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Flame size={16} color="#ef4444" />
               <span className="section-title" style={{ fontSize: '0.98rem', fontWeight: 800, color: '#f8fafc' }}>
@@ -764,7 +764,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               {continueWatchingList.length} in progress
             </span>
           </div>
-          <div className="scroll-row" style={{ display: 'flex', gap: '12px', overflowX: 'auto', padding: '4px 16px 12px' }}>
+          <div className="scroll-row" style={{ display: 'flex', gap: 'var(--carousel-gap, 14px)', overflowX: 'auto', padding: '6px clamp(16px, 3vw, 28px) 16px' }}>
             {continueWatchingList.map(({ group, item, history, episodeLabel }) => (
               <MediaCard
                 key={`cw_${group ? group.id : item.id}`}
@@ -791,7 +791,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       {/* Horizontal Netflix-Style Rows */}
       {sections.map(s => (
         <section key={s.title} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div className="section-header" style={{ padding: '0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="section-header" style={{ padding: '0 clamp(16px, 3vw, 28px)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               {s.icon}
               <span className="section-title" style={{ fontSize: '0.98rem', fontWeight: 800, color: '#f8fafc' }}>{s.title}</span>
@@ -804,7 +804,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               See all <ArrowRight size={13} />
             </button>
           </div>
-          <div className="scroll-row" style={{ display: 'flex', gap: '12px', overflowX: 'auto', padding: '4px 16px 12px' }}>
+          <div className="scroll-row" style={{ display: 'flex', gap: 'var(--carousel-gap, 14px)', overflowX: 'auto', padding: '6px clamp(16px, 3vw, 28px) 16px' }}>
             {s.items.map(group => (
               <MediaCard
                 key={group.id}

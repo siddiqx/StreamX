@@ -39,6 +39,22 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --navbar-h: 56px;
   --bottomnav-h: 68px;
+  --card-width: clamp(152px, 42vw, 175px);
+  --carousel-gap: 12px;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --card-width: clamp(170px, 26vw, 205px);
+    --carousel-gap: 14px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --card-width: clamp(195px, 15vw, 230px);
+    --carousel-gap: 16px;
+  }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; -webkit-tap-highlight-color: transparent; }
 html { height: 100%; overscroll-behavior: none; }
@@ -110,16 +126,12 @@ body {
 }
 @media (hover: hover) and (pointer: fine) {
   .media-card-shell:hover {
-    transform: translateY(-4px) scale(1.02);
-    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(99, 102, 241, 0.22) !important;
-    border-color: rgba(99, 102, 241, 0.45) !important;
+    transform: translateY(-5px) scale(1.025);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85), 0 0 22px rgba(99, 102, 241, 0.25) !important;
+    border-color: rgba(99, 102, 241, 0.5) !important;
   }
   .media-card-shell:hover .media-card-poster {
     transform: scale(1.05);
-  }
-  .media-card-shell:hover .media-card-play-btn {
-    transform: scale(1.12);
-    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.75);
   }
 }
 .scroll-row { display:flex; gap:12px; overflow-x:auto; padding:4px 16px 12px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-behavior:smooth; contain:layout style; }

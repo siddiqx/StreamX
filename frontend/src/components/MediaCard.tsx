@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle } from 'lucide-react';
+import { Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle } from 'lucide-react';
 import type { MediaItem } from '../types';
-import { getSmartSeriesEpisode, type MediaGroup } from '../utils/mediaOrganizer';
+import type { MediaGroup } from '../utils/mediaOrganizer';
 import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl, API_BASE } from '../api';
 import { getWatchProgress, getWatchHistory } from '../utils/watchHistory';
 import type { WatchHistoryItem } from '../utils/watchHistory';
-import { launchVlcWithTracking } from '../utils/playerSettings';
 
 export interface MediaCardProps {
   item?: MediaItem;
@@ -35,7 +34,6 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
   overrideProgress,
   onSelect,
   onSelectGroup,
-  onPlay,
   width,
 }) => {
   const [imageError, setImageError] = useState(false);
@@ -142,18 +140,6 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
       onSelectGroup(group);
     } else {
       onSelect(resolvedItem);
-    }
-  };
-
-  const handlePlayClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const targetItem = (group && group.type === 'series')
-      ? getSmartSeriesEpisode(group).item
-      : (item || resolvedItem);
-    if (onPlay) {
-      onPlay(targetItem);
-    } else {
-      launchVlcWithTracking(targetItem);
     }
   };
 
@@ -372,70 +358,45 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
         </div>
       </div>
 
-      {/* Bottom Vignette with Canonical Title & Quick Play */}
+      {/* Bottom Vignette with Canonical Title */}
       <div style={{
         position: 'absolute',
         bottom: 0,
         left: 0,
         right: 0,
-        background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.78) 45%, rgba(7,9,14,0.2) 80%, transparent 100%)',
-        padding: '28px 10px 10px',
+        background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.82) 48%, rgba(7,9,14,0.18) 82%, transparent 100%)',
+        padding: '32px 12px 10px',
         display: 'flex',
-        alignItems: 'flex-end',
-        justifyContent: 'space-between',
-        gap: '6px',
+        flexDirection: 'column',
+        justifyContent: 'flex-end',
+        pointerEvents: 'none',
       }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <p style={{
-            fontSize: '0.76rem',
-            fontWeight: 800,
-            color: '#fff',
-            fontFamily: 'var(--font-display, inherit)',
-            lineHeight: 1.25,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            textShadow: '0 1px 4px rgba(0,0,0,0.9)',
-            margin: 0,
+        <p style={{
+          fontSize: '0.82rem',
+          fontWeight: 800,
+          color: '#fff',
+          fontFamily: 'var(--font-display, inherit)',
+          lineHeight: 1.25,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          textShadow: '0 1px 4px rgba(0,0,0,0.95)',
+          margin: 0,
+          letterSpacing: '-0.01em',
+        }}>
+          {title}
+        </p>
+        {year && (
+          <span style={{
+            fontSize: '0.66rem',
+            color: 'rgba(255,255,255,0.65)',
+            fontWeight: 700,
+            display: 'block',
+            marginTop: '2px',
           }}>
-            {title}
-          </p>
-          {year && (
-            <span style={{
-              fontSize: '0.62rem',
-              color: 'rgba(255,255,255,0.65)',
-              fontWeight: 700,
-              display: 'block',
-              marginTop: '2px',
-            }}>
-              {year}
-            </span>
-          )}
-        </div>
-
-        {/* Quick Stream Button */}
-        <button
-          onClick={handlePlayClick}
-          aria-label="Play"
-          className="media-card-play-btn"
-          style={{
-            width: '32px',
-            height: '32px',
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-            border: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            cursor: 'pointer',
-            flexShrink: 0,
-            boxShadow: '0 2px 10px rgba(99,102,241,0.6)',
-            touchAction: 'manipulation',
-          }}
-        >
-          <Play size={12} fill="#fff" style={{ marginLeft: '1px' }} />
-        </button>
+            {year}
+          </span>
+        )}
       </div>
 
       {/* Netflix-style Watch Progress Bar */}

@@ -98,8 +98,8 @@ export const SearchView: React.FC<SearchViewProps> = ({
           </p>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(clamp(115px, 30vw, 155px), 1fr))',
-            gap: '12px',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(var(--card-width), 1fr))',
+            gap: 'clamp(12px, 1.5vw, 18px)',
           }}>
             {organized.allGroups.map(group => (
               <MediaCard

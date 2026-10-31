@@ -226,7 +226,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)', fontWeight: 500 }}>
             {totalCount} {totalCount === 1 ? (viewMode === 'grouped' ? 'title' : 'file') : (viewMode === 'grouped' ? 'titles' : 'files')}
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(clamp(115px, 30vw, 155px), 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(var(--card-width), 1fr))', gap: 'clamp(12px, 1.5vw, 18px)' }}>
             {viewMode === 'grouped' ? (
               filteredGroups.map(group => (
                 <MediaCard
