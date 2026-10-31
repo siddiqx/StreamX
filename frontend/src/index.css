@@ -289,8 +289,10 @@ body {
   .hero-spotlight {
     min-height: 240px !important;
     max-height: 270px !important;
-    border-radius: 18px !important;
-    margin: 0 var(--page-gutter) !important;
+    border-radius: 0 0 18px 18px !important;
+    margin: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
   }
   .hero-content-box {
     padding: 18px 24px !important;
@@ -376,7 +378,10 @@ body {
   .hero-spotlight {
     min-height: 250px !important;
     max-height: 280px !important;
-    margin: 0 var(--page-gutter) !important;
+    border-radius: 0 0 20px 20px !important;
+    margin: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
   }
   .hero-content-box {
     padding: 22px 28px !important;

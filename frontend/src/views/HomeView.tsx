@@ -430,16 +430,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
           onTouchStart={handleHeroTouchStart}
           onTouchEnd={handleHeroTouchEnd}
           style={{
-            margin: '0 var(--page-gutter)',
+            margin: '0',
+            width: '100%',
             minHeight: '250px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'flex-end',
             position: 'relative',
-            borderRadius: '18px',
+            borderRadius: '0 0 18px 18px',
             overflow: 'hidden',
             boxShadow: '0 16px 40px -8px rgba(0,0,0,0.9), 0 0 20px rgba(99,102,241,0.12)',
             border: '1px solid rgba(255,255,255,0.12)',
+            borderLeft: 'none',
+            borderRight: 'none',
+            borderTop: 'none',
             userSelect: 'none',
           }}
         >
@@ -543,7 +547,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             style={{
               position: 'relative',
               zIndex: 10,
-              padding: '18px 16px',
+              padding: '18px var(--page-gutter, 16px)',
               display: 'flex',
               flexDirection: 'column',
               gap: '7px',
@@ -626,7 +630,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 style={{
                   height: '38px',
                   minHeight: '38px',
-                  padding: '0 14px',
+                  padding: '0 13px',
                   borderRadius: '10px',
                   background: 'rgba(255,255,255,0.14)',
                   backdropFilter: 'blur(14px)',
@@ -635,7 +639,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '6px',
+                  gap: '5px',
                   cursor: 'pointer',
                   color: '#ffffff',
                   fontSize: '0.82rem',
@@ -643,7 +647,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   transition: 'all 0.15s ease',
                 }}
               >
-                <Info size={16} strokeWidth={2.4} />
+                <Info size={12} strokeWidth={2.2} />
                 Details
               </button>
             </div>
