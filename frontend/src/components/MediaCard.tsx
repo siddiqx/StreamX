@@ -73,40 +73,67 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
   const isOffline = isOfflineProp !== undefined ? isOfflineProp : !!(group ? group.isOffline : false);
   const category = group ? group.category : resolvedItem.category;
   const isSeries = group?.type === 'series';
-  const episodeCount = group?.episodes.length || 1;
 
-  const [watchProgress, setWatchProgress] = useState<WatchHistoryItem | null>(() => {
-    if (overrideProgress !== undefined) return overrideProgress;
-    if (group && group.episodes && group.episodes.length > 0) {
-      const history = getWatchHistory();
-      const epIds = new Set(group.episodes.flatMap(e => [e.item.id, ...(e.versions?.map(v => v.item.id) || [])]));
-      const matched = history.filter(h => epIds.has(h.mediaId));
-      if (matched.length > 0) return matched[0];
-    }
-    return getWatchProgress(resolvedItem.id);
-  });
+  // Watch history reactivity
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   React.useEffect(() => {
-    if (overrideProgress !== undefined) {
-      setWatchProgress(overrideProgress);
-      return;
-    }
-    const handleUpdate = () => {
-      if (group && group.episodes && group.episodes.length > 0) {
-        const history = getWatchHistory();
-        const epIds = new Set(group.episodes.flatMap(e => [e.item.id, ...(e.versions?.map(v => v.item.id) || [])]));
-        const matched = history.filter(h => epIds.has(h.mediaId));
-        if (matched.length > 0) {
-          setWatchProgress(matched[0]);
-          return;
-        }
-      }
-      setWatchProgress(getWatchProgress(resolvedItem.id));
-    };
-
+    const handleUpdate = () => setHistoryVersion(v => v + 1);
     window.addEventListener('streamx_watch_history_updated', handleUpdate);
     return () => window.removeEventListener('streamx_watch_history_updated', handleUpdate);
-  }, [resolvedItem.id, group, overrideProgress]);
+  }, []);
+
+  // Compute series completion and in-progress playback state
+  const { isCompleted, activeProgress } = React.useMemo(() => {
+    if (overrideProgress !== undefined) {
+      if (!overrideProgress) return { isCompleted: false, activeProgress: null };
+      const completed = !!(overrideProgress.completed || overrideProgress.progressPercentage >= 90);
+      return { isCompleted: completed, activeProgress: overrideProgress };
+    }
+
+    const history = getWatchHistory();
+
+    // Series group: Only marked completed if EVERY episode in the series has been finished
+    if (isSeries && group && group.episodes && group.episodes.length > 0) {
+      const episodes = group.episodes;
+      const completedIds = new Set(
+        history.filter(h => h.completed || h.progressPercentage >= 90).map(h => h.mediaId)
+      );
+
+      const allCompleted = episodes.every(ep => {
+        const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
+        return epIds.some(id => completedIds.has(id));
+      });
+
+      if (allCompleted) {
+        return { isCompleted: true, activeProgress: null };
+      }
+
+      // Check if an episode is actively in-progress (paused mid-episode)
+      const allEpIds = new Set(episodes.flatMap(e => [e.item.id, ...(e.versions?.map(v => v.item.id) || [])]));
+      const inProgressEntry = history.find(h =>
+        allEpIds.has(h.mediaId) &&
+        !h.completed &&
+        (h.progressSeconds >= 15 || h.progressPercentage >= 2) &&
+        h.progressPercentage < 90
+      );
+
+      return {
+        isCompleted: false,
+        activeProgress: inProgressEntry || null,
+      };
+    }
+
+    // Standalone media / movie:
+    const itemProgress = getWatchProgress(resolvedItem.id);
+    if (!itemProgress) return { isCompleted: false, activeProgress: null };
+
+    const movieCompleted = !!(itemProgress.completed || itemProgress.progressPercentage >= 90);
+    return {
+      isCompleted: movieCompleted,
+      activeProgress: itemProgress,
+    };
+  }, [overrideProgress, isSeries, group, resolvedItem.id, historyVersion]);
 
   const Icon = getCategoryIcon(category);
 
@@ -161,11 +188,13 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
           alt={title}
           loading="lazy"
           onError={handlePosterError}
+          className="media-card-poster"
           style={{
             width: '100%',
             height: '100%',
             objectFit: 'cover',
             display: 'block',
+            transition: 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
           }}
         />
       ) : (
@@ -286,7 +315,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
           <span />
         )}
 
-        {/* Right side: Offline badge, Series Episode Count, or Continue Watching Episode */}
+        {/* Right side: Offline badge, Continue Watching Episode, or Watched */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           {episodeLabelBadge ? (
             <span style={{
@@ -300,24 +329,6 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
               letterSpacing: '0.02em',
             }}>
               {episodeLabelBadge}
-            </span>
-          ) : isSeries ? (
-            <span style={{
-              background: 'rgba(99,102,241,0.88)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              borderRadius: '6px',
-              padding: '2px 6px',
-              fontSize: '0.6rem',
-              fontWeight: 800,
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-              boxShadow: '0 2px 8px rgba(99,102,241,0.4)',
-            }}>
-              <Layers size={9} />
-              {episodeCount} {episodeCount === 1 ? 'Ep' : 'Eps'}
             </span>
           ) : (group?.versions && group.versions.length > 1) ? (
             <span style={{
@@ -350,24 +361,27 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               boxShadow: '0 2px 8px rgba(16,185,129,0.5)',
-            }}>
+            }} title="Downloaded">
               <Check size={10} color="#fff" strokeWidth={3} />
             </span>
           )}
 
           {/* Watched / Finished badge */}
-          {watchProgress?.completed && (
+          {isCompleted && (
             <span style={{
-              background: 'rgba(16,185,129,0.85)',
+              background: 'rgba(16,185,129,0.9)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
               borderRadius: '6px',
-              padding: '2px 5px',
+              padding: '2px 6px',
               fontSize: '0.58rem',
               fontWeight: 800,
               color: '#fff',
               display: 'flex',
               alignItems: 'center',
-              gap: '2px',
+              gap: '3px',
               boxShadow: '0 2px 6px rgba(0,0,0,0.6)',
+              border: '1px solid rgba(16,185,129,0.3)',
             }}>
               <Check size={8} color="#fff" strokeWidth={3} />
               Watched
@@ -382,8 +396,8 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
         bottom: 0,
         left: 0,
         right: 0,
-        background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.7) 60%, transparent 100%)',
-        padding: '24px 8px 8px',
+        background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.78) 45%, rgba(7,9,14,0.2) 80%, transparent 100%)',
+        padding: '28px 10px 10px',
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'space-between',
@@ -391,15 +405,16 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
       }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <p style={{
-            fontSize: '0.74rem',
+            fontSize: '0.76rem',
             fontWeight: 800,
             color: '#fff',
             fontFamily: 'var(--font-display, inherit)',
-            lineHeight: 1.2,
+            lineHeight: 1.25,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             textShadow: '0 1px 4px rgba(0,0,0,0.9)',
+            margin: 0,
           }}>
             {title}
           </p>
@@ -409,7 +424,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
               color: 'rgba(255,255,255,0.65)',
               fontWeight: 700,
               display: 'block',
-              marginTop: '1px',
+              marginTop: '2px',
             }}>
               {year}
             </span>
@@ -420,6 +435,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
         <button
           onClick={handlePlayClick}
           aria-label="Play"
+          className="media-card-play-btn"
           style={{
             width: '32px',
             height: '32px',
@@ -441,7 +457,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
       </div>
 
       {/* Netflix-style Watch Progress Bar */}
-      {watchProgress && watchProgress.progressPercentage > 0 && !watchProgress.completed && (
+      {activeProgress && activeProgress.progressPercentage > 0 && !isCompleted && (
         <div style={{
           position: 'absolute',
           bottom: 0,
@@ -452,35 +468,11 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
           zIndex: 15,
         }}>
           <div style={{
-            width: `${watchProgress.progressPercentage}%`,
+            width: `${Math.min(100, Math.max(0, activeProgress.progressPercentage))}%`,
             height: '100%',
             background: 'linear-gradient(90deg, #ef4444, #f87171)',
             boxShadow: '0 0 6px rgba(239,68,68,0.8)',
           }} />
-        </div>
-      )}
-
-      {/* Completed indicator badge */}
-      {watchProgress && watchProgress.completed && (
-        <div
-          title="Watched"
-          style={{
-            position: 'absolute',
-            bottom: '7px',
-            right: '7px',
-            width: '18px',
-            height: '18px',
-            borderRadius: '50%',
-            background: 'rgba(16,185,129,0.92)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-            zIndex: 15,
-          }}
-        >
-          <Check size={11} strokeWidth={3} />
         </div>
       )}
     </div>

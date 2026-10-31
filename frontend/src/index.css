@@ -108,6 +108,20 @@ body {
   -webkit-backface-visibility: hidden;
   will-change: transform, box-shadow;
 }
+@media (hover: hover) and (pointer: fine) {
+  .media-card-shell:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(99, 102, 241, 0.22) !important;
+    border-color: rgba(99, 102, 241, 0.45) !important;
+  }
+  .media-card-shell:hover .media-card-poster {
+    transform: scale(1.05);
+  }
+  .media-card-shell:hover .media-card-play-btn {
+    transform: scale(1.12);
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.75);
+  }
+}
 .scroll-row { display:flex; gap:12px; overflow-x:auto; padding:4px 16px 12px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-behavior:smooth; contain:layout style; }
 .scroll-row::-webkit-scrollbar { display:none; }
 .scroll-row > * { scroll-snap-align:start; flex-shrink:0; }
