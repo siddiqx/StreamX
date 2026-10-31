@@ -279,7 +279,7 @@ async def add_private_network_access_header(request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
-    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.workers\.dev|https://.*\.trycloudflare\.com|https://.*\.pages\.dev",
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.workers\.dev|https://.*\.trycloudflare\.com|https://.*\.pages\.dev|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?|http://(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],

@@ -329,13 +329,18 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-      <Navbar />
+      <Navbar
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        downloadCount={transfers.filter(t => t.status !== 'COMPLETED' && t.status !== 'FAILED').length}
+        apiHealthOk={apiHealth.ok}
+      />
 
       <main style={{
         flex: 1,
         paddingTop: '12px',
         paddingBottom: 'calc(var(--bottomnav-h) + max(env(safe-area-inset-bottom, 0px), 8px) + 16px)',
-        maxWidth: '800px',
+        maxWidth: '1440px',
         width: '100%',
         margin: '0 auto',
         overflowX: 'hidden',

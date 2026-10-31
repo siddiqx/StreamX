@@ -4,6 +4,10 @@ export const CLOUD_BACKEND_URL = 'https://streamx-worker.siddiqsiddiq00012.worke
 
 export const getApiBase = (): string => {
   if (typeof window !== 'undefined') {
+    // If opening via Vite dev server (port 5173), use relative paths so dev proxy forwards to local backend seamlessly
+    if (window.location.port === '5173') {
+      return '';
+    }
     // If running in local development or local network, connect directly to local backend
     const isLocalNetwork =
       window.location.hostname === 'localhost' ||

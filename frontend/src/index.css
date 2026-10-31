@@ -236,3 +236,23 @@ body {
   transform: translateY(0);
 }
 
+
+/* Desktop Responsive Enhancements */
+@media (min-width: 768px) {
+  .desktop-nav-links {
+    display: flex !important;
+  }
+  .mobile-bottom-nav {
+    display: none !important;
+  }
+  .hero-spotlight {
+    min-height: clamp(280px, 35vh, 360px) !important;
+    border-radius: 22px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .desktop-only-text {
+    display: none;
+  }
+}
