@@ -430,7 +430,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           onTouchStart={handleHeroTouchStart}
           onTouchEnd={handleHeroTouchEnd}
           style={{
-            margin: '0 clamp(12px, 3vw, 20px)',
+            margin: '0 var(--page-gutter)',
             minHeight: '250px',
             display: 'flex',
             flexDirection: 'column',
@@ -499,22 +499,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
             pointerEvents: 'none',
           }} />
 
-          {/* Minimalist Top-Right Pagination Dots */}
+          {/* Minimalist Bottom-Right Pagination Dots */}
           {recommendedGroups.length > 1 && (
             <div style={{
               position: 'absolute',
-              top: '14px',
-              right: '14px',
+              bottom: '16px',
+              right: '20px',
               zIndex: 15,
               display: 'flex',
-              gap: '5px',
+              gap: '6px',
               alignItems: 'center',
-              padding: '5px 10px',
-              background: 'rgba(0,0,0,0.45)',
-              backdropFilter: 'blur(14px)',
-              WebkitBackdropFilter: 'blur(14px)',
+              padding: '6px 12px',
+              background: 'rgba(7,9,14,0.65)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
               borderRadius: '999px',
-              border: '1px solid rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.14)',
             }}>
               {recommendedGroups.map((_, idx) => (
                 <button
@@ -522,10 +522,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onClick={(e) => selectHero(idx, e)}
                   aria-label={`Slide ${idx + 1}`}
                   style={{
-                    width: idx === safeIndex ? '16px' : '5px',
+                    width: idx === safeIndex ? '18px' : '6px',
                     height: '5px',
                     borderRadius: '999px',
-                    background: idx === safeIndex ? '#ffffff' : 'rgba(255,255,255,0.3)',
+                    background: idx === safeIndex ? '#ffffff' : 'rgba(255,255,255,0.35)',
                     border: 'none',
                     cursor: 'pointer',
                     padding: 0,
@@ -807,7 +807,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className="section-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Flame size={17} color="#ef4444" />
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '24px',
+                height: '24px',
+                borderRadius: '7px',
+                background: 'rgba(99, 102, 241, 0.15)',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+              }}>
+                <Flame size={14} color="#818cf8" />
+              </span>
               <span className="section-title">
                 Continue Watching
               </span>
@@ -845,7 +856,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
         <section key={s.title} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className="section-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {s.icon}
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '24px',
+                height: '24px',
+                borderRadius: '7px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+              }}>
+                {s.icon}
+              </span>
               <span className="section-title">{s.title}</span>
             </div>
             <button

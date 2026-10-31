@@ -43,6 +43,7 @@
   --carousel-gap: 12px;
   --section-gap: 24px;
   --grid-gap: clamp(12px, 1.5vw, 16px);
+  --page-gutter: clamp(14px, 3.2vw, 20px);
 }
 
 @media (min-width: 640px) {
@@ -51,35 +52,39 @@
     --carousel-gap: 16px;
     --section-gap: 32px;
     --grid-gap: 18px;
+    --page-gutter: clamp(18px, 3.2vw, 28px);
   }
 }
 
 @media (min-width: 768px) {
   :root {
-    --navbar-h: 68px;
-    --card-width: clamp(200px, 18vw, 225px);
+    --navbar-h: 64px;
+    --card-width: clamp(195px, 17vw, 220px);
     --carousel-gap: 20px;
-    --section-gap: 40px;
+    --section-gap: 36px;
     --grid-gap: clamp(18px, 2vw, 24px);
+    --page-gutter: clamp(20px, 3.2vw, 36px);
   }
 }
 
 @media (min-width: 1024px) {
   :root {
-    --navbar-h: 70px;
-    --card-width: clamp(215px, 15vw, 245px);
-    --carousel-gap: 24px;
-    --section-gap: 50px;
-    --grid-gap: clamp(22px, 2.2vw, 28px);
+    --navbar-h: 68px;
+    --card-width: clamp(205px, 14.5vw, 235px);
+    --carousel-gap: 22px;
+    --section-gap: 44px;
+    --grid-gap: clamp(20px, 2vw, 26px);
+    --page-gutter: clamp(24px, 3.5vw, 44px);
   }
 }
 
 @media (min-width: 1440px) {
   :root {
-    --card-width: clamp(225px, 13.5vw, 255px);
-    --carousel-gap: 28px;
-    --section-gap: 56px;
-    --grid-gap: 30px;
+    --card-width: clamp(215px, 13vw, 245px);
+    --carousel-gap: 24px;
+    --section-gap: 48px;
+    --grid-gap: 28px;
+    --page-gutter: 48px;
   }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; -webkit-tap-highlight-color: transparent; }
@@ -160,10 +165,10 @@ body {
     transform: scale(1.05);
   }
 }
-.scroll-row { display:flex; gap:12px; overflow-x:auto; padding:4px 16px 12px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-behavior:smooth; contain:layout style; }
+.scroll-row { display:flex; gap:12px; overflow-x:auto; padding:4px var(--page-gutter) 12px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-behavior:smooth; contain:layout style; }
 .scroll-row::-webkit-scrollbar { display:none; }
 .scroll-row > * { scroll-snap-align:start; flex-shrink:0; }
-.section-header { display:flex; align-items:center; justify-content:space-between; padding:0 16px; margin-bottom:2px; }
+.section-header { display:flex; align-items:center; justify-content:space-between; padding:0 var(--page-gutter); margin-bottom:2px; }
 .section-title { font-size:1rem; font-weight:800; font-family:var(--font-display); color:#fff; letter-spacing:-0.02em; }
 .section-see-all { font-size:0.78rem; font-weight:700; color:var(--accent-primary); background:none; border:none; cursor:pointer; min-height:44px; display:flex; align-items:center; gap:3px; padding:0; }
 .input-field { width:100%; background:rgba(255,255,255,0.06); border:1px solid var(--border-subtle); border-radius:var(--radius-full); padding:0 48px; color:var(--text-main); font-size:0.95rem; font-family:inherit; outline:none; transition:border-color 0.2s,background 0.2s; height:50px; }
@@ -272,22 +277,25 @@ body {
     display: none !important;
   }
   .main-content {
-    padding-top: 22px !important;
-    padding-bottom: 60px !important;
+    padding-top: 20px !important;
+    padding-bottom: 56px !important;
+    max-width: 1540px !important;
+    margin: 0 auto !important;
+    width: 100% !important;
   }
   .hero-spotlight {
-    min-height: 270px !important;
-    max-height: 310px !important;
+    min-height: 240px !important;
+    max-height: 270px !important;
     border-radius: 18px !important;
-    margin: 0 clamp(16px, 3vw, 36px) !important;
+    margin: 0 var(--page-gutter) !important;
   }
   .hero-content-box {
-    padding: 20px 24px !important;
+    padding: 18px 24px !important;
     gap: 8px !important;
     max-width: 70% !important;
   }
   .hero-title-text {
-    font-size: 1.65rem !important;
+    font-size: 1.55rem !important;
     line-height: 1.18 !important;
   }
   .hero-action-btn-primary {
@@ -303,14 +311,15 @@ body {
     border-radius: 10px !important;
   }
   .section-header {
-    margin-bottom: 12px !important;
-    padding: 0 clamp(20px, 3.5vw, 44px) !important;
+    margin-bottom: 10px !important;
+    padding: 0 var(--page-gutter) !important;
   }
   .section-title {
-    font-size: 1.16rem !important;
+    font-size: 1.14rem !important;
   }
   .scroll-row {
-    padding: 8px clamp(20px, 3.5vw, 44px) 20px !important;
+    padding: 6px var(--page-gutter) 18px !important;
+    gap: var(--carousel-gap) !important;
   }
   .media-card-shell {
     border-radius: 14px !important;
@@ -325,8 +334,8 @@ body {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    width: 44px;
-    height: 76px;
+    width: 42px;
+    height: 72px;
     background: rgba(7, 9, 14, 0.88);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
@@ -349,40 +358,40 @@ body {
     box-shadow: 0 12px 30px rgba(99, 102, 241, 0.4);
   }
   .shelf-arrow-left {
-    left: clamp(4px, 1.2vw, 16px);
+    left: calc(var(--page-gutter) - 14px);
   }
   .shelf-arrow-right {
-    right: clamp(4px, 1.2vw, 16px);
+    right: calc(var(--page-gutter) - 14px);
   }
 }
 
 @media (min-width: 1024px) {
   .main-content {
-    padding-top: 26px !important;
-    padding-bottom: 64px !important;
+    padding-top: 24px !important;
+    padding-bottom: 60px !important;
   }
   .hero-spotlight {
-    min-height: 285px !important;
-    max-height: 320px !important;
-    margin: 0 clamp(20px, 3.5vw, 44px) !important;
+    min-height: 250px !important;
+    max-height: 280px !important;
+    margin: 0 var(--page-gutter) !important;
   }
   .hero-content-box {
-    padding: 24px 30px !important;
+    padding: 22px 28px !important;
     gap: 8px !important;
     max-width: 65% !important;
   }
   .hero-title-text {
-    font-size: 1.85rem !important;
+    font-size: 1.75rem !important;
   }
   .section-header {
-    margin-bottom: 14px !important;
-    padding: 0 clamp(24px, 4vw, 48px) !important;
+    margin-bottom: 12px !important;
+    padding: 0 var(--page-gutter) !important;
   }
   .section-title {
-    font-size: 1.22rem !important;
+    font-size: 1.2rem !important;
   }
   .scroll-row {
-    padding: 8px clamp(24px, 4vw, 48px) 22px !important;
+    padding: 8px var(--page-gutter) 20px !important;
   }
 }
 

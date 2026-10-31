@@ -190,7 +190,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       display: 'flex',
       flexDirection: 'column',
       gap: '20px',
-      padding: '8px clamp(16px, 3.2vw, 40px) 60px',
+      padding: '8px var(--page-gutter) 60px',
       maxWidth: '820px',
       margin: '0 auto',
       width: '100%',

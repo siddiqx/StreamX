@@ -37,7 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         maxWidth: '1540px',
         margin: '0 auto',
         height: '100%',
-        padding: '0 clamp(16px, 3.2vw, 44px)',
+        padding: '0 var(--page-gutter)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',

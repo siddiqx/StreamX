@@ -19,6 +19,7 @@ const tabs: { id: NavTab; label: string; icon: React.FC<{ size: number; strokeWi
 export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab, downloadCount }) => {
   return (
     <nav
+      className="mobile-bottom-nav"
       style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
         background: 'rgba(7,9,14,0.96)',

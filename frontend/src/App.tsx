@@ -349,7 +349,7 @@ export const App: React.FC = () => {
         downloadCount={transfers.filter(t => t.status !== 'COMPLETED' && t.status !== 'FAILED').length}
       />
 
-      <main className="main-content">
+      <main className="main-content" style={{ maxWidth: '1540px', margin: '0 auto', width: '100%' }}>
         {currentTab === 'home' && (
           <HomeView
             media={media}
@@ -406,11 +406,13 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      <BottomNav
-        currentTab={currentTab}
-        onSelectTab={(tab) => setCurrentTab(tab)}
-        downloadCount={downloads.filter((d) => d.status === 'DOWNLOADING').length}
-      />
+      <div className="mobile-bottom-nav">
+        <BottomNav
+          currentTab={currentTab}
+          onSelectTab={(tab) => setCurrentTab(tab)}
+          downloadCount={downloads.filter((d) => d.status === 'DOWNLOADING').length}
+        />
+      </div>
 
       <TransferModal
         isOpen={isTransfersOpen}

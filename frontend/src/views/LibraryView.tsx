@@ -114,7 +114,15 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   }, [library, selectedCat, sortBy, historyMap]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--section-gap, 20px)', padding: '0 clamp(16px, 3.2vw, 44px) 60px' }}>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 'var(--section-gap, 20px)',
+      padding: '0 var(--page-gutter) 60px',
+      maxWidth: '1540px',
+      margin: '0 auto',
+      width: '100%',
+    }}>
       {/* Top Controls: Library Counter & Sorter */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
         <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.01em' }}>
