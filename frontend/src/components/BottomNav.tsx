@@ -1,7 +1,7 @@
 import React from 'react';
-import { Home, Search, Library, ArrowDownCircle, Settings } from 'lucide-react';
+import { Home, Library, ArrowDownCircle, Settings } from 'lucide-react';
 
-export type NavTab = 'home' | 'search' | 'library' | 'downloads' | 'settings';
+export type NavTab = 'home' | 'library' | 'downloads' | 'settings';
 
 interface BottomNavProps {
   currentTab: NavTab;
@@ -11,7 +11,6 @@ interface BottomNavProps {
 
 const tabs: { id: NavTab; label: string; icon: React.FC<{ size: number; strokeWidth?: number; color?: string }> }[] = [
   { id: 'home',      label: 'Home',      icon: Home },
-  { id: 'search',    label: 'Search',    icon: Search },
   { id: 'library',   label: 'Library',   icon: Library },
   { id: 'downloads', label: 'Downloads', icon: ArrowDownCircle },
   { id: 'settings',  label: 'Settings',  icon: Settings },

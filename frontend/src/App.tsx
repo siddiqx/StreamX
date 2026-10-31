@@ -18,7 +18,7 @@ import { TransferModal } from './components/TransferModal';
 import { MediaDetailModal } from './components/MediaDetailModal';
 import { launchVlcWithTracking } from './utils/playerSettings';
 import { HomeView } from './views/HomeView';
-import { SearchView } from './views/SearchView';
+import { SearchModal } from './components/SearchModal';
 import { LibraryView } from './views/LibraryView';
 import { DownloadsView } from './views/DownloadsView';
 import { SettingsView } from './views/SettingsView';
@@ -42,6 +42,7 @@ export const App: React.FC = () => {
 
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type?: string } | null>(null);
   const [isTransfersOpen, setIsTransfersOpen] = useState(false);
 
@@ -332,8 +333,8 @@ export const App: React.FC = () => {
       <Navbar
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
+        onOpenSearch={() => setIsSearchOpen(true)}
         downloadCount={transfers.filter(t => t.status !== 'COMPLETED' && t.status !== 'FAILED').length}
-        
       />
 
       <main style={{
@@ -359,16 +360,6 @@ export const App: React.FC = () => {
             apiHealth={apiHealth}
             onNavigateSettings={() => setCurrentTab('settings')}
             onRetry={refreshData}
-          />
-        )}
-
-        {currentTab === 'search' && (
-          <SearchView
-            allMedia={media}
-            offlineIds={offlineIds}
-            onSelectMedia={handleSelectMedia}
-            onSelectGroup={handleSelectGroup}
-            onPlayMedia={(item) => handlePlayMedia(item)}
           />
         )}
 
@@ -422,6 +413,16 @@ export const App: React.FC = () => {
         onClose={() => setIsTransfersOpen(false)}
         transfers={transfers}
         onRefresh={refreshData}
+      />
+
+      <SearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        allMedia={media}
+        offlineIds={offlineIds}
+        onSelectMedia={handleSelectMedia}
+        onSelectGroup={handleSelectGroup}
+        onPlayMedia={handlePlayMedia}
       />
 
       <MediaDetailModal

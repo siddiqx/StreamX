@@ -5,17 +5,18 @@ import type { NavTab } from './BottomNav';
 interface NavbarProps {
   currentTab?: NavTab;
   onSelectTab?: (tab: NavTab) => void;
+  onOpenSearch?: () => void;
   downloadCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentTab = 'home',
   onSelectTab,
+  onOpenSearch,
   downloadCount = 0,
 }) => {
   const desktopTabs: { id: NavTab; label: string; icon: React.FC<{ size: number }> }[] = [
     { id: 'home', label: 'Home', icon: Home },
-    { id: 'search', label: 'Search', icon: Search },
     { id: 'library', label: 'Library', icon: Library },
     { id: 'downloads', label: 'Downloads', icon: ArrowDownCircle },
     { id: 'settings', label: 'Settings', icon: Settings },
@@ -119,8 +120,42 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
         )}
 
-        {/* Right spacing balance */}
-        <div style={{ width: '26px' }} />
+        {/* Right Action: Clean Search Icon Button */}
+        {onOpenSearch ? (
+          <button
+            onClick={onOpenSearch}
+            aria-label="Search"
+            title="Search titles, anime, and movies"
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              background: 'rgba(255, 255, 255, 0.05)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#f8fafc',
+              cursor: 'pointer',
+              transition: 'all 0.18s ease',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
+              e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+              e.currentTarget.style.color = '#818cf8';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+              e.currentTarget.style.color = '#f8fafc';
+            }}
+          >
+            <Search size={16} />
+          </button>
+        ) : (
+          <div style={{ width: '36px' }} />
+        )}
       </div>
     </header>
   );
