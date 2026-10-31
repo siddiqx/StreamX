@@ -6,14 +6,12 @@ interface NavbarProps {
   currentTab?: NavTab;
   onSelectTab?: (tab: NavTab) => void;
   downloadCount?: number;
-  apiHealthOk?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentTab = 'home',
   onSelectTab,
   downloadCount = 0,
-  apiHealthOk = true,
 }) => {
   const desktopTabs: { id: NavTab; label: string; icon: React.FC<{ size: number }> }[] = [
     { id: 'home', label: 'Home', icon: Home },
@@ -121,30 +119,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
         )}
 
-        {/* Desktop Connection / Health Indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '4px 10px',
-            borderRadius: '999px',
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            fontSize: '0.72rem',
-            fontWeight: 700,
-            color: apiHealthOk ? '#34d399' : '#fbbf24',
-          }}>
-            <span style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              backgroundColor: apiHealthOk ? '#10b981' : '#f59e0b',
-              boxShadow: apiHealthOk ? '0 0 8px #10b981' : '0 0 8px #f59e0b',
-            }} />
-            <span className="desktop-only-text">{apiHealthOk ? 'PC Backend Active' : 'Connecting'}</span>
-          </div>
-        </div>
+        {/* Right spacing balance */}
+        <div style={{ width: '26px' }} />
       </div>
     </header>
   );

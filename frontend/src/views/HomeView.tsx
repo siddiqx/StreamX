@@ -11,6 +11,7 @@ import { organizeMediaLibrary, getSmartSeriesEpisode } from '../utils/mediaOrgan
 import { MediaCard } from '../components/MediaCard';
 import {
   getMediaBackdropUrl,
+  getMediaPosterUrl,
   getMediaDisplayName,
   type ApiHealthStatus,
 } from '../api';
@@ -176,11 +177,37 @@ export const HomeView: React.FC<HomeViewProps> = ({
     return candidates.sort((a, b) => b.sortTime - a.sortTime).slice(0, 30);
   }, [historyItems, media, library.allGroups]);
 
-  // Curated Recommendation Pool for the Dynamic Rotating Spotlight Hero
+  // Curated Recommendation Pool for the Dynamic Rotating Spotlight Hero (Capped to top 8)
   const recommendedGroups = useMemo(() => {
     const withArt = library.allGroups.filter(g => g.backdropUrl || g.posterUrl);
-    return withArt.length > 0 ? withArt : library.allGroups.slice(0, 8);
+    return (withArt.length > 0 ? withArt : library.allGroups).slice(0, 8);
   }, [library.allGroups]);
+
+  const [failedHeroBackdrops, setFailedHeroBackdrops] = useState<Record<string, boolean>>({});
+
+  const getHeroArtworkForGroup = (grp: MediaGroup): string | undefined => {
+    const hasBackdropFailed = !!failedHeroBackdrops[grp.id];
+    if (!hasBackdropFailed) {
+      if (grp.backdropUrl) return grp.backdropUrl;
+      if (grp.featuredItem) {
+        const bd = getMediaBackdropUrl(grp.featuredItem, 'w1280');
+        if (bd) return bd;
+      }
+    }
+    // High-res poster fallback
+    if (grp.posterUrl) return grp.posterUrl;
+    if (grp.featuredItem) {
+      const p = getMediaPosterUrl(grp.featuredItem);
+      if (p) return p;
+    }
+    if (grp.episodes && grp.episodes.length > 0) {
+      for (const ep of grp.episodes) {
+        const epP = getMediaPosterUrl(ep.item);
+        if (epP) return epP;
+      }
+    }
+    return undefined;
+  };
 
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const [isHeroPaused, setIsHeroPaused] = useState(false);
@@ -331,8 +358,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
         >
           {/* Multi-layered cinematic cross-dissolve artwork */}
           <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-            {recommendedGroups.slice(0, 8).map((grp, idx) => {
-              const bgUrl = grp.backdropUrl || (grp.featuredItem ? getMediaBackdropUrl(grp.featuredItem, 'w1280') : undefined) || grp.posterUrl;
+            {recommendedGroups.map((grp, idx) => {
+              const bgUrl = getHeroArtworkForGroup(grp);
               if (!bgUrl) return null;
               const isCurrent = idx === safeIndex;
               return (
@@ -341,6 +368,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   src={bgUrl}
                   alt={grp.title}
                   loading="eager"
+                  onError={() => {
+                    setFailedHeroBackdrops(prev => ({ ...prev, [grp.id]: true }));
+                  }}
                   style={{
                     position: 'absolute',
                     inset: 0,
@@ -348,9 +378,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     height: '100%',
                     objectFit: 'cover',
                     objectPosition: 'center 20%',
-                    opacity: isCurrent ? 0.92 : 0,
-                    filter: 'saturate(122%) contrast(108%)',
-                    transform: isCurrent ? 'scale(1)' : 'scale(1.04)',
+                    opacity: isCurrent ? 0.95 : 0,
+                    filter: 'saturate(125%) contrast(106%)',
+                    transform: isCurrent ? 'scale(1)' : 'scale(1.03)',
                     transition: 'opacity 0.9s cubic-bezier(0.4, 0, 0.2, 1), transform 1.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
                     pointerEvents: 'none',
                   }}
@@ -386,20 +416,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {recommendedGroups.length > 1 && (
             <div style={{
               position: 'absolute',
-              top: '16px',
-              right: '16px',
+              top: '14px',
+              right: '14px',
               zIndex: 15,
               display: 'flex',
-              gap: '6px',
+              gap: '5px',
               alignItems: 'center',
-              padding: '6px 11px',
+              padding: '5px 10px',
               background: 'rgba(0,0,0,0.45)',
               backdropFilter: 'blur(14px)',
               WebkitBackdropFilter: 'blur(14px)',
               borderRadius: '999px',
               border: '1px solid rgba(255,255,255,0.1)',
             }}>
-              {recommendedGroups.slice(0, 6).map((_, idx) => (
+              {recommendedGroups.map((_, idx) => (
                 <button
                   key={idx}
                   onClick={(e) => selectHero(idx, e)}

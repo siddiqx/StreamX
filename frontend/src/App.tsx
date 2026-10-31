@@ -333,7 +333,7 @@ export const App: React.FC = () => {
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
         downloadCount={transfers.filter(t => t.status !== 'COMPLETED' && t.status !== 'FAILED').length}
-        apiHealthOk={apiHealth.ok}
+        
       />
 
       <main style={{
