@@ -419,7 +419,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   }, [library]);
 
   return (
-    <div className="home-container" style={{ display: 'flex', flexDirection: 'column', paddingBottom: '28px' }}>
+    <div className="home-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--section-gap, 28px)', paddingBottom: '28px' }}>
 
       {/* Netflix-Style Featured Spotlight Hero with Animated Recommendations */}
       {featured ? (
@@ -430,7 +430,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           onTouchStart={handleHeroTouchStart}
           onTouchEnd={handleHeroTouchEnd}
           style={{
-            margin: '0',
+            margin: '0 0 var(--section-gap, 24px) 0',
             width: '100%',
             minHeight: '250px',
             display: 'flex',
@@ -598,27 +598,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 className="btn-primary hero-action-btn-primary"
                 style={{
-                  height: '38px',
-                  minHeight: '38px',
-                  padding: '0 22px',
-                  fontSize: '0.88rem',
+                  height: '34px',
+                  minHeight: '34px',
+                  padding: '0 18px',
+                  fontSize: '0.82rem',
                   fontWeight: 800,
                   background: '#ffffff',
                   color: '#090d16',
-                  boxShadow: '0 4px 16px rgba(255,255,255,0.2), 0 2px 6px rgba(0,0,0,0.4)',
+                  boxShadow: '0 4px 14px rgba(255,255,255,0.18)',
                   border: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '6px',
                   cursor: 'pointer',
-                  borderRadius: '10px',
+                  borderRadius: '999px',
                   transition: 'all 0.15s ease',
                   letterSpacing: '0.01em',
                 }}
                 onClick={handleHeroStream}
               >
-                <Play size={16} fill="#090d16" />
+                <Play size={14} fill="#090d16" />
                 Play
               </button>
 
@@ -628,26 +628,26 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 aria-label="Details"
                 title="Details"
                 style={{
-                  height: '38px',
-                  minHeight: '38px',
-                  padding: '0 13px',
-                  borderRadius: '10px',
-                  background: 'rgba(255,255,255,0.14)',
-                  backdropFilter: 'blur(14px)',
-                  WebkitBackdropFilter: 'blur(14px)',
-                  border: '1px solid rgba(255,255,255,0.22)',
+                  height: '32px',
+                  minHeight: '32px',
+                  padding: '0 12px',
+                  borderRadius: '999px',
+                  background: 'rgba(255,255,255,0.1)',
+                  backdropFilter: 'blur(16px)',
+                  WebkitBackdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(255,255,255,0.15)',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '5px',
                   cursor: 'pointer',
-                  color: '#ffffff',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
+                  color: 'rgba(255,255,255,0.9)',
+                  fontSize: '0.76rem',
+                  fontWeight: 600,
                   transition: 'all 0.15s ease',
                 }}
               >
-                <Info size={12} strokeWidth={2.2} />
+                <Info size={13} strokeWidth={2.2} />
                 Details
               </button>
             </div>

@@ -290,7 +290,7 @@ body {
     min-height: 240px !important;
     max-height: 270px !important;
     border-radius: 0 0 18px 18px !important;
-    margin: 0 !important;
+    margin: 0 0 var(--section-gap, 32px) 0 !important;
     border-left: none !important;
     border-right: none !important;
   }
@@ -304,16 +304,21 @@ body {
     line-height: 1.18 !important;
   }
   .hero-action-btn-primary {
-    height: 38px !important;
-    padding: 0 22px !important;
-    font-size: 0.88rem !important;
-    border-radius: 10px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 18px !important;
+    font-size: 0.82rem !important;
+    border-radius: 999px !important;
   }
   .hero-action-btn-secondary {
-    height: 38px !important;
-    padding: 0 14px !important;
-    font-size: 0.82rem !important;
-    border-radius: 10px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 12px !important;
+    font-size: 0.76rem !important;
+    border-radius: 999px !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    color: rgba(255, 255, 255, 0.9) !important;
   }
   .section-header {
     margin-bottom: 10px !important;
@@ -379,7 +384,7 @@ body {
     min-height: 250px !important;
     max-height: 280px !important;
     border-radius: 0 0 20px 20px !important;
-    margin: 0 !important;
+    margin: 0 0 var(--section-gap, 36px) 0 !important;
     border-left: none !important;
     border-right: none !important;
   }
