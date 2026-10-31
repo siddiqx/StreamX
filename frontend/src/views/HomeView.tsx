@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
   Play, Info, ArrowRight, Sparkles, Tv, Film,
   Star, Clock, Flame, Heart, Compass, Laugh,
-  ChevronLeft, ChevronRight, AlertCircle, Settings
+  AlertCircle, Settings
 } from 'lucide-react';
 
 import type { MediaItem } from '../types';
@@ -233,12 +233,41 @@ export const HomeView: React.FC<HomeViewProps> = ({
     setActiveHeroIndex(index);
   };
 
+  // Touch swipe gesture handling for mobile slide
+  const touchStartX = React.useRef<number | null>(null);
+  const touchStartY = React.useRef<number | null>(null);
+
+  const handleHeroTouchStart = (e: React.TouchEvent) => {
+    setIsHeroPaused(true);
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleHeroTouchEnd = (e: React.TouchEvent) => {
+    setIsHeroPaused(false);
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const diffX = touchStartX.current - touchEndX;
+    const diffY = touchStartY.current - touchEndY;
+
+    // Detect horizontal swipe (threshold: 35px)
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 35) {
+      if (diffX > 0) {
+        goToNextHero();
+      } else {
+        goToPrevHero();
+      }
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
   const featuredRuntime = featuredGroup?.runtime
     ? formatRuntime(featuredGroup.runtime)
     : (featured ? formatRuntime(featured.canonical_metadata?.runtime) : undefined);
   const featuredRating = featuredGroup?.rating || featured?.canonical_metadata?.rating;
   const featuredGenres = featuredGroup?.genres || featured?.canonical_metadata?.genres || [];
-  const featuredOverview = featuredGroup?.overview || featured?.canonical_metadata?.overview;
 
   const handleHeroStream = () => {
     if (featuredGroup && featuredGroup.type === 'series') {
@@ -291,11 +320,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
           className="hero-spotlight animate-fade-in"
           onMouseEnter={() => setIsHeroPaused(true)}
           onMouseLeave={() => setIsHeroPaused(false)}
-          onTouchStart={() => setIsHeroPaused(true)}
-          onTouchEnd={() => setIsHeroPaused(false)}
+          onTouchStart={handleHeroTouchStart}
+          onTouchEnd={handleHeroTouchEnd}
           style={{
             margin: '0 16px',
-            minHeight: '330px',
+            minHeight: '260px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'flex-end',
@@ -358,71 +387,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
             zIndex: 2,
             pointerEvents: 'none',
           }} />
-
-          {/* Side Next / Prev Chevrons */}
-          {recommendedGroups.length > 1 && (
-            <>
-              <button
-                onClick={goToPrevHero}
-                aria-label="Previous title"
-                style={{
-                  position: 'absolute',
-                  left: '12px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  zIndex: 20,
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.45)',
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  opacity: 0.7,
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-              >
-                <ChevronLeft size={17} />
-              </button>
-
-              <button
-                onClick={goToNextHero}
-                aria-label="Next title"
-                style={{
-                  position: 'absolute',
-                  right: '12px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  zIndex: 20,
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.45)',
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  opacity: 0.7,
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-              >
-                <ChevronRight size={17} />
-              </button>
-            </>
-          )}
 
           {/* Minimalist Top-Right Pagination Dots */}
           {recommendedGroups.length > 1 && (
@@ -523,23 +487,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
               {featuredTitle}
             </h1>
 
-            {/* Overview excerpt */}
-            {featuredOverview && (
-              <p style={{
-                fontSize: '0.78rem',
-                color: 'rgba(241,245,249,0.85)',
-                lineHeight: 1.45,
-                margin: 0,
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
-                textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-                maxWidth: '520px',
-              }}>
-                {featuredOverview}
-              </p>
-            )}
 
             {/* Action Buttons: Direct Play in VLC & Details */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
