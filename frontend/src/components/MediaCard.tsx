@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle } from 'lucide-react';
 import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
-import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl, API_BASE } from '../api';
+import { getMediaDisplayName, getMediaPosterUrl, API_BASE } from '../api';
 import { getWatchProgress, getWatchHistory } from '../utils/watchHistory';
 import type { WatchHistoryItem } from '../utils/watchHistory';
 
@@ -44,7 +44,6 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
   if (!resolvedItem) return null;
 
   const title = group ? group.title : getMediaDisplayName(resolvedItem);
-  const year = group ? group.year : getMediaDisplayYear(resolvedItem);
   const posterUrl = group ? group.posterUrl : getMediaPosterUrl(resolvedItem);
 
   const [currentPoster, setCurrentPoster] = useState<string | undefined>(posterUrl);
@@ -184,55 +183,61 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
           }}
         />
       ) : (
-        /* Netflix-style Elegant Fallback Card */
+        /* Clean Modern Fallback Card with Single Clean Title */
         <div style={{
           width: '100%',
           height: '100%',
-          background: 'linear-gradient(145deg, #161e2e 0%, #080b11 100%)',
+          background: 'linear-gradient(150deg, #1a2233 0%, #0b0f17 100%)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '14px 10px',
+          padding: '16px 10px',
           textAlign: 'center',
-          gap: '8px',
+          gap: '10px',
           position: 'relative',
         }}>
           <div style={{
-            width: '42px',
-            height: '42px',
-            borderRadius: '12px',
-            background: 'rgba(99,102,241,0.15)',
-            border: '1px solid rgba(99,102,241,0.25)',
+            width: '44px',
+            height: '44px',
+            borderRadius: '14px',
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.22), rgba(139,92,246,0.16))',
+            border: '1px solid rgba(99,102,241,0.3)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            boxShadow: '0 4px 14px rgba(99,102,241,0.15)',
           }}>
-            <Icon size={20} color="#818cf8" />
+            <Icon size={22} color="#a5b4fc" />
           </div>
 
           <span style={{
-            fontSize: '0.74rem',
+            fontSize: '0.78rem',
             fontWeight: 800,
-            color: '#f1f5f9',
+            color: '#f8fafc',
             fontFamily: 'var(--font-display, inherit)',
-            lineHeight: 1.25,
+            lineHeight: 1.3,
             display: '-webkit-box',
             WebkitLineClamp: 3,
             WebkitBoxOrient: 'vertical',
             overflow: 'hidden',
+            textShadow: '0 2px 6px rgba(0,0,0,0.8)',
           }}>
             {title}
           </span>
 
           <span style={{
-            fontSize: '0.6rem',
-            color: 'rgba(255,255,255,0.4)',
-            letterSpacing: '0.04em',
+            fontSize: '0.58rem',
+            color: '#818cf8',
+            letterSpacing: '0.06em',
             textTransform: 'uppercase',
-            fontWeight: 700,
+            fontWeight: 800,
+            background: 'rgba(99,102,241,0.12)',
+            padding: '2px 8px',
+            borderRadius: '999px',
+            border: '1px solid rgba(99,102,241,0.2)',
           }}>
-            StreamX
+            {category || 'StreamX'}
           </span>
         </div>
       )}
@@ -358,46 +363,37 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
         </div>
       </div>
 
-      {/* Bottom Vignette with Canonical Title */}
-      <div style={{
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.82) 48%, rgba(7,9,14,0.18) 82%, transparent 100%)',
-        padding: '32px 12px 10px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'flex-end',
-        pointerEvents: 'none',
-      }}>
-        <p style={{
-          fontSize: '0.82rem',
-          fontWeight: 800,
-          color: '#fff',
-          fontFamily: 'var(--font-display, inherit)',
-          lineHeight: 1.25,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          textShadow: '0 1px 4px rgba(0,0,0,0.95)',
-          margin: 0,
-          letterSpacing: '-0.01em',
+      {/* Bottom Vignette with Canonical Title (Only rendered over poster) */}
+      {hasPoster && (
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.75) 50%, rgba(7,9,14,0.12) 82%, transparent 100%)',
+          padding: '28px 10px 8px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'flex-end',
+          pointerEvents: 'none',
         }}>
-          {title}
-        </p>
-        {year && (
-          <span style={{
-            fontSize: '0.66rem',
-            color: 'rgba(255,255,255,0.65)',
-            fontWeight: 700,
-            display: 'block',
-            marginTop: '2px',
+          <p style={{
+            fontSize: '0.8rem',
+            fontWeight: 800,
+            color: '#fff',
+            fontFamily: 'var(--font-display, inherit)',
+            lineHeight: 1.25,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            textShadow: '0 1px 4px rgba(0,0,0,0.95)',
+            margin: 0,
+            letterSpacing: '-0.01em',
           }}>
-            {year}
-          </span>
-        )}
-      </div>
+            {title}
+          </p>
+        </div>
+      )}
 
       {/* Netflix-style Watch Progress Bar */}
       {activeProgress && activeProgress.progressPercentage > 0 && !isCompleted && (

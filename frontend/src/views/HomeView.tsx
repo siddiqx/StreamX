@@ -316,16 +316,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
           onTouchStart={handleHeroTouchStart}
           onTouchEnd={handleHeroTouchEnd}
           style={{
-            margin: '0 16px',
-            minHeight: '260px',
+            margin: '0 clamp(12px, 3vw, 20px)',
+            minHeight: '250px',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'flex-end',
             position: 'relative',
-            borderRadius: '22px',
+            borderRadius: '18px',
             overflow: 'hidden',
-            boxShadow: '0 12px 36px rgba(0,0,0,0.85)',
-            border: '1px solid rgba(255,255,255,0.1)',
+            boxShadow: '0 16px 40px -8px rgba(0,0,0,0.9), 0 0 20px rgba(99,102,241,0.12)',
+            border: '1px solid rgba(255,255,255,0.12)',
             userSelect: 'none',
           }}
         >
@@ -425,10 +425,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
             style={{
               position: 'relative',
               zIndex: 10,
-              padding: '24px 20px',
+              padding: '18px 16px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '10px',
+              gap: '7px',
               animation: 'heroContentFade 0.65s cubic-bezier(0.16,1,0.3,1)',
             }}
           >
@@ -468,32 +468,32 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </h1>
 
 
-            {/* Action Buttons: Direct Play in VLC & Details */}
-            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+            {/* Action Buttons: Sleek Pill Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
               <button
                 className="btn-primary"
                 style={{
-                  flex: 1,
-                  height: '46px',
-                  minHeight: '46px',
-                  fontSize: '0.94rem',
+                  height: '38px',
+                  minHeight: '38px',
+                  padding: '0 22px',
+                  fontSize: '0.88rem',
                   fontWeight: 800,
                   background: '#ffffff',
                   color: '#090d16',
-                  boxShadow: '0 4px 18px rgba(255,255,255,0.22), 0 2px 8px rgba(0,0,0,0.5)',
+                  boxShadow: '0 4px 16px rgba(255,255,255,0.2), 0 2px 6px rgba(0,0,0,0.4)',
                   border: 'none',
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '8px',
+                  gap: '6px',
                   cursor: 'pointer',
-                  borderRadius: '12px',
+                  borderRadius: '10px',
                   transition: 'all 0.15s ease',
                   letterSpacing: '0.01em',
                 }}
                 onClick={handleHeroStream}
               >
-                <Play size={18} fill="#090d16" />
+                <Play size={16} fill="#090d16" />
                 Play
               </button>
 
@@ -502,24 +502,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 aria-label="Details"
                 title="Details"
                 style={{
-                  width: '46px',
-                  height: '46px',
-                  minWidth: '46px',
-                  borderRadius: '12px',
+                  height: '38px',
+                  minHeight: '38px',
+                  padding: '0 14px',
+                  borderRadius: '10px',
                   background: 'rgba(255,255,255,0.14)',
-                  backdropFilter: 'blur(16px)',
-                  WebkitBackdropFilter: 'blur(16px)',
+                  backdropFilter: 'blur(14px)',
+                  WebkitBackdropFilter: 'blur(14px)',
                   border: '1px solid rgba(255,255,255,0.22)',
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  gap: '6px',
                   cursor: 'pointer',
                   color: '#ffffff',
-                  flexShrink: 0,
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
                   transition: 'all 0.15s ease',
                 }}
               >
-                <Info size={19} strokeWidth={2.4} />
+                <Info size={16} strokeWidth={2.4} />
+                Details
               </button>
             </div>
           </div>

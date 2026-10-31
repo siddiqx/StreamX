@@ -299,8 +299,12 @@ class MetadataService:
                 # candidate pool once. Never let a noisy Telegram filename force a
                 # single weak result into the library.
                 query_variants = []
+                collapsed_repeat = re.sub(r"([a-zA-Z])\1{2,}", r"\1\1", parsed.clean_title)
+                single_repeat = re.sub(r"([a-zA-Z])\1{2,}", r"\1", parsed.clean_title)
                 for query in (
                     parsed.clean_title,
+                    collapsed_repeat,
+                    single_repeat,
                     re.sub(r"[^\w\s]", " ", parsed.clean_title),
                     re.sub(r"\s+", " ", parsed.clean_title).strip(),
                 ):
@@ -309,7 +313,7 @@ class MetadataService:
                         query_variants.append(query)
 
                 for provider in providers:
-                    for index, query in enumerate(query_variants[:3]):
+                    for index, query in enumerate(query_variants[:4]):
                         found = await provider.search(
                             query=query,
                             year=parsed.year,
@@ -671,8 +675,15 @@ class MetadataService:
         strip_art = lambda p: re.sub(r"^(?:the|a|an)\s+", "", p).strip()
         core_a = strip_art(pref_a)
         core_b = strip_art(pref_b)
-        if core_a and core_b and (core_a == core_b or core_a.startswith(core_b) or core_b.startswith(core_a)):
-            if len(core_a.split()) >= 2 or len(core_b.split()) >= 2 or min(len(core_a), len(core_b)) >= 7:
+        clean_core_a = re.sub(r"([a-z])\1{2,}", r"\1\1", core_a)
+        clean_core_b = re.sub(r"([a-z])\1{2,}", r"\1\1", core_b)
+        if clean_core_a and clean_core_b and (clean_core_a == clean_core_b or clean_core_a.startswith(clean_core_b) or clean_core_b.startswith(clean_core_a)):
+            if len(clean_core_a.split()) >= 2 or len(clean_core_b.split()) >= 2 or min(len(clean_core_a), len(clean_core_b)) >= 7:
+                return True
+
+        from difflib import SequenceMatcher
+        if clean_core_a and clean_core_b and len(clean_core_a) >= 5 and len(clean_core_b) >= 5:
+            if SequenceMatcher(None, clean_core_a, clean_core_b).ratio() >= 0.88:
                 return True
 
         norm_a = re.sub(r"[^\w]", "", strip_art(title_a).lower())

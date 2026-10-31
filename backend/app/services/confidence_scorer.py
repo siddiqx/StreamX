@@ -17,6 +17,8 @@ def normalize_title_for_comparison(title: str) -> str:
     # Strip apostrophes so contractions match uncontracted words (He's -> hes, World's -> worlds)
     s = re.sub(r"['’`]", "", s)
     s = re.sub(r"[^\w\s]", " ", s)
+    # Collapse accidental repeated consecutive characters (e.g. immmoral -> immoral)
+    s = re.sub(r"([a-z])\1{2,}", r"\1\1", s)
     s = re.sub(r"\s+", " ", s).strip()
     # Leading articles are not identity-bearing in provider titles.
     s = re.sub(r"^(?:the|a|an)\s+", "", s)
