@@ -10,10 +10,8 @@ import type { MediaGroup } from '../utils/mediaOrganizer';
 import { organizeMediaLibrary, getSmartSeriesEpisode } from '../utils/mediaOrganizer';
 import { MediaCard } from '../components/MediaCard';
 import {
-  formatRuntime,
   getMediaBackdropUrl,
   getMediaDisplayName,
-  getMediaDisplayYear,
   type ApiHealthStatus,
 } from '../api';
 
@@ -214,7 +212,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const featuredGroup = recommendedGroups[safeIndex] || null;
   const featured = featuredGroup?.featuredItem || media[0] || null;
   const featuredTitle = featuredGroup ? featuredGroup.title : (featured ? getMediaDisplayName(featured) : '');
-  const featuredYear = featuredGroup ? featuredGroup.year : (featured ? getMediaDisplayYear(featured) : null);
 
   const goToNextHero = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -263,11 +260,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     touchStartY.current = null;
   };
 
-  const featuredRuntime = featuredGroup?.runtime
-    ? formatRuntime(featuredGroup.runtime)
-    : (featured ? formatRuntime(featured.canonical_metadata?.runtime) : undefined);
   const featuredRating = featuredGroup?.rating || featured?.canonical_metadata?.rating;
-  const featuredGenres = featuredGroup?.genres || featured?.canonical_metadata?.genres || [];
 
   const handleHeroStream = () => {
     if (featuredGroup && featuredGroup.type === 'series') {
@@ -339,7 +332,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {/* Multi-layered cinematic cross-dissolve artwork */}
           <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
             {recommendedGroups.slice(0, 8).map((grp, idx) => {
-              const bgUrl = grp.backdropUrl || (grp.featuredItem ? getMediaBackdropUrl(grp.featuredItem, 'w1280') : undefined);
+              const bgUrl = grp.backdropUrl || (grp.featuredItem ? getMediaBackdropUrl(grp.featuredItem, 'w1280') : undefined) || grp.posterUrl;
               if (!bgUrl) return null;
               const isCurrent = idx === safeIndex;
               return (
@@ -355,9 +348,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     height: '100%',
                     objectFit: 'cover',
                     objectPosition: 'center 20%',
-                    opacity: isCurrent ? 0.68 : 0,
+                    opacity: isCurrent ? 0.92 : 0,
+                    filter: 'saturate(122%) contrast(108%)',
                     transform: isCurrent ? 'scale(1)' : 'scale(1.04)',
-                    transition: 'opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1), transform 1.8s cubic-bezier(0.2, 0.8, 0.2, 1)',
+                    transition: 'opacity 0.9s cubic-bezier(0.4, 0, 0.2, 1), transform 1.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
                     pointerEvents: 'none',
                   }}
                 />
@@ -374,16 +368,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
             pointerEvents: 'none',
           }} />
 
-          {/* Vignette Gradients for cinematic contrast and text readability */}
+          {/* Subtle Vignette for crisp text contrast without muting poster vibrance */}
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.65) 55%, transparent 100%)',
+            background: 'linear-gradient(to top, rgba(7,9,14,0.96) 0%, rgba(7,9,14,0.55) 42%, rgba(7,9,14,0.1) 75%, transparent 100%)',
             zIndex: 2,
             pointerEvents: 'none',
           }} />
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to right, rgba(7,9,14,0.85) 0%, transparent 65%)',
+            background: 'linear-gradient(to right, rgba(7,9,14,0.7) 0%, rgba(7,9,14,0.2) 45%, transparent 80%)',
             zIndex: 2,
             pointerEvents: 'none',
           }} />
@@ -438,19 +432,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
               animation: 'heroContentFade 0.65s cubic-bezier(0.16,1,0.3,1)',
             }}
           >
-            {/* Metadata Badges strip */}
+            {/* Minimalist Metadata Badges */}
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
               <span className="badge-spec accent-purple">{featured.category}</span>
               {featuredGroup?.type === 'series' && (
                 <span className="badge-spec accent-cyan">
                   {featuredGroup.episodes.length} {featuredGroup.episodes.length === 1 ? 'Episode' : 'Episodes'}
                 </span>
-              )}
-              {featuredYear && (
-                <span className="badge-spec accent-cyan">{featuredYear}</span>
-              )}
-              {featuredRuntime && (
-                <span className="badge-spec accent-emerald">{featuredRuntime}</span>
               )}
               {featuredRating && (
                 <span style={{
@@ -463,14 +451,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   {featuredRating.toFixed(1)}
                 </span>
               )}
-              {featuredGenres.slice(0, 2).map(g => (
-                <span key={g} style={{
-                  background: 'rgba(255,255,255,0.08)', color: '#cbd5e1',
-                  padding: '2px 6px', borderRadius: '5px', fontSize: '0.64rem', fontWeight: 700,
-                }}>
-                  {g}
-                </span>
-              ))}
             </div>
 
             {/* Canonical Title */}
