@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Search as SearchIcon, X, Film } from 'lucide-react';
 import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
@@ -24,9 +24,8 @@ export const SearchView: React.FC<SearchViewProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [selectedCat, setSelectedCat] = useState('All');
-  const [results, setResults] = useState<MediaItem[]>(allMedia);
 
-  useEffect(() => {
+  const results = useMemo(() => {
     let filtered = allMedia;
     if (selectedCat !== 'All') filtered = filtered.filter(m => m.category.toLowerCase() === selectedCat.toLowerCase());
     if (query.trim()) {
@@ -38,7 +37,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
         return canonical.includes(q) || orig.includes(q) || file.includes(q);
       });
     }
-    setResults(filtered);
+    return filtered;
   }, [query, selectedCat, allMedia]);
 
   const organized = useMemo(() => organizeMediaLibrary(results, offlineIds), [results, offlineIds]);

@@ -95,7 +95,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     sync();
     window.addEventListener('streamx_watch_history_updated', sync);
     return () => window.removeEventListener('streamx_watch_history_updated', sync);
-  }, [item?.id]);
+  }, [item]);
 
   const handleToggleWatched = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -162,7 +162,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     } else {
       setSelectedEpisodeId(null);
     }
-  }, [rawItem?.id, isSeriesGroup]);
+  }, [rawItem, isSeriesGroup, episodes]);
 
   // Determine smart resume/next episode for series
   const activeEpisodeTarget = useMemo(() => {

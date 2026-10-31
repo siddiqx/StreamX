@@ -103,7 +103,7 @@ export const App: React.FC = () => {
   // Synchronize watch progress with cloud backend
   useEffect(() => {
     syncWatchHistoryWithCloud(media);
-  }, [media.length]);
+  }, [media]);
 
   const [isWifiOnly, setIsWifiOnly] = useState<boolean>(() => {
     try {
@@ -164,7 +164,7 @@ export const App: React.FC = () => {
         }
         return transfersRes;
       });
-    } catch (_) {}
+    } catch {}
   };
 
   const refreshMedia = async () => {
@@ -191,7 +191,7 @@ export const App: React.FC = () => {
           return mediaRes;
         });
       }
-    } catch (_) {}
+    } catch {}
   };
 
   const refreshData = async () => {

@@ -41,10 +41,8 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
 
   // Resolve target item and metadata
   const resolvedItem = item || group?.featuredItem;
-  if (!resolvedItem) return null;
-
-  const title = group ? group.title : getMediaDisplayName(resolvedItem);
-  const posterUrl = group ? group.posterUrl : getMediaPosterUrl(resolvedItem);
+  const title = group ? group.title : (resolvedItem ? getMediaDisplayName(resolvedItem) : '');
+  const posterUrl = group ? group.posterUrl : (resolvedItem ? getMediaPosterUrl(resolvedItem) : undefined);
 
   const [currentPoster, setCurrentPoster] = useState<string | undefined>(posterUrl);
   const [hasTriedProxy, setHasTriedProxy] = useState(false);
@@ -65,10 +63,10 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
   };
 
   const hasPoster = !!currentPoster && !imageError;
-  const rating = group ? group.rating : resolvedItem.canonical_metadata?.rating;
-  const status = group ? group.metadataStatus : resolvedItem.metadata_status;
+  const rating = group ? group.rating : resolvedItem?.canonical_metadata?.rating;
+  const status = group ? group.metadataStatus : resolvedItem?.metadata_status;
   const isOffline = isOfflineProp !== undefined ? isOfflineProp : !!(group ? group.isOffline : false);
-  const category = group ? group.category : resolvedItem.category;
+  const category = group ? group.category : (resolvedItem?.category || '');
   const isSeries = group?.type === 'series';
 
   // Watch history reactivity
@@ -82,6 +80,8 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
 
   // Compute series completion and in-progress playback state
   const { isCompleted, activeProgress } = React.useMemo(() => {
+    if (!resolvedItem) return { isCompleted: false, activeProgress: null };
+
     if (overrideProgress !== undefined) {
       if (!overrideProgress) return { isCompleted: false, activeProgress: null };
       const completed = !!(overrideProgress.completed || overrideProgress.progressPercentage >= 90);
@@ -130,9 +130,10 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
       isCompleted: movieCompleted,
       activeProgress: itemProgress,
     };
-  }, [overrideProgress, isSeries, group, resolvedItem.id, historyVersion]);
+  }, [overrideProgress, isSeries, group, resolvedItem, historyVersion]);
 
-  const Icon = getCategoryIcon(category);
+  // Safe early return after all Hooks have been called unconditionally
+  if (!resolvedItem) return null;
 
   const handleCardClick = () => {
     if (group && onSelectGroup) {
@@ -208,7 +209,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
             justifyContent: 'center',
             boxShadow: '0 4px 14px rgba(99,102,241,0.15)',
           }}>
-            <Icon size={22} color="#a5b4fc" />
+            {React.createElement(getCategoryIcon(category), { size: 22, color: '#a5b4fc' })}
           </div>
 
           <span style={{

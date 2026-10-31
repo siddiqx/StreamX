@@ -278,6 +278,43 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
     resetControlsTimer();
   };
 
+  const toggleMute = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setIsMuted(v.muted);
+  };
+
+  const toggleFullscreen = async () => {
+    const c = containerRef.current;
+    if (!c) return;
+    try {
+      if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+        if (c.requestFullscreen) {
+          await c.requestFullscreen();
+        } else if ((c as any).webkitRequestFullscreen) {
+          await (c as any).webkitRequestFullscreen();
+        }
+        setIsFullscreen(true);
+        // Attempt landscape lock on mobile devices if supported
+        try {
+          if (screen.orientation && (screen.orientation as any).lock) {
+            (screen.orientation as any).lock('landscape').catch(() => {});
+          }
+        } catch {}
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        }
+        setIsFullscreen(false);
+      }
+    } catch (err) {
+      console.warn('Fullscreen toggle failed:', err);
+    }
+  };
+
   // Keyboard shortcut listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -342,44 +379,6 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ item, onClos
         : getStreamUrl(item.id, item.drive_file_id, item.filename);
       videoRef.current.src = nextUrl;
       videoRef.current.play().catch(() => {});
-    }
-  };
-
-  const toggleMute = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.muted = !v.muted;
-    setIsMuted(v.muted);
-  };
-
-  const toggleFullscreen = async () => {
-    const c = containerRef.current;
-    if (!c) return;
-    try {
-      if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
-        if (c.requestFullscreen) {
-          await c.requestFullscreen();
-        } else if ((c as any).webkitRequestFullscreen) {
-          await (c as any).webkitRequestFullscreen();
-        }
-        setIsFullscreen(true);
-        // Attempt landscape lock on mobile devices if supported
-        try {
-          if (screen.orientation && (screen.orientation as any).lock) {
-            (screen.orientation as any).lock('landscape').catch(() => {});
-          }
-        } catch {}
-      } else {
-        if (document.exitFullscreen) {
-          await document.exitFullscreen();
-        } else if ((document as any).webkitExitFullscreen) {
-          await (document as any).webkitExitFullscreen();
-        }
-        setIsFullscreen(false);
-      }
-    } catch {
-      const v = videoRef.current as any;
-      if (v?.webkitEnterFullscreen) v.webkitEnterFullscreen();
     }
   };
 

@@ -411,7 +411,7 @@ export function parseMediaMetadata(filename: string): ParsedMediaMeta {
   // Remove resolution and codec tags from clean display title
   clean = clean.replace(/\b(2160p|1080p|720p|480p|BluRay|WEB-DL|WEBRip|x264|x265|HEVC|AAC|Dual-Audio|Esub)\b/gi, '');
   clean = clean.replace(/S\d+\s*[-_]?\s*E\d+/gi, '');
-  clean = clean.replace(/[\._\-]+/g, ' ').trim();
+  clean = clean.replace(/[._-]+/g, ' ').trim();
 
   const tags: string[] = [];
   if (/Dual-Audio|Dual/i.test(filename)) tags.push('Dual Audio');
