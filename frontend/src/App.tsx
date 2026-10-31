@@ -334,8 +334,8 @@ export const App: React.FC = () => {
       <main style={{
         flex: 1,
         paddingTop: '12px',
-        paddingBottom: 'calc(var(--bottomnav-h) + max(env(safe-area-inset-bottom, 0px), 8px) + 20px)',
-        maxWidth: '1200px',
+        paddingBottom: 'calc(var(--bottomnav-h) + max(env(safe-area-inset-bottom, 0px), 8px) + 16px)',
+        maxWidth: '800px',
         width: '100%',
         margin: '0 auto',
         overflowX: 'hidden',
