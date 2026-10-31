@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle, Layers } from 'lucide-react';
+import { Play, Check, Sparkles, Tv, Film, Star, Loader2, AlertCircle } from 'lucide-react';
 import type { MediaItem } from '../types';
 import { getSmartSeriesEpisode, type MediaGroup } from '../utils/mediaOrganizer';
 import { getMediaDisplayName, getMediaDisplayYear, getMediaPosterUrl, API_BASE } from '../api';
@@ -317,7 +317,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
 
         {/* Right side: Offline badge, Continue Watching Episode, or Watched */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {episodeLabelBadge ? (
+          {episodeLabelBadge && (
             <span style={{
               background: 'linear-gradient(135deg, #ef4444, #dc2626)',
               borderRadius: '6px',
@@ -330,25 +330,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
             }}>
               {episodeLabelBadge}
             </span>
-          ) : (group?.versions && group.versions.length > 1) ? (
-            <span style={{
-              background: 'rgba(14,165,233,0.88)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              borderRadius: '6px',
-              padding: '2px 6px',
-              fontSize: '0.6rem',
-              fontWeight: 800,
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '3px',
-              boxShadow: '0 2px 8px rgba(14,165,233,0.4)',
-            }}>
-              <Layers size={9} />
-              {group.versions.length} Versions
-            </span>
-          ) : null}
+          )}
 
           {/* Offline downloaded badge */}
           {isOffline && (
