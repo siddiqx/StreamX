@@ -134,6 +134,46 @@ body {
     transform: scale(1.05);
   }
 }
+
+/* Hero Spotlight Responsive Architecture */
+.hero-spotlight {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justifyContent: flex-end;
+  overflow: hidden;
+  user-select: none;
+  touch-action: pan-y pinch-zoom;
+  /* Mobile: Full-bleed vertical cinema showcase (never an awkward square box!) */
+  margin: 0;
+  min-height: clamp(450px, 66vh, 560px);
+  border-radius: 0 0 28px 28px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9);
+}
+
+@media (min-width: 768px) {
+  .hero-spotlight {
+    /* Tablet & Desktop: Floating widescreen cinema banner */
+    margin: 6px clamp(16px, 3vw, 28px) 0;
+    min-height: clamp(380px, 42vh, 480px);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(99, 102, 241, 0.15);
+  }
+}
+
+.hero-chevron-btn {
+  display: none !important;
+}
+
+@media (min-width: 768px) {
+  .hero-chevron-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+}
 .scroll-row { display:flex; gap:12px; overflow-x:auto; padding:4px 16px 12px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-behavior:smooth; contain:layout style; }
 .scroll-row::-webkit-scrollbar { display:none; }
 .scroll-row > * { scroll-snap-align:start; flex-shrink:0; }

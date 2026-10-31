@@ -233,6 +233,36 @@ export const HomeView: React.FC<HomeViewProps> = ({
     setActiveHeroIndex(index);
   };
 
+  // Touch swipe gesture handling for mobile
+  const touchStartX = React.useRef<number | null>(null);
+  const touchStartY = React.useRef<number | null>(null);
+
+  const handleHeroTouchStart = (e: React.TouchEvent) => {
+    setIsHeroPaused(true);
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleHeroTouchEnd = (e: React.TouchEvent) => {
+    setIsHeroPaused(false);
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const diffX = touchStartX.current - touchEndX;
+    const diffY = touchStartY.current - touchEndY;
+
+    // Detect horizontal swipe (threshold: 40px)
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
+      if (diffX > 0) {
+        goToNextHero();
+      } else {
+        goToPrevHero();
+      }
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
   const featuredRuntime = featuredGroup?.runtime
     ? formatRuntime(featuredGroup.runtime)
     : (featured ? formatRuntime(featured.canonical_metadata?.runtime) : undefined);
@@ -291,26 +321,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
           className="hero-spotlight animate-fade-in"
           onMouseEnter={() => setIsHeroPaused(true)}
           onMouseLeave={() => setIsHeroPaused(false)}
-          onTouchStart={() => setIsHeroPaused(true)}
-          onTouchEnd={() => setIsHeroPaused(false)}
-          style={{
-            margin: '0 16px',
-            minHeight: '330px',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'flex-end',
-            position: 'relative',
-            borderRadius: '22px',
-            overflow: 'hidden',
-            boxShadow: '0 12px 36px rgba(0,0,0,0.85)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            userSelect: 'none',
-          }}
+          onTouchStart={handleHeroTouchStart}
+          onTouchEnd={handleHeroTouchEnd}
         >
           {/* Multi-layered cinematic cross-dissolve artwork */}
           <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
             {recommendedGroups.slice(0, 8).map((grp, idx) => {
-              const bgUrl = grp.backdropUrl || (grp.featuredItem ? getMediaBackdropUrl(grp.featuredItem, 'w1280') : undefined);
+              const bgUrl = grp.backdropUrl || (grp.featuredItem ? getMediaBackdropUrl(grp.featuredItem, 'w1280') : undefined) || grp.posterUrl;
               if (!bgUrl) return null;
               const isCurrent = idx === safeIndex;
               return (
@@ -325,8 +342,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
-                    objectPosition: 'center 20%',
-                    opacity: isCurrent ? 0.68 : 0,
+                    objectPosition: 'center 22%',
+                    opacity: isCurrent ? 0.72 : 0,
                     transform: isCurrent ? 'scale(1)' : 'scale(1.04)',
                     transition: 'opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1), transform 1.8s cubic-bezier(0.2, 0.8, 0.2, 1)',
                     pointerEvents: 'none',
@@ -348,40 +365,38 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {/* Vignette Gradients for cinematic contrast and text readability */}
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.65) 55%, transparent 100%)',
+            background: 'linear-gradient(to top, rgba(7,9,14,0.98) 0%, rgba(7,9,14,0.85) 35%, rgba(7,9,14,0.3) 65%, transparent 100%)',
             zIndex: 2,
             pointerEvents: 'none',
           }} />
           <div style={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(to right, rgba(7,9,14,0.85) 0%, transparent 65%)',
+            background: 'linear-gradient(to right, rgba(7,9,14,0.82) 0%, transparent 65%)',
             zIndex: 2,
             pointerEvents: 'none',
           }} />
 
-          {/* Side Next / Prev Chevrons */}
+          {/* Side Next / Prev Chevrons (Desktop Only) */}
           {recommendedGroups.length > 1 && (
             <>
               <button
                 onClick={goToPrevHero}
                 aria-label="Previous title"
+                className="hero-chevron-btn"
                 style={{
                   position: 'absolute',
-                  left: '12px',
+                  left: '14px',
                   top: '50%',
                   transform: 'translateY(-50%)',
                   zIndex: 20,
-                  width: '34px',
-                  height: '34px',
+                  width: '38px',
+                  height: '38px',
                   borderRadius: '50%',
                   background: 'rgba(0,0,0,0.45)',
                   backdropFilter: 'blur(10px)',
                   WebkitBackdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.14)',
                   color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
                   cursor: 'pointer',
                   opacity: 0.7,
                   transition: 'all 0.2s ease',
@@ -389,29 +404,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
                 onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
               >
-                <ChevronLeft size={17} />
+                <ChevronLeft size={18} />
               </button>
 
               <button
                 onClick={goToNextHero}
                 aria-label="Next title"
+                className="hero-chevron-btn"
                 style={{
                   position: 'absolute',
-                  right: '12px',
+                  right: '14px',
                   top: '50%',
                   transform: 'translateY(-50%)',
                   zIndex: 20,
-                  width: '34px',
-                  height: '34px',
+                  width: '38px',
+                  height: '38px',
                   borderRadius: '50%',
                   background: 'rgba(0,0,0,0.45)',
                   backdropFilter: 'blur(10px)',
                   WebkitBackdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.14)',
                   color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
                   cursor: 'pointer',
                   opacity: 0.7,
                   transition: 'all 0.2s ease',
@@ -419,7 +432,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
                 onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
               >
-                <ChevronRight size={17} />
+                <ChevronRight size={18} />
               </button>
             </>
           )}
@@ -467,11 +480,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
             style={{
               position: 'relative',
               zIndex: 10,
-              padding: '24px 20px',
+              padding: '28px clamp(16px, 3.5vw, 28px)',
               display: 'flex',
               flexDirection: 'column',
               gap: '10px',
-              animation: 'heroContentFade 0.65s cubic-bezier(0.16,1,0.3,1)',
+              animation: 'heroContentFade 0.45s cubic-bezier(0.16,1,0.3,1)',
             }}
           >
             {/* Metadata Badges strip */}
@@ -511,14 +524,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
             {/* Canonical Title */}
             <h1 style={{
-              fontSize: 'clamp(1.35rem, 5.5vw, 1.95rem)',
+              fontSize: 'clamp(1.4rem, 5.2vw, 2.3rem)',
               fontWeight: 900,
               fontFamily: 'var(--font-display, inherit)',
               letterSpacing: '-0.03em',
               lineHeight: 1.15,
               color: '#fff',
               margin: 0,
-              textShadow: '0 2px 14px rgba(0,0,0,0.9)',
+              textShadow: '0 2px 14px rgba(0,0,0,0.95)',
             }}>
               {featuredTitle}
             </h1>
