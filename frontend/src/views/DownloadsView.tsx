@@ -197,9 +197,9 @@ export const DownloadsView: React.FC<DownloadsViewProps> = ({
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      gap: '16px',
-      padding: '4px 16px 48px',
-      maxWidth: '720px',
+      gap: '20px',
+      padding: '8px clamp(16px, 3.2vw, 40px) 60px',
+      maxWidth: '820px',
       margin: '0 auto',
       width: '100%',
     }}>

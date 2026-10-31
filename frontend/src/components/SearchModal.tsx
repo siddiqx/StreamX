@@ -296,8 +296,8 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '16px clamp(16px, 3vw, 36px) 48px',
-          maxWidth: '1440px',
+          padding: '16px clamp(16px, 3.2vw, 44px) 48px',
+          maxWidth: '1540px',
           margin: '0 auto',
           width: '100%',
         }}
@@ -385,7 +385,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fill, minmax(var(--card-width), 1fr))',
-                gap: 'clamp(12px, 1.5vw, 18px)',
+                gap: 'var(--grid-gap, 16px)',
               }}
             >
               {organized.allGroups.map((group) => (

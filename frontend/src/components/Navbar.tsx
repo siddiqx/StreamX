@@ -34,10 +34,10 @@ export const Navbar: React.FC<NavbarProps> = ({
       }}
     >
       <div style={{
-        maxWidth: '1440px',
+        maxWidth: '1540px',
         margin: '0 auto',
         height: '100%',
-        padding: '0 clamp(16px, 3vw, 36px)',
+        padding: '0 clamp(16px, 3.2vw, 44px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -52,7 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             src="/streamx-logo.png"
             alt="StreamX"
             style={{
-              height: '26px',
+              height: '28px',
               width: 'auto',
               objectFit: 'contain',
               display: 'block',
@@ -63,7 +63,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Desktop Navigation Links (Visible on Tablets & Desktops >= 768px) */}
         {onSelectTab && (
-          <nav className="desktop-nav-links" style={{ display: 'none', alignItems: 'center', gap: '6px' }}>
+          <nav className="desktop-nav-links" style={{ display: 'none', alignItems: 'center', gap: '8px' }}>
             {desktopTabs.map((t) => {
               const Icon = t.icon;
               const isActive = currentTab === t.id;
@@ -76,13 +76,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '7px',
-                    padding: '7px 14px',
-                    borderRadius: '10px',
-                    border: isActive ? '1px solid rgba(99,102,241,0.35)' : '1px solid transparent',
-                    background: isActive ? 'rgba(99,102,241,0.14)' : 'transparent',
-                    color: isActive ? '#fff' : 'rgba(255,255,255,0.65)',
-                    fontSize: '0.84rem',
+                    gap: '8px',
+                    padding: '8px 18px',
+                    borderRadius: '12px',
+                    border: isActive ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
+                    background: isActive ? 'rgba(99,102,241,0.16)' : 'transparent',
+                    color: isActive ? '#fff' : 'rgba(255,255,255,0.7)',
+                    fontSize: '0.88rem',
                     fontWeight: isActive ? 700 : 500,
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
@@ -95,7 +95,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   }}
                   onMouseLeave={(e) => {
                     if (!isActive) {
-                      e.currentTarget.style.color = 'rgba(255,255,255,0.65)';
+                      e.currentTarget.style.color = 'rgba(255,255,255,0.7)';
                       e.currentTarget.style.background = 'transparent';
                     }
                   }}
@@ -120,39 +120,90 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
         )}
 
-        {/* Right Action: Clean Search Icon Button */}
+        {/* Right Action: Search Trigger (Desktop Bar + Mobile Icon) */}
         {onOpenSearch ? (
-          <button
-            onClick={onOpenSearch}
-            aria-label="Search"
-            title="Search titles, anime, and movies"
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              background: 'rgba(255, 255, 255, 0.05)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#f8fafc',
-              cursor: 'pointer',
-              transition: 'all 0.18s ease',
-              WebkitTapHighlightColor: 'transparent',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
-              e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
-              e.currentTarget.style.color = '#818cf8';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)';
-              e.currentTarget.style.color = '#f8fafc';
-            }}
-          >
-            <Search size={16} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            {/* Desktop Quick Search Pill */}
+            <button
+              onClick={onOpenSearch}
+              className="desktop-search-trigger"
+              aria-label="Search"
+              style={{
+                display: 'none',
+                alignItems: 'center',
+                gap: '10px',
+                height: '38px',
+                padding: '0 14px 0 12px',
+                borderRadius: '12px',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                background: 'rgba(255, 255, 255, 0.05)',
+                color: 'rgba(255, 255, 255, 0.55)',
+                fontSize: '0.84rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.18s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.45)';
+                e.currentTarget.style.color = '#fff';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.55)';
+              }}
+            >
+              <Search size={15} color="#818cf8" />
+              <span>Search anime, movies...</span>
+              <kbd style={{
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                background: 'rgba(255, 255, 255, 0.08)',
+                padding: '2px 6px',
+                borderRadius: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                color: 'rgba(255, 255, 255, 0.65)',
+                marginLeft: '6px',
+              }}>
+                Ctrl K
+              </kbd>
+            </button>
+
+            {/* Mobile Icon Button */}
+            <button
+              onClick={onOpenSearch}
+              className="mobile-search-trigger"
+              aria-label="Search"
+              title="Search titles, anime, and movies"
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                background: 'rgba(255, 255, 255, 0.05)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#f8fafc',
+                cursor: 'pointer',
+                transition: 'all 0.18s ease',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
+                e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                e.currentTarget.style.color = '#818cf8';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+                e.currentTarget.style.color = '#f8fafc';
+              }}
+            >
+              <Search size={16} />
+            </button>
+          </div>
         ) : (
           <div style={{ width: '36px' }} />
         )}

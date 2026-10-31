@@ -106,6 +106,18 @@ export const App: React.FC = () => {
     syncWatchHistoryWithCloud(media);
   }, [media]);
 
+  // Desktop keyboard shortcut: Ctrl+K / Cmd+K to toggle search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const [isWifiOnly, setIsWifiOnly] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('streamx_wifi_only');
@@ -337,15 +349,7 @@ export const App: React.FC = () => {
         downloadCount={transfers.filter(t => t.status !== 'COMPLETED' && t.status !== 'FAILED').length}
       />
 
-      <main style={{
-        flex: 1,
-        paddingTop: '12px',
-        paddingBottom: 'calc(var(--bottomnav-h) + max(env(safe-area-inset-bottom, 0px), 8px) + 16px)',
-        maxWidth: '1440px',
-        width: '100%',
-        margin: '0 auto',
-        overflowX: 'hidden',
-      }}>
+      <main className="main-content">
         {currentTab === 'home' && (
           <HomeView
             media={media}

@@ -114,10 +114,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   }, [library, selectedCat, sortBy, historyMap]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '0 16px 40px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--section-gap, 20px)', padding: '0 clamp(16px, 3.2vw, 44px) 60px' }}>
       {/* Top Controls: Library Counter & Sorter */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.01em' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+        <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.01em' }}>
           {filteredGroups.length} {filteredGroups.length === 1 ? 'Title' : 'Titles'}
         </span>
 
@@ -126,9 +126,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           onChange={e => setSortBy(e.target.value as SortKey)}
           style={{
             background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-full)', padding: '6px 12px',
-            color: 'var(--text-muted)', fontSize: '0.78rem', fontFamily: 'inherit',
-            outline: 'none', cursor: 'pointer', whiteSpace: 'nowrap', minHeight: '34px',
+            borderRadius: 'var(--radius-full)', padding: '7px 16px',
+            color: 'var(--text-muted)', fontSize: '0.82rem', fontFamily: 'inherit',
+            outline: 'none', cursor: 'pointer', whiteSpace: 'nowrap', minHeight: '36px',
           }}
         >
           <option value="newest" style={{ background: '#0f172a' }}>Newest</option>
@@ -158,7 +158,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           <p style={{ fontSize: '0.9rem', fontWeight: 600 }}>Nothing here yet</p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(var(--card-width), 1fr))', gap: 'clamp(12px, 1.5vw, 18px)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(var(--card-width), 1fr))', gap: 'var(--grid-gap, 16px)' }}>
           {filteredGroups.map(group => (
             <MediaCard
               key={group.id}

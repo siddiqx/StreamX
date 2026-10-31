@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
   Play, Info, ArrowRight, Sparkles, Tv, Film,
   Star, Clock, Flame, Heart, Compass, Laugh,
-  AlertCircle, Settings
+  AlertCircle, Settings, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 import type { MediaItem } from '../types';
@@ -33,6 +33,68 @@ interface HomeViewProps {
 }
 
 const CARD_W = 'var(--card-width)';
+
+interface ShelfCarouselProps {
+  children: React.ReactNode;
+}
+
+const ShelfCarousel: React.FC<ShelfCarouselProps> = ({ children }) => {
+  const rowRef = React.useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = React.useState(false);
+  const [canScrollRight, setCanScrollRight] = React.useState(true);
+
+  const updateScrollButtons = React.useCallback(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 25);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 25);
+  }, []);
+
+  React.useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    updateScrollButtons();
+    el.addEventListener('scroll', updateScrollButtons, { passive: true });
+    window.addEventListener('resize', updateScrollButtons);
+    return () => {
+      el.removeEventListener('scroll', updateScrollButtons);
+      window.removeEventListener('resize', updateScrollButtons);
+    };
+  }, [updateScrollButtons]);
+
+  const handleScroll = (dir: 'left' | 'right') => {
+    const el = rowRef.current;
+    if (!el) return;
+    const distance = el.clientWidth * 0.72;
+    el.scrollBy({ left: dir === 'left' ? -distance : distance, behavior: 'smooth' });
+  };
+
+  return (
+    <div className="shelf-wrapper">
+      {canScrollLeft && (
+        <button
+          className="shelf-arrow shelf-arrow-left"
+          onClick={() => handleScroll('left')}
+          aria-label="Scroll left"
+        >
+          <ChevronLeft size={22} strokeWidth={2.4} />
+        </button>
+      )}
+      <div ref={rowRef} className="scroll-row">
+        {children}
+      </div>
+      {canScrollRight && (
+        <button
+          className="shelf-arrow shelf-arrow-right"
+          onClick={() => handleScroll('right')}
+          aria-label="Scroll right"
+        >
+          <ChevronRight size={22} strokeWidth={2.4} />
+        </button>
+      )}
+    </div>
+  );
+};
 
 export const HomeView: React.FC<HomeViewProps> = ({
   media,
@@ -322,7 +384,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   };
 
   const sections: Section[] = [
-    { title: 'Recently Added', icon: <Clock size={15} color="#818cf8" />, items: library.allGroups.slice(0, 15), cat: '' },
+    { title: 'Recently Added', icon: <Clock size={16} color="#818cf8" />, items: library.allGroups.slice(0, 15), cat: '' },
     ...library.genreShelves.map((shelf) => ({
       title: shelf.title,
       icon: getShelfIcon(shelf.iconName),
@@ -332,7 +394,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   ].filter(s => s.items.length > 0);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingBottom: '28px' }}>
+    <div className="home-container" style={{ display: 'flex', flexDirection: 'column', paddingBottom: '28px' }}>
 
       {/* Netflix-Style Featured Spotlight Hero with Animated Recommendations */}
       {featured ? (
@@ -452,6 +514,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {/* Hero Content with Smooth Keyframe Transition */}
           <div
             key={safeIndex}
+            className="hero-content-box"
             style={{
               position: 'relative',
               zIndex: 10,
@@ -484,16 +547,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </div>
 
             {/* Canonical Title */}
-            <h1 style={{
-              fontSize: 'clamp(1.35rem, 5.5vw, 1.95rem)',
-              fontWeight: 900,
-              fontFamily: 'var(--font-display, inherit)',
-              letterSpacing: '-0.03em',
-              lineHeight: 1.15,
-              color: '#fff',
-              margin: 0,
-              textShadow: '0 2px 14px rgba(0,0,0,0.9)',
-            }}>
+            <h1
+              className="hero-title-text"
+              style={{
+                fontSize: 'clamp(1.35rem, 5.5vw, 1.95rem)',
+                fontWeight: 900,
+                fontFamily: 'var(--font-display, inherit)',
+                letterSpacing: '-0.03em',
+                lineHeight: 1.15,
+                color: '#fff',
+                margin: 0,
+                textShadow: '0 2px 14px rgba(0,0,0,0.9)',
+              }}
+            >
               {featuredTitle}
             </h1>
 
@@ -501,7 +567,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {/* Action Buttons: Sleek Pill Controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
               <button
-                className="btn-primary"
+                className="btn-primary hero-action-btn-primary"
                 style={{
                   height: '38px',
                   minHeight: '38px',
@@ -529,6 +595,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
               <button
                 onClick={handleHeroClick}
+                className="hero-action-btn-secondary"
                 aria-label="Details"
                 title="Details"
                 style={{
@@ -712,11 +779,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {/* Continue Watching Row (Active Watch Progress - Collapsed by Series) */}
       {continueWatchingList.length > 0 && (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div className="section-header" style={{ padding: '0 clamp(16px, 3vw, 28px)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Flame size={16} color="#ef4444" />
-              <span className="section-title" style={{ fontSize: '0.98rem', fontWeight: 800, color: '#f8fafc' }}>
+        <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="section-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Flame size={17} color="#ef4444" />
+              <span className="section-title">
                 Continue Watching
               </span>
             </div>
@@ -724,7 +791,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               {continueWatchingList.length} in progress
             </span>
           </div>
-          <div className="scroll-row" style={{ display: 'flex', gap: 'var(--carousel-gap, 14px)', overflowX: 'auto', padding: '6px clamp(16px, 3vw, 28px) 16px' }}>
+          <ShelfCarousel>
             {continueWatchingList.map(({ group, item, history, episodeLabel }) => (
               <MediaCard
                 key={`cw_${group ? group.id : item.id}`}
@@ -744,27 +811,26 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 width={CARD_W}
               />
             ))}
-          </div>
+          </ShelfCarousel>
         </section>
       )}
 
       {/* Horizontal Netflix-Style Rows */}
       {sections.map(s => (
-        <section key={s.title} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div className="section-header" style={{ padding: '0 clamp(16px, 3vw, 28px)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <section key={s.title} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="section-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {s.icon}
-              <span className="section-title" style={{ fontSize: '0.98rem', fontWeight: 800, color: '#f8fafc' }}>{s.title}</span>
+              <span className="section-title">{s.title}</span>
             </div>
             <button
               className="section-see-all"
               onClick={() => onViewAllLibrary(s.cat || undefined)}
-              style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', color: '#818cf8', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
             >
               See all <ArrowRight size={13} />
             </button>
           </div>
-          <div className="scroll-row" style={{ display: 'flex', gap: 'var(--carousel-gap, 14px)', overflowX: 'auto', padding: '6px clamp(16px, 3vw, 28px) 16px' }}>
+          <ShelfCarousel>
             {s.items.map(group => (
               <MediaCard
                 key={group.id}
@@ -776,7 +842,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 width={CARD_W}
               />
             ))}
-          </div>
+          </ShelfCarousel>
         </section>
       ))}
     </div>
