@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Film, Layers, List } from 'lucide-react';
+import { Film } from 'lucide-react';
 import type { MediaItem } from '../types';
 import type { MediaGroup } from '../utils/mediaOrganizer';
 import { organizeMediaLibrary } from '../utils/mediaOrganizer';
@@ -28,7 +28,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 }) => {
   const [selectedCat, setSelectedCat] = useState(initialCategory);
   const [sortBy, setSortBy] = useState<SortKey>('newest');
-  const [viewMode, setViewMode] = useState<'grouped' | 'files'>('grouped');
   const [historyItems, setHistoryItems] = useState<WatchHistoryItem[]>(getWatchHistory);
 
   React.useEffect(() => {
@@ -50,7 +49,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     return map;
   }, [historyItems]);
 
-  // Filter & Sort Grouped Series Catalogue
+  // Filter & Sort Grouped Series & Movies Catalogue
   const filteredGroups = useMemo(() => {
     if (selectedCat === 'Recently Watched') {
       // Find all groups that contain at least one watched episode / item
@@ -94,7 +93,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           return group.category === 'TV Shows';
         }
         if (selectedCat === 'Movies') {
-          return group.category === 'Movies';
+          return group.category === 'Movies' || group.type === 'movie' || group.category === 'Anime Movies';
         }
         // Genre matching (Action, Sci-Fi, Romance, Comedy, etc.)
         const matchGenre = group.genres.some(g => g.toLowerCase().includes(selectedCat.toLowerCase()));
@@ -114,76 +113,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       });
   }, [library, selectedCat, sortBy, historyMap]);
 
-  // Filter & Sort Raw Files using the server's authoritative taxonomy.
-  const filteredFiles = useMemo(() => {
-    if (selectedCat === 'Recently Watched') {
-      const matched: { item: MediaItem; time: number }[] = [];
-      for (const item of media) {
-        const h = historyMap.get(item.id);
-        if (h) {
-          matched.push({ item, time: new Date(h.lastWatchedAt).getTime() });
-        }
-      }
-      return matched.sort((a, b) => b.time - a.time).map(m => m.item);
-    }
-
-    return media
-      .filter(item => {
-        if (selectedCat === 'All') return true;
-        if (selectedCat === 'Anime') return item.media_type === 'ANIME_SERIES' || item.media_type === 'ANIME_EPISODE' || item.category === 'Anime';
-        if (selectedCat === 'Anime Movies') return item.media_type === 'ANIME_MOVIE' || item.category === 'Anime Movies';
-        if (selectedCat === 'TV Shows') return item.media_type === 'TV_SERIES' || item.media_type === 'TV_EPISODE' || item.media_type === 'DOCUMENTARY_SERIES' || item.category === 'TV Shows';
-        if (selectedCat === 'Movies') return item.media_type === 'MOVIE' || item.media_type === 'DOCUMENTARY' || item.category === 'Movies';
-        return item.canonical_metadata?.genres?.some(g => g.toLowerCase().includes(selectedCat.toLowerCase())) || false;
-      })
-      .sort((a, b) => {
-        if (sortBy === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        if (sortBy === 'rating') return (b.canonical_metadata?.rating || 0) - (a.canonical_metadata?.rating || 0);
-        if (sortBy === 'size') return b.size - a.size;
-        return a.filename.localeCompare(b.filename);
-      });
-  }, [media, selectedCat, sortBy, historyMap]);
-
-  const totalCount = viewMode === 'grouped' ? filteredGroups.length : filteredFiles.length;
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '0 16px 40px' }}>
-      {/* Top Controls: Mode Switcher & Sorter */}
+      {/* Top Controls: Library Counter & Sorter */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-        {/* Toggle between Grouped Series vs Raw Files */}
-        <div style={{
-          display: 'flex', background: 'rgba(255,255,255,0.06)',
-          borderRadius: '12px', padding: '3px', border: '1px solid var(--border-subtle)',
-        }}>
-          <button
-            onClick={() => setViewMode('grouped')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '5px',
-              padding: '6px 12px', borderRadius: '9px', border: 'none',
-              background: viewMode === 'grouped' ? 'var(--accent-primary, #6366f1)' : 'transparent',
-              color: viewMode === 'grouped' ? '#fff' : 'var(--text-muted)',
-              fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <Layers size={14} />
-            Grouped Series
-          </button>
-          <button
-            onClick={() => setViewMode('files')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '5px',
-              padding: '6px 12px', borderRadius: '9px', border: 'none',
-              background: viewMode === 'files' ? 'var(--accent-primary, #6366f1)' : 'transparent',
-              color: viewMode === 'files' ? '#fff' : 'var(--text-muted)',
-              fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <List size={14} />
-            All Files
-          </button>
-        </div>
+        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.01em' }}>
+          {filteredGroups.length} {filteredGroups.length === 1 ? 'Title' : 'Titles'}
+        </span>
 
         <select
           value={sortBy}
@@ -213,7 +149,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       </div>
 
       {/* Grid */}
-      {totalCount === 0 ? (
+      {filteredGroups.length === 0 ? (
         <div style={{
           padding: '60px 20px', display: 'flex', flexDirection: 'column',
           alignItems: 'center', gap: '10px', color: 'var(--text-faint)',
@@ -222,35 +158,18 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           <p style={{ fontSize: '0.9rem', fontWeight: 600 }}>Nothing here yet</p>
         </div>
       ) : (
-        <>
-          <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)', fontWeight: 500 }}>
-            {totalCount} {totalCount === 1 ? (viewMode === 'grouped' ? 'title' : 'file') : (viewMode === 'grouped' ? 'titles' : 'files')}
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(var(--card-width), 1fr))', gap: 'clamp(12px, 1.5vw, 18px)' }}>
-            {viewMode === 'grouped' ? (
-              filteredGroups.map(group => (
-                <MediaCard
-                  key={group.id}
-                  group={group}
-                  isOffline={group.isOffline}
-                  onSelect={onSelectMedia}
-                  onSelectGroup={onSelectGroup}
-                  onPlay={onPlayMedia}
-                />
-              ))
-            ) : (
-              filteredFiles.map(item => (
-                <MediaCard
-                  key={item.id}
-                  item={item}
-                  isOffline={offlineIds.has(item.id)}
-                  onSelect={onSelectMedia}
-                  onPlay={onPlayMedia}
-                />
-              ))
-            )}
-          </div>
-        </>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(var(--card-width), 1fr))', gap: 'clamp(12px, 1.5vw, 18px)' }}>
+          {filteredGroups.map(group => (
+            <MediaCard
+              key={group.id}
+              group={group}
+              isOffline={group.isOffline}
+              onSelect={onSelectMedia}
+              onSelectGroup={onSelectGroup}
+              onPlay={onPlayMedia}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

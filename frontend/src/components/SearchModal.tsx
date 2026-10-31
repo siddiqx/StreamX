@@ -62,8 +62,12 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Real-time live filtering
+  const trimmed = query.trim();
+
+  // Real-time live filtering (only run when query is present)
   const results = useMemo(() => {
+    if (!trimmed) return [];
+
     let filtered = allMedia;
 
     if (selectedCat !== 'All') {
@@ -84,24 +88,22 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       });
     }
 
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      filtered = filtered.filter((m) => {
-        const canonical = m.canonical_metadata?.title?.toLowerCase() || '';
-        const orig = m.canonical_metadata?.original_title?.toLowerCase() || '';
-        const file = (m.filename || '').toLowerCase();
-        const genres = (m.canonical_metadata?.genres || []).map(g => g.toLowerCase());
-        return (
-          canonical.includes(q) ||
-          orig.includes(q) ||
-          file.includes(q) ||
-          genres.some(g => g.includes(q))
-        );
-      });
-    }
+    const q = trimmed.toLowerCase();
+    filtered = filtered.filter((m) => {
+      const canonical = m.canonical_metadata?.title?.toLowerCase() || '';
+      const orig = m.canonical_metadata?.original_title?.toLowerCase() || '';
+      const file = (m.filename || '').toLowerCase();
+      const genres = (m.canonical_metadata?.genres || []).map(g => g.toLowerCase());
+      return (
+        canonical.includes(q) ||
+        orig.includes(q) ||
+        file.includes(q) ||
+        genres.some(g => g.includes(q))
+      );
+    });
 
     return filtered;
-  }, [query, selectedCat, allMedia]);
+  }, [trimmed, selectedCat, allMedia]);
 
   const organized = useMemo(() => organizeMediaLibrary(results, offlineIds), [results, offlineIds]);
 
@@ -300,7 +302,43 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           width: '100%',
         }}
       >
-        {organized.allGroups.length === 0 ? (
+        {!trimmed ? (
+          <div
+            style={{
+              padding: '80px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '14px',
+              textAlign: 'center',
+            }}
+          >
+            <div
+              style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                background: 'rgba(99, 102, 241, 0.08)',
+                border: '1px solid rgba(99, 102, 241, 0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#818cf8',
+              }}
+            >
+              <SearchIcon size={28} style={{ opacity: 0.8 }} />
+            </div>
+            <div style={{ maxWidth: '320px' }}>
+              <p style={{ fontSize: '1rem', fontWeight: 700, color: '#fff', margin: 0 }}>
+                Search StreamX
+              </p>
+              <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: '6px 0 0', lineHeight: 1.45 }}>
+                Type a title, genre, or keyword to find anime, movies, and series
+              </p>
+            </div>
+          </div>
+        ) : organized.allGroups.length === 0 ? (
           <div
             style={{
               padding: '60px 20px',
@@ -328,10 +366,10 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             </div>
             <div>
               <p style={{ fontSize: '0.96rem', fontWeight: 700, color: '#fff', margin: 0 }}>
-                {query.trim() ? `No results for "${query}"` : 'No titles available'}
+                No results for "{trimmed}"
               </p>
               <p style={{ fontSize: '0.76rem', color: 'var(--text-muted, #94a3b8)', margin: '4px 0 0' }}>
-                {query.trim() ? 'Try checking for typos or searching by alternate title' : 'Your media library is empty'}
+                Try checking for typos or searching by alternate title
               </p>
             </div>
           </div>
@@ -339,9 +377,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', fontWeight: 600 }}>
-                {query.trim()
-                  ? `${organized.allGroups.length} ${organized.allGroups.length === 1 ? 'title' : 'titles'} found`
-                  : `Browse All (${organized.allGroups.length})`}
+                {`${organized.allGroups.length} ${organized.allGroups.length === 1 ? 'title' : 'titles'} found`}
               </span>
             </div>
 
