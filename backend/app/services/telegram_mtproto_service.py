@@ -29,6 +29,7 @@ class TelegramMTProtoService:
         )
         self.client: Optional[TelegramClient] = None
         self._lock = asyncio.Lock()
+        self._auth_revoked: bool = False
 
     def is_configured(self) -> bool:
         return bool(
@@ -39,31 +40,57 @@ class TelegramMTProtoService:
         )
 
     async def get_client(self) -> TelegramClient:
-        """Get or initialize the connected Telethon client."""
+        """Get or initialize the connected Telethon client with fast circuit breaker on revoked credentials."""
         async with self._lock:
+            if self._auth_revoked:
+                raise PermissionError(
+                    "The Telegram MTProto session string has been revoked by Telegram (AuthKeyDuplicatedError). "
+                    "Run 'python scripts/generate_telegram_session.py' to generate a new session."
+                )
+
             if self.client is None or not self.client.is_connected():
                 if not self.is_configured():
                     raise ValueError(
                         "MTProto client is not configured. TELEGRAM_API_ID, "
                         "TELEGRAM_API_HASH, and TELEGRAM_SESSION_STRING are required."
                     )
-                self.client = TelegramClient(
-                    StringSession(self.session_string),
-                    self.api_id,
-                    self.api_hash,
-                    connection_retries=10,
-                    retry_delay=1,
-                    auto_reconnect=True,
-                    flood_sleep_threshold=60,
-                    request_retries=10,
-                )
-                await self.client.connect()
-                if not await self.client.is_user_authorized():
-                    raise PermissionError(
-                        "The Telegram MTProto session is invalid or expired. "
-                        "Please re-generate TELEGRAM_SESSION_STRING."
+                try:
+                    self.client = TelegramClient(
+                        StringSession(self.session_string),
+                        self.api_id,
+                        self.api_hash,
+                        connection_retries=2,
+                        retry_delay=1,
+                        auto_reconnect=False,
+                        flood_sleep_threshold=15,
+                        request_retries=2,
+                        timeout=5.0,
                     )
-                log_event("MTPROTO_CLIENT_CONNECTED")
+                    await asyncio.wait_for(self.client.connect(), timeout=8.0)
+                    if not await self.client.is_user_authorized():
+                        self._auth_revoked = True
+                        raise PermissionError(
+                            "The Telegram MTProto session is invalid or expired. "
+                            "Please re-generate TELEGRAM_SESSION_STRING."
+                        )
+                    log_event("MTPROTO_CLIENT_CONNECTED")
+                except errors.AuthKeyDuplicatedError as e:
+                    self._auth_revoked = True
+                    log_event("TELEGRAM_MTPROTO_AUTH_REVOKED", error=str(e))
+                    if self.client:
+                        try:
+                            await self.client.disconnect()
+                        except Exception:
+                            pass
+                        self.client = None
+                    raise PermissionError(
+                        "Telegram session revoked due to simultaneous multi-IP login (AuthKeyDuplicatedError). "
+                        "Run 'python scripts/generate_telegram_session.py' to re-authenticate."
+                    ) from e
+                except Exception as e:
+                    if "AuthKeyDuplicated" in type(e).__name__ or "AuthKeyDuplicated" in str(e):
+                        self._auth_revoked = True
+                    raise
             return self.client
 
     async def disconnect(self) -> None:

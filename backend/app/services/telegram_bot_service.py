@@ -1101,13 +1101,13 @@ class TelegramBotService:
     async def sync_forwarded_messages(self) -> int:
         """Scan bot/owner chat via MTProto for newly forwarded media not yet recorded in SQLite."""
         from app.services.telegram_mtproto_service import mtproto_service
-        if not mtproto_service.is_configured():
+        if not mtproto_service.is_configured() or getattr(mtproto_service, '_auth_revoked', False):
             return 0
 
         try:
             client = await mtproto_service.get_client()
             bot_entity = "Stream1_X_bot"
-            messages = await client.get_messages(bot_entity, limit=200)
+            messages = await asyncio.wait_for(client.get_messages(bot_entity, limit=200), timeout=6.0)
             async with AsyncSessionLocal() as session:
                 existing_tids = set((await session.execute(select(TelegramTransfer.telegram_message_id))).scalars().all())
                 existing_fwds = set((await session.execute(select(TelegramTransfer.forwarded_message_id))).scalars().all())
@@ -1238,29 +1238,15 @@ class TelegramBotService:
         except Exception as e:
             logger.debug(f"Could not register commands at polling start: {e}")
 
-        if webhook_active:
-            # Cloudflare Worker is handling updates 24/7.
-            # Local worker runs sync loop via MTProto to download queued files.
-            logger.info("Telegram Bot is running in 24/7 Cloudflare Webhook mode. Local MTProto sync active.")
-            while self.running:
-                try:
-                    await self.sync_forwarded_messages()
-                    await asyncio.sleep(25)
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    logger.debug(f"Webhook sync loop error: {e}")
-                    await asyncio.sleep(10)
-            return
-
-        log_event("TELEGRAM_POLLING_STARTED", forward_target_configured=self.is_forward_target_configured())
-
-        # Polling fallback: Clear any existing webhook so getUpdates is unblocked
+        # When local backend is active, clear any existing webhook so long-polling (getUpdates) receives all updates directly
         try:
             async with httpx.AsyncClient(timeout=15.0) as init_client:
                 await init_client.post(f"{self.base_url}/deleteWebhook", json={"drop_pending_updates": False})
+                log_event("TELEGRAM_WEBHOOK_CLEARED_FOR_POLLING")
         except Exception as e:
             logger.debug(f"Could not clear webhook at polling start: {e}")
+
+        log_event("TELEGRAM_POLLING_STARTED", forward_target_configured=self.is_forward_target_configured())
 
         consecutive_errors = 0
         while self.running:
