@@ -70,11 +70,33 @@ const DEFAULT_FALLBACK_BACKEND_URL = "https://streamx-backend-cqm0.onrender.com"
 async function isBackendAlive(baseUrl, timeoutMs = 2000) {
   if (!baseUrl) return false;
   try {
-    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/health`, {
+    const cleanUrl = baseUrl.replace(/\/+$/, "");
+    // Check system status to verify backend has a functional Drive connection
+    const statusRes = await fetch(`${cleanUrl}/system/status`, {
       method: "GET",
       signal: AbortSignal.timeout(timeoutMs),
     });
-    return res.ok || res.status === 200 || res.status === 404;
+    if (statusRes.ok) {
+      try {
+        const data = await statusRes.json();
+        // If Google Drive is configured but connection failed, backend cannot stream or serve
+        if (data.drive && data.drive.configured && data.drive.connected === false) {
+          return false;
+        }
+        // If library is completely empty on cloud fallback, don't hijack edge autonomous catalog
+        if (cleanUrl.includes("onrender.com") && data.library && data.library.total_items === 0) {
+          return false;
+        }
+        return true;
+      } catch (_) {
+        return true;
+      }
+    }
+    const res = await fetch(`${cleanUrl}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return res.ok || res.status === 200;
   } catch {
     return false;
   }
@@ -1169,7 +1191,7 @@ export default {
           const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
           const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
           const safeAscii = cleanTitle.replace(/[^a-zA-Z0-9._-]/g, '_');
-          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=1500\n#EXTVLCOPT:sout-mux-caching=1500\n#EXTVLCOPT:file-caching=1500\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+          const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:live-caching=3000\n#EXTVLCOPT:http-reconnect=true\n#EXTVLCOPT:http-continuous=true\n${streamUrl}\n`;
           return new Response(m3u, {
             status: 200,
             headers: {
@@ -1204,7 +1226,7 @@ export default {
         const streamUrl = `https://${url.host}/media/${mediaId || 0}/stream/${cleanEncoded}?drive_id=${cleanDriveId}`;
         const cleanTitle = (filename || 'stream').replace(/[\r\n\x00-\x1f\x7f]+/g, ' ').trim().replace(/,/g, ' -');
         const safeAscii = cleanTitle.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=1500\n#EXTVLCOPT:sout-mux-caching=1500\n#EXTVLCOPT:file-caching=1500\n#EXTVLCOPT:http-reconnect=true\n${streamUrl}\n`;
+        const m3u = `#EXTM3U\n#EXTINF:-1,${cleanTitle}\n#EXTVLCOPT:video-track=0\n#EXTVLCOPT:network-caching=3000\n#EXTVLCOPT:sout-mux-caching=3000\n#EXTVLCOPT:file-caching=3000\n#EXTVLCOPT:live-caching=3000\n#EXTVLCOPT:http-reconnect=true\n#EXTVLCOPT:http-continuous=true\n${streamUrl}\n`;
         return new Response(m3u, {
           status: 200,
           headers: {

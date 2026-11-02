@@ -61,6 +61,12 @@ async def main():
     print("This will connect your Telegram user session to StreamX.")
     print("StreamX will use this session ONLY to download large media")
     print("files that you explicitly forward to @Stream1_X_bot.")
+    print("======================================================")
+    print("IMPORTANT:")
+    print("1. Enter your phone number WITH the '+' and country code.")
+    print("   Example: +919876543210 (if in India) or +1XXXXXXXXXX")
+    print("2. Do NOT enter the bot token here. A bot session cannot")
+    print("   download large user-forwarded media files.")
     print("======================================================\n")
 
     client = TelegramClient(StringSession(), api_id, api_hash)

@@ -18,6 +18,7 @@ Error model:
 """
 
 import asyncio
+import os
 import time
 from datetime import timedelta
 from typing import Optional
