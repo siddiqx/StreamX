@@ -48,8 +48,9 @@ class GoogleDriveService:
     def _get_stream_client(self) -> httpx.AsyncClient:
         """Get or initialize pooled HTTP client with keep-alive for zero-handshake streaming."""
         if self._stream_client is None or self._stream_client.is_closed:
-            limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=60.0)
-            timeout = httpx.Timeout(300.0, connect=10.0, read=300.0)
+            limits = httpx.Limits(max_keepalive_connections=30, max_connections=60, keepalive_expiry=120.0)
+            # Media streaming requires connect/pool timeouts without artificial read timeouts (VLC buffering/pauses)
+            timeout = httpx.Timeout(timeout=None, connect=15.0, read=None, write=30.0, pool=30.0)
             self._stream_client = httpx.AsyncClient(limits=limits, timeout=timeout)
         return self._stream_client
 
@@ -67,8 +68,8 @@ class GoogleDriveService:
             and self.refresh_token.strip()
         )
 
-    async def get_credentials(self) -> Credentials:
-        """Get or refresh valid Google OAuth credentials."""
+    async def get_credentials(self, force_refresh: bool = False) -> Credentials:
+        """Get or refresh valid Google OAuth credentials with proactive renewal."""
         async with self._lock:
             if not self.is_configured():
                 raise ValueError("Google Drive credentials are not fully configured in .env.")
@@ -83,7 +84,19 @@ class GoogleDriveService:
                     scopes=["https://www.googleapis.com/auth/drive"],
                 )
 
-            if not self.credentials.valid:
+            now_utc = datetime.now(timezone.utc)
+            is_nearing_expiry = False
+            if self.credentials.expiry:
+                expiry_dt = (
+                    self.credentials.expiry.replace(tzinfo=timezone.utc)
+                    if self.credentials.expiry.tzinfo is None
+                    else self.credentials.expiry
+                )
+                # Proactively renew if token expires within 5 minutes (300 seconds)
+                if (expiry_dt - now_utc).total_seconds() < 300:
+                    is_nearing_expiry = True
+
+            if force_refresh or not self.credentials.valid or is_nearing_expiry:
                 # Run synchronous refresh in executor
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, self.credentials.refresh, Request())
@@ -1014,7 +1027,7 @@ class GoogleDriveService:
         return sync_res
 
     async def get_download_stream(self, drive_file_id: str, range_header: Optional[str] = None):
-        """Yield chunks directly from Google Drive alt=media endpoint with connection pooling."""
+        """Yield chunks directly from Google Drive alt=media endpoint with connection pooling and auth recovery."""
         creds = await self.get_credentials()
         headers = {"Authorization": f"Bearer {creds.token}"}
         if range_header:
@@ -1024,6 +1037,16 @@ class GoogleDriveService:
         client = self._get_stream_client()
         req = client.build_request("GET", url, headers=headers)
         res = await client.send(req, stream=True)
+
+        # Transparently recover if access token expired mid-session
+        if res.status_code == 401:
+            await res.aclose()
+            log_event("STREAM_AUTH_EXPIRED_REFRESHING", drive_file_id=drive_file_id)
+            creds = await self.get_credentials(force_refresh=True)
+            headers["Authorization"] = f"Bearer {creds.token}"
+            req = client.build_request("GET", url, headers=headers)
+            res = await client.send(req, stream=True)
+
         return client, res
 
     async def get_storage_and_user_info(self) -> Dict[str, Any]:

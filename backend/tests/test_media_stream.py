@@ -209,3 +209,60 @@ async def test_apostrophe_and_special_char_m3u_stream():
                 await session.delete(item)
                 await session.commit()
 
+
+@pytest.mark.asyncio
+async def test_stream_resilience_mid_playback_drop(sample_media):
+    """Verify that when Google Drive drops the connection mid-playback, StreamX auto-resumes seamlessly without freezing VLC."""
+    import httpx
+
+    # First call: sends 512 bytes, then simulates connection drop (RemoteProtocolError)
+    mock_client1 = AsyncMock()
+    mock_res1 = AsyncMock()
+    mock_res1.status_code = 206
+    mock_res1.headers = {
+        "Content-Range": "bytes 0-1023/1048576",
+        "Content-Length": "1024",
+    }
+
+    async def failing_aiter(chunk_size=65536):
+        yield b"A" * 512
+        raise httpx.RemoteProtocolError("peer closed connection prematurely")
+
+    mock_res1.aiter_bytes = failing_aiter
+    mock_res1.aclose = AsyncMock()
+
+    # Second call (resumption): sends remaining 512 bytes
+    mock_client2 = AsyncMock()
+    mock_res2 = AsyncMock()
+    mock_res2.status_code = 206
+    mock_res2.headers = {
+        "Content-Range": "bytes 512-1023/1048576",
+        "Content-Length": "512",
+    }
+
+    async def resume_aiter(chunk_size=65536):
+        yield b"B" * 512
+
+    mock_res2.aiter_bytes = resume_aiter
+    mock_res2.aclose = AsyncMock()
+
+    calls = [(mock_client1, mock_res1), (mock_client2, mock_res2)]
+
+    async def mock_get_download_stream(fid, range_header=None):
+        return calls.pop(0)
+
+    with patch("app.api.media.drive_service.get_download_stream", side_effect=mock_get_download_stream), \
+         patch("app.api.media.asyncio.sleep", new_callable=AsyncMock):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res_stream = await client.get(
+                f"/media/{sample_media}/stream",
+                headers={"Range": "bytes=0-1023"},
+            )
+            assert res_stream.status_code == 206
+            content = res_stream.content
+            assert len(content) == 1024
+            assert content[:512] == b"A" * 512
+            assert content[512:] == b"B" * 512
+
+

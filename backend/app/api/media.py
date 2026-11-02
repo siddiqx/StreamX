@@ -1,7 +1,8 @@
 import asyncio
 from datetime import datetime, timezone
 import json
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -509,6 +510,138 @@ async def unlock_media_metadata(
 
 
 
+def parse_content_range(content_range_str: Optional[str]) -> Tuple[int, Optional[int], Optional[int]]:
+    """Parse 'bytes <start>-<end>/<total>' into (start, end, total)."""
+    if not content_range_str:
+        return 0, None, None
+    try:
+        match = re.match(r"bytes\s+(\d+)-(\d+)/(?:\*|(\d+))", content_range_str.strip())
+        if match:
+            start = int(match.group(1))
+            end = int(match.group(2))
+            total = int(match.group(3)) if match.group(3) else None
+            return start, end, total
+    except Exception:
+        pass
+    return 0, None, None
+
+
+async def resilient_stream_generator(
+    drive_file_id: str,
+    initial_res: httpx.Response,
+    start_byte: int = 0,
+    end_byte: Optional[int] = None,
+    expected_bytes: Optional[int] = None,
+    chunk_size: int = 262144,
+):
+    """Stream media chunks from Google Drive with zero-disk memory buffering and transparent auto-resumption.
+
+    If Google Drive drops the upstream TCP connection or the access token expires mid-stream,
+    this generator catches the disconnect, requests the remaining byte range, and seamlessly
+    continues yielding chunks to VLC / the player without dropping the client HTTP connection.
+    """
+    bytes_sent = 0
+    current_res = initial_res
+    max_retries = 8
+    retry_delay = 0.5
+
+    try:
+        while True:
+            try:
+                async for chunk in current_res.aiter_bytes(chunk_size=chunk_size):
+                    if not chunk:
+                        continue
+                    bytes_sent += len(chunk)
+                    yield chunk
+                    retry_delay = 0.5  # Reset retry backoff on healthy data flow
+            except (asyncio.CancelledError, GeneratorExit):
+                # Client (VLC / browser) intentionally closed connection or scrubbed
+                logger.debug(
+                    f"Client disconnected from stream for file {drive_file_id} after {bytes_sent} bytes"
+                )
+                return
+            except Exception as stream_err:
+                logger.warning(
+                    f"Google Drive stream interrupted at byte {start_byte + bytes_sent} "
+                    f"({expected_bytes or 'unknown'} expected): {type(stream_err).__name__}: {stream_err}. Resuming..."
+                )
+            finally:
+                if current_res is not None:
+                    try:
+                        await current_res.aclose()
+                    except Exception:
+                        pass
+                    current_res = None
+
+            # Check if all expected bytes have been delivered
+            if expected_bytes is not None and bytes_sent >= expected_bytes:
+                break
+
+            # If expected_bytes was not known and the iteration finished without error, we are done
+            if expected_bytes is None:
+                break
+
+            # Upstream closed connection prematurely before delivering all expected bytes.
+            # Perform seamless resumption from last transmitted byte offset.
+            retry_count = 0
+            resumed = False
+            while retry_count < max_retries:
+                retry_count += 1
+                resume_offset = start_byte + bytes_sent
+                if end_byte is not None:
+                    resume_range = f"bytes={resume_offset}-{end_byte}"
+                else:
+                    resume_range = f"bytes={resume_offset}-"
+
+                logger.info(
+                    f"Seamless stream resume attempt {retry_count}/{max_retries} for file {drive_file_id} "
+                    f"at offset {resume_offset} ({resume_range})"
+                )
+
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 1.5, 4.0)
+
+                try:
+                    # Force token refresh if retry > 1
+                    force_token_refresh = (retry_count > 1)
+                    if force_token_refresh:
+                        await drive_service.get_credentials(force_refresh=True)
+
+                    _, new_res = await drive_service.get_download_stream(
+                        drive_file_id, range_header=resume_range
+                    )
+
+                    if new_res.status_code in (200, 206):
+                        current_res = new_res
+                        resumed = True
+                        break
+                    elif new_res.status_code == 401:
+                        await new_res.aclose()
+                        await drive_service.get_credentials(force_refresh=True)
+                    else:
+                        await new_res.aclose()
+                        logger.warning(
+                            f"Resume request returned HTTP {new_res.status_code} on attempt {retry_count}"
+                        )
+                except (asyncio.CancelledError, GeneratorExit):
+                    return
+                except Exception as resume_err:
+                    logger.warning(f"Resume attempt {retry_count} failed: {resume_err}")
+
+            if not resumed:
+                logger.error(
+                    f"Stream resumption exhausted for file {drive_file_id} at byte {start_byte + bytes_sent} "
+                    f"after {retry_count} retries."
+                )
+                break
+    finally:
+        if current_res is not None:
+            try:
+                await current_res.aclose()
+            except Exception:
+                pass
+
+
 @router.api_route("/{media_id}/stream", methods=["GET", "HEAD"])
 async def stream_media(
     media_id: int,
@@ -551,20 +684,35 @@ async def stream_media(
         logger.error(f"Google Drive streaming error HTTP {res.status_code} for file {drive_file_id}: {err_text}")
         raise HTTPException(status_code=res.status_code, detail=f"Google Drive stream error: {res.status_code}")
 
-    async def stream_generator():
-        try:
-            async for chunk in res.aiter_bytes(chunk_size=262144):
-                yield chunk
-        finally:
-            await res.aclose()
+    start_byte = 0
+    end_byte = None
+    expected_bytes = None
 
     if "Content-Range" in res.headers:
         headers["Content-Range"] = res.headers["Content-Range"]
+        start_byte, end_byte, total_size = parse_content_range(res.headers["Content-Range"])
+        if end_byte is not None and end_byte >= start_byte:
+            expected_bytes = end_byte - start_byte + 1
+    elif "Content-Length" in res.headers:
+        try:
+            content_length = int(res.headers["Content-Length"])
+            expected_bytes = content_length
+            end_byte = content_length - 1 if content_length > 0 else None
+        except ValueError:
+            pass
+
     if "Content-Length" in res.headers:
         headers["Content-Length"] = res.headers["Content-Length"]
 
     return StreamingResponse(
-        stream_generator(),
+        resilient_stream_generator(
+            drive_file_id=drive_file_id,
+            initial_res=res,
+            start_byte=start_byte,
+            end_byte=end_byte,
+            expected_bytes=expected_bytes,
+            chunk_size=262144,
+        ),
         status_code=res.status_code,
         headers=headers,
     )
@@ -805,11 +953,16 @@ async def open_in_vlc(
     vlc_args = [
         vlc_bin,
         "--no-qt-privacy-ask",
-        "--network-caching=300",
-        "--file-caching=300",
+        "--network-caching=3000",
+        "--file-caching=2000",
+        "--live-caching=2000",
+        "--sout-mux-caching=2000",
         "--http-reconnect",
+        "--http-continuous",
         "--avcodec-hw=any",
     ]
+    if item and item.filename:
+        vlc_args.append(f"--meta-title={item.filename}")
     if start > 0:
         vlc_args.append(f"--start-time={int(start)}")
     vlc_args.append(stream_url)
@@ -861,6 +1014,7 @@ async def get_m3u_playlist(
         f"#EXTVLCOPT:sout-mux-caching=1500\n"
         f"#EXTVLCOPT:file-caching=1500\n"
         f"#EXTVLCOPT:http-reconnect=true\n"
+        f"#EXTVLCOPT:http-continuous=true\n"
         f"{stream_url}\n"
     )
 
@@ -890,26 +1044,41 @@ async def download_media(
     range_header = request.headers.get("Range")
     client, res = await drive_service.get_download_stream(item.drive_file_id, range_header)
 
-    async def stream_generator():
-        try:
-            async for chunk in res.aiter_bytes(chunk_size=131072):
-                yield chunk
-        finally:
-            await res.aclose()
-            await client.aclose()
+    start_byte = 0
+    end_byte = None
+    expected_bytes = None
 
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": "application/octet-stream",
         "Content-Disposition": make_content_disposition("attachment", item.filename),
     }
+
     if "Content-Range" in res.headers:
         headers["Content-Range"] = res.headers["Content-Range"]
+        start_byte, end_byte, total_size = parse_content_range(res.headers["Content-Range"])
+        if end_byte is not None and end_byte >= start_byte:
+            expected_bytes = end_byte - start_byte + 1
+    elif "Content-Length" in res.headers:
+        try:
+            content_length = int(res.headers["Content-Length"])
+            expected_bytes = content_length
+            end_byte = content_length - 1 if content_length > 0 else None
+        except ValueError:
+            pass
+
     if "Content-Length" in res.headers:
         headers["Content-Length"] = res.headers["Content-Length"]
 
     return StreamingResponse(
-        stream_generator(),
+        resilient_stream_generator(
+            drive_file_id=item.drive_file_id,
+            initial_res=res,
+            start_byte=start_byte,
+            end_byte=end_byte,
+            expected_bytes=expected_bytes,
+            chunk_size=131072,
+        ),
         status_code=res.status_code,
         headers=headers,
     )
