@@ -246,9 +246,17 @@ class GoogleDriveService:
                         # Single word query like 'Alya' matching 'Alya Sometimes Hides Her Feelings in Russian'
                         if len(target_sig[0]) >= 3:
                             is_match = True
+                    elif len(folder_sig) == 1:
+                        # Existing folder is single word like 'Alya' matching incoming multi-word show
+                        if len(folder_sig[0]) >= 3:
+                            is_match = True
                     elif len(target_sig) <= len(folder_sig):
                         # Multi-word prefix like 'The Promised' matching 'The Promised Neverland'
                         if folder_sig[:len(target_sig)] == target_sig:
+                            is_match = True
+                    elif len(folder_sig) < len(target_sig):
+                        # Existing folder like 'Solo Leveling' matching incoming 'Solo Leveling Season 2'
+                        if target_sig[:len(folder_sig)] == folder_sig:
                             is_match = True
 
                 if is_match:

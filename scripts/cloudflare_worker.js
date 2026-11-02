@@ -65,7 +65,7 @@ function isDuplicateUpdate(updateId) {
   return false;
 }
 
-const DEFAULT_FALLBACK_BACKEND_URL = "https://streamx-backend-cqm0.onrender.com";
+const DEFAULT_FALLBACK_BACKEND_URL = null;
 
 async function isBackendAlive(baseUrl, timeoutMs = 2000) {
   if (!baseUrl) return false;
@@ -1287,8 +1287,24 @@ export default {
       if (isCatalog && response.status === 200) {
         try {
           const clone = response.clone();
-          cachedCatalog = await clone.json();
-          cachedCatalogTime = Date.now();
+          const liveData = await clone.json();
+          // If live backend returned empty catalog ([]), intercept and fallback to dynamic edge catalog!
+          if (Array.isArray(liveData) && liveData.length === 0) {
+            const catalogData = await getDynamicCatalog(env);
+            return new Response(JSON.stringify(catalogData), {
+              status: 200,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "X-StreamX-Source": "dynamic-edge-reconciler",
+              },
+            });
+          }
+          if (Array.isArray(liveData) && liveData.length > 0) {
+            cachedCatalog = liveData;
+            cachedCatalogTime = Date.now();
+          }
         } catch (_) {}
       }
 

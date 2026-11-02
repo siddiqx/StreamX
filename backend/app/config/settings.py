@@ -71,7 +71,7 @@ class Settings(BaseSettings):
         description="Public backend URL for 24/7 keep-alive self-ping on cloud platforms",
     )
     KEEP_ALIVE_ENABLED: bool = Field(
-        default=True,
+        default=False,
         description="Enable periodic self-ping to prevent free-tier cloud containers from sleeping",
     )
 
