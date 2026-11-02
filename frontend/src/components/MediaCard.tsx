@@ -46,12 +46,14 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
 
   const [currentPoster, setCurrentPoster] = useState<string | undefined>(posterUrl);
   const [hasTriedProxy, setHasTriedProxy] = useState(false);
+  const [prevPosterUrl, setPrevPosterUrl] = useState(posterUrl);
 
-  React.useEffect(() => {
+  if (posterUrl !== prevPosterUrl) {
+    setPrevPosterUrl(posterUrl);
     setCurrentPoster(posterUrl);
     setImageError(false);
     setHasTriedProxy(false);
-  }, [posterUrl]);
+  }
 
   const handlePosterError = () => {
     if (!hasTriedProxy && posterUrl && (posterUrl.startsWith('http://') || posterUrl.startsWith('https://')) && !posterUrl.includes('image-proxy')) {
@@ -69,14 +71,15 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
   const category = group ? group.category : (resolvedItem?.category || '');
   const isSeries = group?.type === 'series';
 
-  // Watch history reactivity
+  // Watch history reactivity (skipped if overrideProgress is already provided)
   const [historyVersion, setHistoryVersion] = useState(0);
 
   React.useEffect(() => {
+    if (overrideProgress !== undefined) return;
     const handleUpdate = () => setHistoryVersion(v => v + 1);
     window.addEventListener('streamx_watch_history_updated', handleUpdate);
     return () => window.removeEventListener('streamx_watch_history_updated', handleUpdate);
-  }, []);
+  }, [overrideProgress]);
 
   // Compute series completion and in-progress playback state
   const { isCompleted, activeProgress } = React.useMemo(() => {
@@ -173,6 +176,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
           src={currentPoster}
           alt={title}
           loading="lazy"
+          decoding="async"
           onError={handlePosterError}
           className="media-card-poster"
           style={{
@@ -257,9 +261,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
         {/* Rating or Status Badge */}
         {rating && rating > 0 ? (
           <span style={{
-            background: 'rgba(7,9,14,0.82)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
+            background: 'rgba(7,9,14,0.92)',
             border: '1px solid rgba(251,191,36,0.3)',
             borderRadius: '6px',
             padding: '2px 5px',
@@ -343,9 +345,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
           {/* Watched / Finished badge */}
           {isCompleted && (
             <span style={{
-              background: 'rgba(16,185,129,0.9)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
+              background: '#059669',
               borderRadius: '6px',
               padding: '2px 6px',
               fontSize: '0.58rem',
@@ -355,7 +355,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
               alignItems: 'center',
               gap: '3px',
               boxShadow: '0 2px 6px rgba(0,0,0,0.6)',
-              border: '1px solid rgba(16,185,129,0.3)',
+              border: '1px solid rgba(16,185,129,0.4)',
             }}>
               <Check size={8} color="#fff" strokeWidth={3} />
               Watched

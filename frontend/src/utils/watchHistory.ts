@@ -31,6 +31,31 @@ export interface WatchHistoryItem {
 
 const STORAGE_KEY = 'streamx_watch_history';
 
+// In-memory zero-latency cache to eliminate synchronous localStorage layout thrashing on media cards
+let cachedHistory: WatchHistoryItem[] | null = null;
+let cachedHistoryMap: Map<number, WatchHistoryItem> | null = null;
+
+function setCachedHistory(list: WatchHistoryItem[]): void {
+  cachedHistory = list;
+  const map = new Map<number, WatchHistoryItem>();
+  for (let i = 0; i < list.length; i++) {
+    const h = list[i];
+    if (!map.has(h.mediaId)) {
+      map.set(h.mediaId, h);
+    }
+  }
+  cachedHistoryMap = map;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY) {
+      cachedHistory = null;
+      cachedHistoryMap = null;
+    }
+  });
+}
+
 /**
  * Intelligently estimate media duration when not yet provided by video element or canonical metadata.
  * Prevents 2-hour movies from defaulting to 24-minute TV episode durations.
@@ -74,20 +99,29 @@ export function getEstimatedDuration(item?: MediaItem | null, fallbackSeconds: n
 
 export function getWatchHistory(): WatchHistoryItem[] {
   if (typeof window === 'undefined') return [];
+  if (cachedHistory) return cachedHistory;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) {
+      setCachedHistory([]);
+      return [];
+    }
     const list: WatchHistoryItem[] = JSON.parse(raw);
     if (Array.isArray(list)) {
-      return list.sort((a, b) => new Date(b.lastWatchedAt).getTime() - new Date(a.lastWatchedAt).getTime());
+      list.sort((a, b) => new Date(b.lastWatchedAt).getTime() - new Date(a.lastWatchedAt).getTime());
+      setCachedHistory(list);
+      return list;
     }
   } catch {}
+  setCachedHistory([]);
   return [];
 }
 
 export function getWatchProgress(mediaId: number): WatchHistoryItem | null {
-  const history = getWatchHistory();
-  return history.find(h => h.mediaId === mediaId) || null;
+  if (!cachedHistoryMap) {
+    getWatchHistory();
+  }
+  return cachedHistoryMap?.get(mediaId) || null;
 }
 
 export function recordWatchStart(item: MediaItem, defaultDuration?: number): WatchHistoryItem {
@@ -115,6 +149,7 @@ export function recordWatchStart(item: MediaItem, defaultDuration?: number): Wat
 
   const filtered = history.filter(h => h.mediaId !== item.id);
   const updated = [entry, ...filtered].slice(0, 80); // Keep last 80 watched
+  setCachedHistory(updated);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   } catch {}
@@ -193,6 +228,7 @@ export function updateWatchProgress(
   }
 
   const updated = [entry, ...history].slice(0, 80);
+  setCachedHistory(updated);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   } catch {}
@@ -204,6 +240,7 @@ export function updateWatchProgress(
 }
 
 export function clearWatchHistory(): void {
+  setCachedHistory([]);
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {}
@@ -214,6 +251,7 @@ export function clearWatchHistory(): void {
 
 export function removeWatchHistoryItem(mediaId: number): void {
   const history = getWatchHistory().filter(h => h.mediaId !== mediaId);
+  setCachedHistory(history);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
   } catch {}
@@ -254,8 +292,10 @@ export function markWatchUnwatched(mediaId: number, item?: MediaItem): void {
     completed: false,
   };
 
+  const unwatchedList = [entry, ...filtered].slice(0, 80);
+  setCachedHistory(unwatchedList);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([entry, ...filtered].slice(0, 80)));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(unwatchedList));
   } catch {}
 
   if (typeof window !== 'undefined') {

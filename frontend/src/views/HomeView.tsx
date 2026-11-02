@@ -38,16 +38,23 @@ interface ShelfCarouselProps {
   children: React.ReactNode;
 }
 
-const ShelfCarousel: React.FC<ShelfCarouselProps> = ({ children }) => {
+const ShelfCarousel: React.FC<ShelfCarouselProps> = React.memo(({ children }) => {
   const rowRef = React.useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = React.useState(false);
   const [canScrollRight, setCanScrollRight] = React.useState(true);
+  const rafId = React.useRef<number | null>(null);
 
   const updateScrollButtons = React.useCallback(() => {
-    const el = rowRef.current;
-    if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 25);
-    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 25);
+    if (rafId.current !== null) return;
+    rafId.current = requestAnimationFrame(() => {
+      rafId.current = null;
+      const el = rowRef.current;
+      if (!el) return;
+      const leftState = el.scrollLeft > 25;
+      const rightState = el.scrollLeft + el.clientWidth < el.scrollWidth - 25;
+      setCanScrollLeft(prev => prev !== leftState ? leftState : prev);
+      setCanScrollRight(prev => prev !== rightState ? rightState : prev);
+    });
   }, []);
 
   React.useEffect(() => {
@@ -57,6 +64,9 @@ const ShelfCarousel: React.FC<ShelfCarouselProps> = ({ children }) => {
     el.addEventListener('scroll', updateScrollButtons, { passive: true });
     window.addEventListener('resize', updateScrollButtons);
     return () => {
+      if (rafId.current !== null) {
+        cancelAnimationFrame(rafId.current);
+      }
       el.removeEventListener('scroll', updateScrollButtons);
       window.removeEventListener('resize', updateScrollButtons);
     };
@@ -94,7 +104,7 @@ const ShelfCarousel: React.FC<ShelfCarouselProps> = ({ children }) => {
       )}
     </div>
   );
-};
+});
 
 export const HomeView: React.FC<HomeViewProps> = ({
   media,
@@ -458,7 +468,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   key={grp.id || idx}
                   src={bgUrl}
                   alt={grp.title}
-                  loading="eager"
+                  loading={idx === 0 ? "eager" : "lazy"}
+                  decoding="async"
                   onError={() => {
                     setFailedHeroBackdrops(prev => ({ ...prev, [grp.id]: true }));
                   }}
@@ -470,10 +481,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     objectFit: 'cover',
                     objectPosition: 'center 20%',
                     opacity: isCurrent ? 0.95 : 0,
-                    filter: 'saturate(125%) contrast(106%)',
+                    filter: isCurrent ? 'saturate(125%) contrast(106%)' : 'none',
                     transform: isCurrent ? 'scale(1)' : 'scale(1.03)',
                     transition: 'opacity 0.9s cubic-bezier(0.4, 0, 0.2, 1), transform 1.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
                     pointerEvents: 'none',
+                    visibility: isCurrent || Math.abs(idx - safeIndex) <= 1 ? 'visible' : 'hidden',
                   }}
                 />
               );
@@ -808,7 +820,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {/* Continue Watching Row (Active Watch Progress - Collapsed by Series) */}
       {continueWatchingList.length > 0 && (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <section className="shelf-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className="section-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{
@@ -858,7 +870,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {/* Horizontal Netflix-Style Rows */}
       {sections.map(s => (
-        <section key={s.title} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <section key={s.title} className="shelf-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className="section-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{

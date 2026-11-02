@@ -448,7 +448,7 @@ export function getMediaDisplayYear(item: MediaItem): number | undefined {
   return match ? parseInt(match[1]) : undefined;
 }
 
-export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'original' = 'w500'): string | undefined {
+export function getMediaPosterUrl(item: MediaItem, size: 'w342' | 'w500' | 'original' = 'w342'): string | undefined {
   if (item.poster_override && item.poster_override.trim()) {
     const o = item.poster_override.trim();
     if (o.includes('image.tmdb.org') || o.includes('googleusercontent.com')) {
