@@ -149,9 +149,9 @@ def calculate_match_confidence(parsed: ParsedMedia, candidate: CandidateMatch) -
     # contains an explicit season marker (e.g. "Season 2", "Season 3", "Part 2"):
     season_penalty = 0.0
     if parsed.season is not None:
-        cand_season_match = re.search(r"(?i)\b(?:Season|S|Part)\s*(\d{1,2})\b", candidate.title)
+        cand_season_match = re.search(r"(?i)\b(?:Season|S|Part)\s*(\d{1,2})\b|\b(?:2nd|3rd|4th)\s+season\b|([Ω])", candidate.title)
         if cand_season_match:
-            cand_s = int(cand_season_match.group(1))
+            cand_s = 2 if (cand_season_match.group(2) or "2nd" in cand_season_match.group(0).lower()) else int(cand_season_match.group(1) or 1)
             if cand_s != parsed.season:
                 season_penalty = 0.15
 
@@ -199,7 +199,7 @@ def is_same_work(c1: CandidateMatch, c2: CandidateMatch) -> bool:
 
     # Strip season/part markers for cross-season franchise comparison
     def strip_season_suffix(s: str) -> str:
-        return re.sub(r"\b(?:season|\d+(?:st|nd|rd|th)\s+season|part)\s*\d*\b", "", s, flags=re.I).strip()
+        return re.sub(r"\b(?:season|\d+(?:st|nd|rd|th)\s+season|part|s\d+)\s*\d*\b|(?:\b[ivxLCDM]+\b|\b\d+\b|[Ωαβγδε]|\bultra\b|\bult\b|\bmini\b|\bmovie\b)", "", s, flags=re.I).strip()
 
     bt1 = strip_season_suffix(t1)
     bt2 = strip_season_suffix(t2)

@@ -459,29 +459,43 @@ class TelegramBotService:
     def _extract_media_info(self, message: Dict[str, Any]) -> Optional[Tuple[str, str, int]]:
         """Extract file_id, filename, and size from video, document, audio, or animation messages."""
         caption = (message.get("caption") or "").strip()
+        fwd_title = message.get("forward_from_chat", {}).get("title") or message.get("forward_sender_name") or (caption.split("\n")[0].strip() if caption else None)
+
+        def _enrich_name(raw: str) -> str:
+            if fwd_title and raw:
+                clean_fwd = re.sub(r"(?i)\[[^\]]*\]|\([^\)]*\)|@[a-zA-Z0-9_]+", " ", fwd_title)
+                clean_fwd = re.sub(r"(?i)\b(?:uncensored|dual\s*audio|ongoing|tamil|telugu|hindi|english|sub|dub|dubbed|subbed|720p|1080p|hevc|season\s*\d+|s\d+)\b", " ", clean_fwd)
+                clean_fwd = re.sub(r"[_\-–—:|~.]+", " ", clean_fwd)
+                clean_fwd = re.sub(r"\s+", " ", clean_fwd).strip()
+                if clean_fwd and len(clean_fwd) >= 3:
+                    norm_fwd = re.sub(r"[^\w]", "", clean_fwd).lower()
+                    norm_fname = re.sub(r"[^\w]", "", raw).lower()
+                    if norm_fwd not in norm_fname:
+                        raw = f"{clean_fwd} - {raw}"
+            return sanitize_filename(raw)
 
         if "document" in message:
             doc = message["document"]
             raw_name = doc.get("file_name") or caption or "document.bin"
-            filename = sanitize_filename(raw_name)
+            filename = _enrich_name(raw_name)
             return doc.get("file_id"), filename, doc.get("file_size", 0)
 
         if "video" in message:
             vid = message["video"]
             raw_name = vid.get("file_name") or caption or f"video_{int(datetime.now(timezone.utc).timestamp())}.mp4"
-            filename = sanitize_filename(raw_name)
+            filename = _enrich_name(raw_name)
             return vid.get("file_id"), filename, vid.get("file_size", 0)
 
         if "animation" in message:
             anim = message["animation"]
             raw_name = anim.get("file_name") or caption or f"animation_{int(datetime.now(timezone.utc).timestamp())}.mp4"
-            filename = sanitize_filename(raw_name)
+            filename = _enrich_name(raw_name)
             return anim.get("file_id"), filename, anim.get("file_size", 0)
 
         if "audio" in message:
             aud = message["audio"]
             raw_name = aud.get("file_name") or caption or f"audio_{int(datetime.now(timezone.utc).timestamp())}.mp3"
-            filename = sanitize_filename(raw_name)
+            filename = _enrich_name(raw_name)
             return aud.get("file_id"), filename, aud.get("file_size", 0)
 
         return None
@@ -1147,6 +1161,21 @@ class TelegramBotService:
                             ext = f".{ext}"
                         fname = f"telegram_media_{m.id}{ext}"
 
+                    fwd = getattr(m, "forward", None)
+                    fwd_chat = getattr(fwd, "chat", None) if fwd else None
+                    m_caption = getattr(m, "message", None)
+                    cap_title = m_caption.split("\n")[0].strip() if m_caption else None
+                    fwd_title = (getattr(fwd_chat, "title", None) or getattr(fwd, "from_name", None)) if fwd else cap_title
+                    if fwd_title and fname:
+                        clean_fwd = re.sub(r"(?i)\[[^\]]*\]|\([^\)]*\)|@[a-zA-Z0-9_]+", " ", fwd_title)
+                        clean_fwd = re.sub(r"(?i)\b(?:uncensored|dual\s*audio|ongoing|tamil|telugu|hindi|english|sub|dub|dubbed|subbed|720p|1080p|hevc|season\s*\d+|s\d+)\b", " ", clean_fwd)
+                        clean_fwd = re.sub(r"[_\-–—:|~.]+", " ", clean_fwd)
+                        clean_fwd = re.sub(r"\s+", " ", clean_fwd).strip()
+                        if clean_fwd and len(clean_fwd) >= 3:
+                            norm_fwd = re.sub(r"[^\w]", "", clean_fwd).lower()
+                            norm_fname = re.sub(r"[^\w]", "", fname).lower()
+                            if norm_fwd not in norm_fname:
+                                fname = f"{clean_fwd} - {fname}"
                     fname = sanitize_filename(fname)
                     fsize = getattr(file_obj, "size", 0) or 0
                     if (

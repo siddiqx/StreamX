@@ -190,7 +190,7 @@ class TransferWorker:
         return cat
 
     async def reconcile_incomplete_transfers(self) -> None:
-        """Section 37: Reconcile transfers left incomplete by dead or restarted processes."""
+        """Section 37: Reconcile transfers left incomplete by dead or restarted processes, and auto-recover transient failures."""
         async with AsyncSessionLocal() as session:
             stmt = select(TelegramTransfer).where(
                 TelegramTransfer.status.in_(
@@ -200,18 +200,44 @@ class TransferWorker:
             )
             result = await session.execute(stmt)
             incomplete = result.scalars().all()
+            changed = False
             for t in incomplete:
-                log_event(
-                    "RECONCILING_INCOMPLETE_TRANSFER",
-                    transfer_id=t.id,
-                    filename=t.filename,
-                    previous_status=t.status.value,
-                )
-                t.status = TransferStatus.QUEUED
-                # Clear transient progress markers so the job re-runs cleanly.
-                t.started_at = None
-                t.scheduled_retry_at = None
-            if incomplete:
+                if t.id not in self.active_jobs:
+                    log_event(
+                        "RECONCILING_INCOMPLETE_TRANSFER",
+                        transfer_id=t.id,
+                        filename=t.filename,
+                        previous_status=t.status.value,
+                    )
+                    t.status = TransferStatus.QUEUED
+                    t.started_at = None
+                    t.scheduled_retry_at = None
+                    changed = True
+
+            # Auto-recover older transiently failed transfers after 10 minutes of cooling down
+            failed_stmt = select(TelegramTransfer).where(
+                TelegramTransfer.status == TransferStatus.FAILED,
+                TelegramTransfer.is_deleted.is_(False),
+                TelegramTransfer.completed_at <= utc_now() - timedelta(minutes=10),
+            )
+            failed_rows = (await session.execute(failed_stmt)).scalars().all()
+            for t in failed_rows:
+                if t.error_category not in {
+                    ErrorCategory.DRIVE_AUTH_FAILED,
+                    ErrorCategory.DRIVE_PERMISSION_DENIED,
+                    ErrorCategory.TELEGRAM_FORWARD_FAILED,
+                }:
+                    log_event("AUTO_RECOVERING_FAILED_TRANSFER", transfer_id=t.id, filename=t.filename)
+                    t.status = TransferStatus.QUEUED
+                    t.retry_count = 0
+                    t.resumable_upload_url = None
+                    t.bytes_transferred = 0
+                    t.error_message = None
+                    t.error_category = None
+                    t.completed_at = None
+                    changed = True
+
+            if changed:
                 await session.commit()
 
     async def start(self) -> None:
@@ -221,6 +247,7 @@ class TransferWorker:
         await self.reconcile_incomplete_transfers()
         while self.running:
             try:
+                await self.reconcile_incomplete_transfers()
                 processed = await self.process_next_transfer()
                 if not processed:
                     await asyncio.sleep(3)
@@ -630,17 +657,21 @@ class TransferWorker:
         start_time = time.time()
         current_offset = start_offset
         drive_file_id = None
-        target_chunk_size = 4 * 1024 * 1024  # 4MB chunk buffer for Drive (16 * 256KB)
-        mtproto_slice_size = 512 * 1024      # 512KB MTProto wire limit for Telegram
+        target_chunk_size = 8 * 1024 * 1024  # 8MB chunk buffer for Drive (32 * 256KB)
+        mtproto_slice_size = 1024 * 1024 if actual_size > 10 * 1024 * 1024 else 512 * 1024
 
-        # Concurrent Double-Buffered Queue (up to 2 chunks = 8MB in RAM)
+        # Concurrent Double-Buffered Queue (up to 2 chunks = 16MB in RAM, strictly <= 32MB invariant)
         chunk_queue: asyncio.Queue = asyncio.Queue(maxsize=2)
         producer_error: Optional[Exception] = None
         consumer_error: Optional[Exception] = None
+        watchdog_error: Optional[Exception] = None
         stop_event = stop_event or asyncio.Event()
 
+        last_activity_time = time.time()
+        last_db_sync = time.time()
+
         async def download_producer():
-            nonlocal producer_error
+            nonlocal producer_error, last_activity_time
             try:
                 buffer = bytearray()
                 offset_cursor = start_offset
@@ -650,18 +681,22 @@ class TransferWorker:
                     chunk_size=mtproto_slice_size,
                     request_size=mtproto_slice_size,
                 ):
+                    last_activity_time = time.time()
                     if stop_event.is_set():
                         break
                     buffer.extend(raw_slice)
                     if len(buffer) >= target_chunk_size or (offset_cursor + len(buffer)) >= actual_size:
                         chunk_bytes = bytes(buffer)
                         buffer.clear()
-                        while not stop_event.is_set():
-                            try:
-                                chunk_queue.put_nowait((chunk_bytes, offset_cursor))
-                                break
-                            except asyncio.QueueFull:
-                                await asyncio.sleep(0.05)
+                        put_task = asyncio.create_task(chunk_queue.put((chunk_bytes, offset_cursor)))
+                        done, pending = await asyncio.wait(
+                            [put_task, asyncio.create_task(stop_event.wait())],
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if stop_event.is_set():
+                            if put_task in pending:
+                                put_task.cancel()
+                            break
                         offset_cursor += len(chunk_bytes)
                         if offset_cursor >= actual_size or stop_event.is_set():
                             break
@@ -670,16 +705,17 @@ class TransferWorker:
                 if len(buffer) > 0 and not stop_event.is_set():
                     chunk_bytes = bytes(buffer)
                     buffer.clear()
-                    while not stop_event.is_set():
-                        try:
-                            chunk_queue.put_nowait((chunk_bytes, offset_cursor))
-                            break
-                        except asyncio.QueueFull:
-                            await asyncio.sleep(0.05)
-                    offset_cursor += len(chunk_bytes)
+                    put_task = asyncio.create_task(chunk_queue.put((chunk_bytes, offset_cursor)))
+                    done, pending = await asyncio.wait(
+                        [put_task, asyncio.create_task(stop_event.wait())],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if not stop_event.is_set():
+                        offset_cursor += len(chunk_bytes)
 
                 # Signal EOF
-                await chunk_queue.put(None)
+                if not stop_event.is_set():
+                    await chunk_queue.put(None)
             except Exception as e:
                 logger.error(f"Download producer error for transfer #{transfer_id}: {e}", exc_info=True)
                 producer_error = e
@@ -690,7 +726,7 @@ class TransferWorker:
                     pass
 
         async def upload_consumer():
-            nonlocal consumer_error, drive_file_id, current_offset
+            nonlocal consumer_error, drive_file_id, current_offset, last_activity_time, last_db_sync
             try:
                 async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as http_client:
                     while not stop_event.is_set():
@@ -720,6 +756,7 @@ class TransferWorker:
                             raise
 
                         current_offset = chunk_start + len(chunk_bytes)
+                        last_activity_time = time.time()
                         pct = int((current_offset / actual_size) * 100) if actual_size > 0 else 0
                         log_event(
                             "TRANSFER_CHUNK_UPLOADED",
@@ -729,13 +766,17 @@ class TransferWorker:
                             progress_pct=pct,
                         )
 
-                        async with AsyncSessionLocal() as session:
-                            stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
-                            t = (await session.execute(stmt)).scalar_one_or_none()
-                            if t:
-                                t.bytes_transferred = current_offset
-                                await session.commit()
-                        asyncio.create_task(self.broadcast_transfers_to_edge())
+                        # Throttle DB commits and edge broadcasts to at most once per 3.0s or upon completion
+                        now = time.time()
+                        if (now - last_db_sync >= 3.0) or completed:
+                            last_db_sync = now
+                            async with AsyncSessionLocal() as session:
+                                stmt = select(TelegramTransfer).where(TelegramTransfer.id == transfer_id)
+                                t = (await session.execute(stmt)).scalar_one_or_none()
+                                if t:
+                                    t.bytes_transferred = current_offset
+                                    await session.commit()
+                            asyncio.create_task(self.broadcast_transfers_to_edge())
 
                         if completed:
                             drive_file_id = file_id
@@ -746,8 +787,32 @@ class TransferWorker:
                 consumer_error = e
                 stop_event.set()
 
-        # Concurrently stream from Telegram while streaming to Google Drive
-        await asyncio.gather(download_producer(), upload_consumer())
+        async def transfer_watchdog():
+            nonlocal watchdog_error
+            INACTIVITY_TIMEOUT = 60.0
+            while not stop_event.is_set():
+                await asyncio.sleep(5.0)
+                if stop_event.is_set():
+                    break
+                inactive_sec = time.time() - last_activity_time
+                if inactive_sec > INACTIVITY_TIMEOUT:
+                    logger.warning(
+                        f"Transfer #{transfer_id} watchdog: no data for {round(inactive_sec, 1)}s. Triggering recovery abort."
+                    )
+                    watchdog_error = TimeoutError(
+                        f"Transfer stalled: no data transferred for {int(inactive_sec)} seconds."
+                    )
+                    stop_event.set()
+                    try:
+                        chunk_queue.put_nowait(None)
+                    except Exception:
+                        pass
+                    break
+
+        # Concurrently stream from Telegram while streaming to Google Drive with active watchdog
+        await asyncio.gather(download_producer(), upload_consumer(), transfer_watchdog())
+        if watchdog_error:
+            raise watchdog_error
 
         if stop_event.is_set():
             log_event("TRANSFER_STREAMING_STOPPED_BY_EVENT", transfer_id=transfer_id)

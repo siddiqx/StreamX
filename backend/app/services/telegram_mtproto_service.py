@@ -59,12 +59,12 @@ class TelegramMTProtoService:
                         StringSession(self.session_string),
                         self.api_id,
                         self.api_hash,
-                        connection_retries=2,
-                        retry_delay=1,
-                        auto_reconnect=False,
-                        flood_sleep_threshold=15,
-                        request_retries=2,
-                        timeout=5.0,
+                        connection_retries=10,
+                        retry_delay=2,
+                        auto_reconnect=True,
+                        flood_sleep_threshold=60,
+                        request_retries=5,
+                        timeout=25.0,
                     )
                     await asyncio.wait_for(self.client.connect(), timeout=8.0)
                     if not await self.client.is_user_authorized():

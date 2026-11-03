@@ -317,7 +317,8 @@ async def sync_watch_progress_bulk(
         record = existing_records.get(item.media_id)
         if record:
             server_time = ensure_utc(record.last_watched_at)
-            if not server_time or client_time >= server_time:
+            is_unwatch = (not item.completed and record.completed) or (item.progress_seconds == 0 and record.progress_seconds > 0)
+            if not server_time or client_time >= server_time or is_unwatch:
                 record.progress_seconds = item.progress_seconds
                 record.duration_seconds = item.duration_seconds
                 record.progress_percentage = item.progress_percentage

@@ -30,6 +30,7 @@ export interface WatchHistoryItem {
 }
 
 const STORAGE_KEY = 'streamx_watch_history';
+const SANITIZATION_KEY = 'streamx_watch_history_sanitized_v4';
 
 // In-memory zero-latency cache to eliminate synchronous localStorage layout thrashing on media cards
 let cachedHistory: WatchHistoryItem[] | null = null;
@@ -45,6 +46,41 @@ function setCachedHistory(list: WatchHistoryItem[]): void {
     }
   }
   cachedHistoryMap = map;
+}
+
+function sanitizeHistoryEntries(list: WatchHistoryItem[]): { list: WatchHistoryItem[]; changed: boolean } {
+  let changed = false;
+  const cleaned: WatchHistoryItem[] = [];
+
+  for (const item of list) {
+    const copy = { ...item };
+    // Check for bogus bug signatures:
+    // 1) 780s / 780s false completions from old default anime duration
+    // 2) completed: true with progressSeconds <= 60 or 0
+    // 3) progressPercentage == 5 with progressSeconds == 0
+    // 4) completed: true with low progress (<70%) or low seconds (<180s)
+    const isBogus780 = copy.completed && copy.durationSeconds === 780 && copy.progressSeconds === 780;
+    const isZeroCompleted = copy.completed && copy.progressSeconds <= 60;
+    const isFake5Pct = copy.progressPercentage === 5 && copy.progressSeconds === 0;
+    const isLowProgressCompleted = copy.completed && (copy.progressPercentage < 70 || copy.progressSeconds < 180);
+
+    if (isBogus780 || isZeroCompleted || isFake5Pct || isLowProgressCompleted) {
+      copy.completed = false;
+      if (isBogus780 || isZeroCompleted || isFake5Pct) {
+        copy.progressPercentage = 0;
+        copy.progressSeconds = 0;
+      }
+      changed = true;
+    } else if (copy.completed && copy.progressPercentage >= 90 && copy.progressSeconds === copy.durationSeconds) {
+      // Legacy auto-completed entries: reset completed to false, retain progress as 80%
+      copy.completed = false;
+      copy.progressPercentage = 80;
+      copy.progressSeconds = Math.round(copy.durationSeconds * 0.8);
+      changed = true;
+    }
+    cleaned.push(copy);
+  }
+  return { list: cleaned, changed };
 }
 
 if (typeof window !== 'undefined') {
@@ -106,8 +142,21 @@ export function getWatchHistory(): WatchHistoryItem[] {
       setCachedHistory([]);
       return [];
     }
-    const list: WatchHistoryItem[] = JSON.parse(raw);
+    let list: WatchHistoryItem[] = JSON.parse(raw);
     if (Array.isArray(list)) {
+      const alreadySanitized = localStorage.getItem(SANITIZATION_KEY);
+      if (!alreadySanitized) {
+        const { list: cleanedList, changed } = sanitizeHistoryEntries(list);
+        if (changed) {
+          list = cleanedList;
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+          } catch {}
+        }
+        try {
+          localStorage.setItem(SANITIZATION_KEY, 'true');
+        } catch {}
+      }
       list.sort((a, b) => new Date(b.lastWatchedAt).getTime() - new Date(a.lastWatchedAt).getTime());
       setCachedHistory(list);
       return list;
@@ -121,7 +170,13 @@ export function getWatchProgress(mediaId: number): WatchHistoryItem | null {
   if (!cachedHistoryMap) {
     getWatchHistory();
   }
-  return cachedHistoryMap?.get(mediaId) || null;
+  const entry = cachedHistoryMap?.get(mediaId) || null;
+  if (!entry) return null;
+  // Guardrail against any legacy or un-sanitized completed flags
+  if (entry.completed && (entry.progressPercentage < 70 || entry.progressSeconds < 180)) {
+    return { ...entry, completed: false };
+  }
+  return entry;
 }
 
 export function recordWatchStart(item: MediaItem, defaultDuration?: number): WatchHistoryItem {
@@ -162,13 +217,22 @@ export function recordWatchStart(item: MediaItem, defaultDuration?: number): Wat
   return entry;
 }
 
+export interface WatchProgressOptions {
+  allowComplete?: boolean;
+  isExplicit?: boolean;
+}
+
 export function updateWatchProgress(
   mediaId: number,
   progressSeconds: number,
   durationSeconds: number,
-  item?: MediaItem
+  item?: MediaItem,
+  options?: WatchProgressOptions
 ): void {
   if (!Number.isFinite(progressSeconds) || progressSeconds < 0) return;
+
+  const allowComplete = options?.allowComplete ?? true;
+  const isExplicit = options?.isExplicit ?? false;
 
   const history = getWatchHistory();
   const existingIndex = history.findIndex(h => h.mediaId === mediaId);
@@ -189,13 +253,22 @@ export function updateWatchProgress(
     ? Math.min(100, Math.max(0, Math.round((roundedProgress / effectiveDuration) * 100)))
     : 0;
 
-  // Completion criteria: >= 90% watched OR within 75s of the end for videos > 5 min
-  const nearEnd = effectiveDuration > 300 && (effectiveDuration - roundedProgress) <= 75;
-  const isComplete = pct >= 90 || nearEnd;
+  // STRICT Completion criteria:
+  // ONLY mark completed if:
+  // 1) Explicit user action (clicking "Mark as Watched" / "Seen") -> isExplicit === true
+  // 2) Real in-app web player playback (allowComplete !== false) AND genuine completion:
+  //    pct >= 92% AND duration > 120s AND roundedProgress >= 100s
+  // Under NO circumstances may external wall-clock sessions or allowComplete === false mark an item as completed!
+  const isGenuinePlayerCompletion = allowComplete &&
+    effectiveDuration > 120 &&
+    roundedProgress >= 100 &&
+    (pct >= 92 || ((effectiveDuration - roundedProgress) <= 60 && effectiveDuration > 300));
+
+  const isComplete = isExplicit || isGenuinePlayerCompletion;
 
   // If replayed from beginning (< 60s or < 5%), reset completed back to false
   const isRestart = roundedProgress < 60 || pct < 5;
-  const completed = isRestart ? false : (isComplete || Boolean(existing?.completed && pct > 80));
+  const completed = isRestart ? false : (isComplete || Boolean(existing?.completed && pct > 80 && allowComplete));
 
   let entry: WatchHistoryItem;
 
@@ -266,7 +339,7 @@ export function markWatchCompleted(mediaId: number, item?: MediaItem): void {
   const duration = existing && existing.durationSeconds > 0
     ? existing.durationSeconds
     : getEstimatedDuration(item, 3600);
-  updateWatchProgress(mediaId, duration, duration, item);
+  updateWatchProgress(mediaId, duration, duration, item, { allowComplete: true, isExplicit: true });
 }
 
 export function markWatchUnwatched(mediaId: number, item?: MediaItem): void {
@@ -301,6 +374,7 @@ export function markWatchUnwatched(mediaId: number, item?: MediaItem): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('streamx_watch_history_updated'));
   }
+  scheduleBackendSync(entry);
 }
 
 const SESSION_KEY = 'streamx_active_watch_session';
@@ -360,8 +434,8 @@ export function syncActiveWatchSession(mediaList: MediaItem[]): { updated: boole
     // Only consume the session once real watch time has elapsed
     localStorage.removeItem(SESSION_KEY);
 
-    // Discard absurd elapsed times (>6 hours) where user likely closed VLC or slept their machine
-    if (elapsedSeconds > 6 * 3600) {
+    // Discard absurd elapsed times (>2 hours) where user likely closed VLC or slept/left their machine
+    if (elapsedSeconds > 2 * 3600) {
       return { updated: false };
     }
 
@@ -370,8 +444,14 @@ export function syncActiveWatchSession(mediaList: MediaItem[]): { updated: boole
       ? session.durationSeconds
       : getEstimatedDuration(targetItem, 3600);
 
-    const newProgress = Math.min(duration, session.initialProgressSeconds + elapsedSeconds);
-    updateWatchProgress(session.mediaId, newProgress, duration, targetItem);
+    // External player sessions cannot guarantee active viewing.
+    // Cap maximum progress from an external session at 80% of total duration,
+    // and strictly pass allowComplete: false so external sessions never auto-tag as watched.
+    const maxAllowedProgress = Math.round(duration * 0.80);
+    const calculatedProgress = session.initialProgressSeconds + elapsedSeconds;
+    const newProgress = Math.min(maxAllowedProgress, calculatedProgress);
+
+    updateWatchProgress(session.mediaId, newProgress, duration, targetItem, { allowComplete: false });
 
     return {
       updated: true,
@@ -387,7 +467,8 @@ export function formatTimeRemaining(progressSeconds: number, durationSeconds: nu
     return '0m left';
   }
   const remaining = Math.max(0, durationSeconds - progressSeconds);
-  if (remaining <= 60) return 'Watched';
+  if (remaining === 0) return 'Finished';
+  if (remaining < 60) return '< 1m left';
   const hours = Math.floor(remaining / 3600);
   const minutes = Math.floor((remaining % 3600) / 60);
   if (hours > 0) return `${hours}h ${minutes}m left`;
@@ -430,7 +511,7 @@ export async function syncWatchHistoryWithCloud(mediaList: MediaItem[] = []): Pr
     const serverRecords = await syncBackendWatchProgressBulk(payload);
     if (!serverRecords || serverRecords.length === 0) return false;
 
-    // Merge server records into local watch history
+    // Merge server records into local watch history respecting timestamps
     const mergedMap = new Map<number, WatchHistoryItem>();
     for (const l of local) {
       mergedMap.set(l.mediaId, l);
@@ -444,6 +525,16 @@ export async function syncWatchHistoryWithCloud(mediaList: MediaItem[] = []): Pr
       const backdropUrl = existing?.backdropUrl || (targetItem ? getMediaBackdropUrl(targetItem) : undefined);
       const category = existing?.category || targetItem?.category || 'Movies';
 
+      // Conflict resolution: only overwrite local record if server record has a newer last_watched_at timestamp
+      if (existing) {
+        const localTime = new Date(existing.lastWatchedAt).getTime();
+        const serverTime = s.last_watched_at ? new Date(s.last_watched_at).getTime() : 0;
+        if (serverTime <= localTime) {
+          // Local is newer or equal, preserve local state!
+          continue;
+        }
+      }
+
       mergedMap.set(s.media_id, {
         mediaId: s.media_id,
         title,
@@ -455,7 +546,7 @@ export async function syncWatchHistoryWithCloud(mediaList: MediaItem[] = []): Pr
         durationSeconds: s.duration_seconds,
         progressPercentage: s.progress_percentage,
         completed: s.completed,
-        lastWatchedAt: s.last_watched_at,
+        lastWatchedAt: s.last_watched_at || new Date().toISOString(),
       });
     }
 
@@ -463,6 +554,7 @@ export async function syncWatchHistoryWithCloud(mediaList: MediaItem[] = []): Pr
       .sort((a, b) => new Date(b.lastWatchedAt).getTime() - new Date(a.lastWatchedAt).getTime())
       .slice(0, 80);
 
+    setCachedHistory(mergedList);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedList));
     window.dispatchEvent(new CustomEvent('streamx_watch_history_updated'));
     return true;

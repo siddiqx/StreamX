@@ -1,3 +1,8 @@
 name = "streamx-worker"
 main = "scripts/cloudflare_worker.js"
 compatibility_date = "2024-01-01"
+account_id = "667ce46323447ffe821271beb48dbaec"
+
+[[kv_namespaces]]
+binding = "STREAMX_CACHE"
+id = "68ecd713629b461fb04ff36c84d8dc3d"

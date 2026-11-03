@@ -47,8 +47,68 @@ function getFastCatalogItem(predicate) {
 const edgeTransfersQueue = [];
 const MAX_EDGE_QUEUE = 50;
 
+async function getEdgeTransfers(env) {
+  if (env?.STREAMX_CACHE) {
+    try {
+      const data = await env.STREAMX_CACHE.get("edge_transfers", "json");
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    } catch (e) {
+      console.warn("KV get edge_transfers error:", e);
+    }
+  }
+  return edgeTransfersQueue;
+}
+
+async function saveEdgeTransfers(env, list) {
+  edgeTransfersQueue.length = 0;
+  if (Array.isArray(list)) {
+    edgeTransfersQueue.push(...list.slice(0, MAX_EDGE_QUEUE));
+  }
+  if (env?.STREAMX_CACHE) {
+    try {
+      await env.STREAMX_CACHE.put("edge_transfers", JSON.stringify(edgeTransfersQueue), {
+        expirationTtl: 604800,
+      });
+    } catch (e) {
+      console.warn("KV put edge_transfers error:", e);
+    }
+  }
+}
+
 // Dynamic edge watch progress map (ensures resume & tracking persist 24/7 when backend is offline)
 const edgeWatchProgress = new Map();
+
+async function getEdgeWatchProgress(env) {
+  if (env?.STREAMX_CACHE) {
+    try {
+      const data = await env.STREAMX_CACHE.get("edge_watch_progress", "json");
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          if (item?.media_id) edgeWatchProgress.set(item.media_id, item);
+        }
+        return Array.from(edgeWatchProgress.values());
+      }
+    } catch (e) {
+      console.warn("KV get edge_watch_progress error:", e);
+    }
+  }
+  return Array.from(edgeWatchProgress.values());
+}
+
+async function saveEdgeWatchProgress(env) {
+  if (env?.STREAMX_CACHE) {
+    try {
+      const arr = Array.from(edgeWatchProgress.values()).slice(0, 200);
+      await env.STREAMX_CACHE.put("edge_watch_progress", JSON.stringify(arr), {
+        expirationTtl: 2592000,
+      });
+    } catch (e) {
+      console.warn("KV put edge_watch_progress error:", e);
+    }
+  }
+}
 
 // Update deduplication ring buffer
 const PROCESSED_UPDATE_IDS = new Set();
@@ -277,6 +337,7 @@ async function getDynamicCatalog(env) {
         if (videoFiles.length > 0) {
           // Sort newest first
           videoFiles.sort((a, b) => new Date(b.createdTime || 0).getTime() - new Date(a.createdTime || 0).getTime());
+          const maxExistingId = Math.max(100, ...snapshotList.map((s) => s.id || 0));
 
           const dynamicItems = videoFiles.map((f, idx) => {
             const fname = f.name;
@@ -288,7 +349,7 @@ async function getDynamicCatalog(env) {
             if (matched) {
               return {
                 ...matched,
-                id: matched.id || (idx + 1),
+                id: matched.id || (maxExistingId + idx + 1),
                 drive_file_id: f.id,
                 filename: fname,
                 size: size,
@@ -300,6 +361,7 @@ async function getDynamicCatalog(env) {
 
             // Sibling & canonical metadata cascade on Edge
             const cleanTitle = fname
+              .replace(/^(?:[\s\[({]*)(?:[αaа][ηnн][ιiи][мm][єeе]|anime|аниме|аnime|анимэ)[\s\])}._-]*/i, "")
               .replace(/\[[^\]]*\]/g, "")
               .replace(/\([^\)]*\)/g, "")
               .replace(/@[a-zA-Z0-9_]+/g, "")
@@ -329,7 +391,7 @@ async function getDynamicCatalog(env) {
               return false;
             });
 
-            const isAnime = lowerName.includes("s0") || lowerName.includes("ep") || lowerName.includes("sub") || lowerName.includes("dual") || (siblingMatch && siblingMatch.category === "Anime");
+            const isAnime = lowerName.includes("s0") || lowerName.includes("ep") || lowerName.includes("sub") || lowerName.includes("dual") || lowerName.includes("αηιмє") || lowerName.includes("anime") || (siblingMatch && siblingMatch.category === "Anime");
             const driveThumb = f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+/, "=s600") : null;
             const poster = (siblingMatch && siblingMatch.poster_url) ? siblingMatch.poster_url : driveThumb;
             const backdrop = (siblingMatch && (siblingMatch.backdrop_url || siblingMatch.canonical_metadata?.backdrop_path))
@@ -337,7 +399,7 @@ async function getDynamicCatalog(env) {
               : null;
 
             return {
-              id: idx + 1,
+              id: maxExistingId + idx + 1,
               drive_file_id: f.id,
               filename: fname,
               size: size,
@@ -535,7 +597,8 @@ async function handleTelegramWebhook(request, env, rawBase) {
     }
 
     if (["/queue", "/downloads", "/download", "/transfers", "/transfer", "/progress"].includes(cmd)) {
-      if (edgeTransfersQueue.length === 0) {
+      const currentTransfers = await getEdgeTransfers(env);
+      if (currentTransfers.length === 0) {
         await sendTelegram(
           chatId,
           `✨ <b>StreamX — Transfer Queue Clear</b>\n\n` +
@@ -545,15 +608,15 @@ async function handleTelegramWebhook(request, env, rawBase) {
           msgId
         );
       } else {
-        const lines = [`⏳ <b>StreamX Download Queue (${edgeTransfersQueue.length} files)</b>\n`];
-        for (const t of edgeTransfersQueue.slice(0, 8)) {
+        const lines = [`⏳ <b>StreamX Download Queue (${currentTransfers.length} files)</b>\n`];
+        for (const t of currentTransfers.slice(0, 8)) {
           const sizeStr = t.size ? `${(t.size / (1024 * 1024)).toFixed(1)} MB` : "Unknown";
           const progressPct = t.size && t.bytes_transferred ? Math.min(100, Math.round((t.bytes_transferred / t.size) * 100)) : (t.status === "COMPLETED" ? 100 : 0);
           const emoji = t.status === "COMPLETED" ? "✅" : (t.status === "UPLOADING_DRIVE" ? "☁️" : (t.status === "FAILED" ? "❌" : "⏳"));
           lines.push(`• ${emoji} <b>${t.filename}</b>\n  <code>${t.status}</code> · ${progressPct}% (${sizeStr})`);
         }
-        if (edgeTransfersQueue.length > 8) {
-          lines.push(`\n<i>...and ${edgeTransfersQueue.length - 8} more in queue</i>`);
+        if (currentTransfers.length > 8) {
+          lines.push(`\n<i>...and ${currentTransfers.length - 8} more in queue</i>`);
         }
         await sendTelegram(chatId, lines.join("\n\n"), msgId);
       }
@@ -562,7 +625,8 @@ async function handleTelegramWebhook(request, env, rawBase) {
 
     if (["/status", "/stats", "/health", "/system"].includes(cmd)) {
       const catalog = await getDynamicCatalog(env);
-      const activeTransfers = edgeTransfersQueue.filter(t => !["COMPLETED", "FAILED", "CANCELLED"].includes(t.status)).length;
+      const currentTransfers = await getEdgeTransfers(env);
+      const activeTransfers = currentTransfers.filter(t => !["COMPLETED", "FAILED", "CANCELLED"].includes(t.status)).length;
       await sendTelegram(
         chatId,
         `📊 <b>StreamX System Status</b>\n\n` +
@@ -646,10 +710,12 @@ async function handleTelegramWebhook(request, env, rawBase) {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-      edgeTransfersQueue.unshift(queueItem);
-      if (edgeTransfersQueue.length > MAX_EDGE_QUEUE) {
-        edgeTransfersQueue.pop();
+      const currentQueue = await getEdgeTransfers(env);
+      currentQueue.unshift(queueItem);
+      if (currentQueue.length > MAX_EDGE_QUEUE) {
+        currentQueue.pop();
       }
+      await saveEdgeTransfers(env, currentQueue);
 
       if (userId !== ownerId) {
         await forwardToOwner(chatId, msgId);
@@ -742,13 +808,14 @@ export default {
         const body = await request.json();
         const incoming = Array.isArray(body) ? body : body?.transfers;
         if (Array.isArray(incoming)) {
-          edgeTransfersQueue.length = 0;
+          const filtered = [];
           for (const item of incoming) {
             const fname = (item.filename || "").toLowerCase();
             if (fname.includes("alpha.movie") || fname.includes("beta.series")) continue;
-            edgeTransfersQueue.push(item);
+            filtered.push(item);
           }
-          return new Response(JSON.stringify({ ok: true, count: edgeTransfersQueue.length }), {
+          await saveEdgeTransfers(env, filtered);
+          return new Response(JSON.stringify({ ok: true, count: filtered.length }), {
             status: 200,
             headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
           });
@@ -790,6 +857,83 @@ export default {
     }
 
     const rawBase = await getLiveBackendUrl(env);
+
+    // Transfer Retry Action (resumes / resets transfer to QUEUED)
+    const transferRetryMatch = url.pathname.match(/\/(?:api\/)?transfers\/(\d+)\/retry/);
+    if (transferRetryMatch && request.method === "POST") {
+      const transferId = parseInt(transferRetryMatch[1], 10);
+      if (rawBase) {
+        try {
+          const fwdHeaders = new Headers(request.headers);
+          fwdHeaders.set("Host", new URL(rawBase).host);
+          const backendRes = await fetch(`${rawBase}${url.pathname}`, {
+            method: "POST",
+            headers: fwdHeaders,
+            signal: AbortSignal.timeout(3000),
+          });
+          if (backendRes.ok) {
+            const data = await backendRes.json();
+            return new Response(JSON.stringify(data), {
+              status: backendRes.status,
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+            });
+          }
+        } catch (_) {}
+      }
+      const currentQueue = await getEdgeTransfers(env);
+      let found = null;
+      for (const item of currentQueue) {
+        if (item.id === transferId) {
+          item.status = "QUEUED";
+          item.error_message = null;
+          item.updated_at = new Date().toISOString();
+          found = item;
+          break;
+        }
+      }
+      if (found) {
+        await saveEdgeTransfers(env, currentQueue);
+        return new Response(JSON.stringify(found), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+        });
+      }
+      return new Response(JSON.stringify({ error: "Transfer not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+      });
+    }
+
+    // Transfer Delete / Cancel Action (removes transfer from active UI)
+    const transferDeleteMatch = url.pathname.match(/\/(?:api\/)?transfers\/(\d+)$/);
+    if (transferDeleteMatch && request.method === "DELETE") {
+      const transferId = parseInt(transferDeleteMatch[1], 10);
+      if (rawBase) {
+        try {
+          const fwdHeaders = new Headers(request.headers);
+          fwdHeaders.set("Host", new URL(rawBase).host);
+          const backendRes = await fetch(`${rawBase}${url.pathname}`, {
+            method: "DELETE",
+            headers: fwdHeaders,
+            signal: AbortSignal.timeout(3000),
+          });
+          if (backendRes.ok) {
+            const data = await backendRes.json();
+            return new Response(JSON.stringify(data), {
+              status: backendRes.status,
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+            });
+          }
+        } catch (_) {}
+      }
+      let currentQueue = await getEdgeTransfers(env);
+      currentQueue = currentQueue.filter((item) => item.id !== transferId);
+      await saveEdgeTransfers(env, currentQueue);
+      return new Response(JSON.stringify({ ok: true, message: `Transfer ${transferId} cancelled and deleted`, id: transferId }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin },
+      });
+    }
 
     // 24/7 Telegram Webhook handler
     if ((url.pathname === "/telegram/webhook" || url.pathname === "/api/telegram/webhook") && request.method === "POST") {
@@ -1075,7 +1219,25 @@ export default {
       // 24/7 Edge Watch Progress Synchronization Fallback
       if (path.includes("/media/watch-progress")) {
         if (request.method === "GET") {
-          return new Response(JSON.stringify(Array.from(edgeWatchProgress.values())), {
+          const progressList = await getEdgeWatchProgress(env);
+          return new Response(JSON.stringify(progressList), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": origin,
+              "Access-Control-Allow-Credentials": "true",
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
+          });
+        }
+        if (request.method === "DELETE") {
+          const match = path.match(/\/media\/(\d+)\/watch-progress/);
+          if (match) {
+            const id = parseInt(match[1], 10);
+            edgeWatchProgress.delete(id);
+            ctx.waitUntil(saveEdgeWatchProgress(env));
+          }
+          return new Response(JSON.stringify({ success: true }), {
             status: 200,
             headers: {
               "Content-Type": "application/json",
@@ -1091,6 +1253,7 @@ export default {
               for (const item of body) {
                 if (item.media_id) edgeWatchProgress.set(item.media_id, item);
               }
+              ctx.waitUntil(saveEdgeWatchProgress(env));
               return new Response(JSON.stringify(Array.from(edgeWatchProgress.values())), {
                 status: 200,
                 headers: {
@@ -1101,6 +1264,7 @@ export default {
               });
             } else if (body && body.media_id) {
               edgeWatchProgress.set(body.media_id, body);
+              ctx.waitUntil(saveEdgeWatchProgress(env));
               return new Response(JSON.stringify(body), {
                 status: 200,
                 headers: {
@@ -1136,12 +1300,14 @@ export default {
       }
 
       if (isTransfers) {
-        return new Response(JSON.stringify(edgeTransfersQueue), {
+        const transfers = await getEdgeTransfers(env);
+        return new Response(JSON.stringify(transfers), {
           status: 200,
           headers: {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
           },
         });
       }
@@ -1308,6 +1474,31 @@ export default {
         } catch (_) {}
       }
 
+      // Automatically cache transfers on successful live responses
+      if (isTransfers && response.status === 200) {
+        try {
+          const clone = response.clone();
+          const liveTransfers = await clone.json();
+          if (Array.isArray(liveTransfers) && liveTransfers.length > 0) {
+            ctx.waitUntil(saveEdgeTransfers(env, liveTransfers));
+          } else if (Array.isArray(liveTransfers) && liveTransfers.length === 0) {
+            const kvTransfers = await getEdgeTransfers(env);
+            if (kvTransfers.length > 0) {
+              return new Response(JSON.stringify(kvTransfers), {
+                status: 200,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Access-Control-Allow-Origin": origin,
+                  "Access-Control-Allow-Credentials": "true",
+                  "Cache-Control": "no-cache, no-store, must-revalidate",
+                  "X-StreamX-Source": "edge-kv",
+                },
+              });
+            }
+          }
+        } catch (_) {}
+      }
+
       const resHeaders = new Headers(response.headers);
       resHeaders.delete("connection");
       resHeaders.delete("keep-alive");
@@ -1333,12 +1524,14 @@ export default {
 
       // OFFLINE FALLBACK
       if (isTransfers) {
-        return new Response(JSON.stringify(edgeTransfersQueue), {
+        const transfers = await getEdgeTransfers(env);
+        return new Response(JSON.stringify(transfers), {
           status: 200,
           headers: {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
           },
         });
       }
@@ -1375,7 +1568,25 @@ export default {
 
       if (isWatchProgress) {
         if (request.method === "GET") {
-          return new Response(JSON.stringify(Array.from(edgeWatchProgress.values())), {
+          const progressList = await getEdgeWatchProgress(env);
+          return new Response(JSON.stringify(progressList), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": origin,
+              "Access-Control-Allow-Credentials": "true",
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
+          });
+        }
+        if (request.method === "DELETE") {
+          const match = path.match(/\/media\/(\d+)\/watch-progress/);
+          if (match) {
+            const id = parseInt(match[1], 10);
+            edgeWatchProgress.delete(id);
+            ctx.waitUntil(saveEdgeWatchProgress(env));
+          }
+          return new Response(JSON.stringify({ success: true }), {
             status: 200,
             headers: {
               "Content-Type": "application/json",
@@ -1391,6 +1602,7 @@ export default {
               for (const item of body) {
                 if (item.media_id) edgeWatchProgress.set(item.media_id, item);
               }
+              ctx.waitUntil(saveEdgeWatchProgress(env));
               return new Response(JSON.stringify(Array.from(edgeWatchProgress.values())), {
                 status: 200,
                 headers: {
@@ -1401,6 +1613,7 @@ export default {
               });
             } else if (body && body.media_id) {
               edgeWatchProgress.set(body.media_id, body);
+              ctx.waitUntil(saveEdgeWatchProgress(env));
               return new Response(JSON.stringify(body), {
                 status: 200,
                 headers: {

@@ -87,7 +87,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
 
     if (overrideProgress !== undefined) {
       if (!overrideProgress) return { isCompleted: false, activeProgress: null };
-      const completed = !!(overrideProgress.completed || overrideProgress.progressPercentage >= 90);
+      const completed = !!overrideProgress.completed;
       return { isCompleted: completed, activeProgress: overrideProgress };
     }
 
@@ -97,10 +97,14 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
     if (isSeries && group && group.episodes && group.episodes.length > 0) {
       const episodes = group.episodes;
       const completedIds = new Set(
-        history.filter(h => h.completed || h.progressPercentage >= 90).map(h => h.mediaId)
+        history.filter(h => h.completed && (h.progressPercentage >= 80 || h.progressSeconds > 180)).map(h => h.mediaId)
       );
 
-      const allCompleted = episodes.every(ep => {
+      // Only mark entire series card completed if it has at least 2 episodes
+      // and every episode in the library has been genuinely finished.
+      const hasEnoughEpisodes = episodes.length >= 2;
+
+      const allCompleted = hasEnoughEpisodes && episodes.every(ep => {
         const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
         return epIds.some(id => completedIds.has(id));
       });
@@ -114,8 +118,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
       const inProgressEntry = history.find(h =>
         allEpIds.has(h.mediaId) &&
         !h.completed &&
-        (h.progressSeconds >= 15 || h.progressPercentage >= 2) &&
-        h.progressPercentage < 90
+        (h.progressSeconds >= 15 || h.progressPercentage >= 2)
       );
 
       return {
@@ -128,7 +131,7 @@ export const MediaCardComponent: React.FC<MediaCardProps> = ({
     const itemProgress = getWatchProgress(resolvedItem.id);
     if (!itemProgress) return { isCompleted: false, activeProgress: null };
 
-    const movieCompleted = !!(itemProgress.completed || itemProgress.progressPercentage >= 90);
+    const movieCompleted = !!itemProgress.completed && (itemProgress.progressPercentage >= 80 || itemProgress.progressSeconds > 180);
     return {
       isCompleted: movieCompleted,
       activeProgress: itemProgress,

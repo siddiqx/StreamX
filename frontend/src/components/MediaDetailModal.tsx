@@ -173,7 +173,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
       const explicit = episodes.find(e => e.item.id === selectedEpisodeId);
       if (explicit) {
         const epProgress = getWatchProgress(explicit.item.id);
-        const isResume = epProgress && !epProgress.completed && (epProgress.progressSeconds >= 15 || epProgress.progressPercentage >= 2) && epProgress.progressPercentage < 90;
+        const isResume = epProgress && !epProgress.completed && (epProgress.progressSeconds >= 15 || epProgress.progressPercentage >= 2);
         return {
           ep: explicit,
           progress: epProgress,
@@ -183,14 +183,13 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     }
 
     const history = getWatchHistory();
-    // 2. Genuine in-progress episode (progress between 2% and 90% or >=15s)
+    // 2. Genuine in-progress episode (uncompleted with progress >= 15s or >= 2%)
     for (const ep of episodes) {
       const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
       const matchHistory = history.find(h =>
         epIds.includes(h.mediaId) &&
         !h.completed &&
-        (h.progressSeconds >= 15 || h.progressPercentage >= 2) &&
-        h.progressPercentage < 90
+        (h.progressSeconds >= 15 || h.progressPercentage >= 2)
       );
       if (matchHistory) {
         return {
@@ -202,7 +201,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
     }
 
     // 3. Otherwise find first uncompleted episode sequentially (Ep 1 -> Ep 2...)
-    const completedIds = new Set(history.filter(h => h.completed || h.progressPercentage >= 90).map(h => h.mediaId));
+    const completedIds = new Set(history.filter(h => h.completed).map(h => h.mediaId));
     for (const ep of episodes) {
       const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
       if (!epIds.some(id => completedIds.has(id))) {

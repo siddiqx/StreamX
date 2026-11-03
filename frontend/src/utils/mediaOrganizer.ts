@@ -779,8 +779,7 @@ export function getSmartSeriesEpisode(group: MediaGroup): MediaEpisode {
     const inProgress = history.find(h =>
       epIds.includes(h.mediaId) &&
       !h.completed &&
-      (h.progressSeconds >= 15 || h.progressPercentage >= 2) &&
-      h.progressPercentage < 90
+      (h.progressSeconds >= 15 || h.progressPercentage >= 2)
     );
     if (inProgress) {
       return ep;
@@ -788,7 +787,7 @@ export function getSmartSeriesEpisode(group: MediaGroup): MediaEpisode {
   }
 
   // 2. Otherwise find the first uncompleted episode sequentially (accounting for all versions)
-  const completedIds = new Set(history.filter(h => h.completed || h.progressPercentage >= 90).map(h => h.mediaId));
+  const completedIds = new Set(history.filter(h => h.completed).map(h => h.mediaId));
   for (const ep of group.episodes) {
     const epIds = [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])];
     if (!epIds.some(id => completedIds.has(id))) {

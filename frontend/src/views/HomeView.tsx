@@ -174,8 +174,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       // Check if there is an episode currently in progress in this series
       const inProgressEp = groupEpHistories.find(({ history }) =>
         !history.completed &&
-        (history.progressSeconds >= 15 || history.progressPercentage >= 2) &&
-        history.progressPercentage < 90
+        (history.progressSeconds >= 15 || history.progressPercentage >= 2)
       );
 
       if (inProgressEp) {
@@ -187,11 +186,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
           episodeLabel: inProgressEp.ep.episodeLabel || `Ep ${inProgressEp.ep.episodeNumber || ''}`,
           sortTime: new Date(inProgressEp.history.lastWatchedAt).getTime(),
         });
-      } else if (latestInteraction.history.completed || latestInteraction.history.progressPercentage >= 90) {
+      } else if (latestInteraction.history.completed) {
         // Latest watched episode is completed -> Find the NEXT uncompleted episode in sequence
         const completedIds = new Set(
           groupEpHistories
-            .filter(({ history }) => history.completed || history.progressPercentage >= 90)
+            .filter(({ history }) => history.completed)
             .flatMap(({ ep }) => [ep.item.id, ...(ep.versions?.map(v => v.item.id) || [])])
         );
 
@@ -221,7 +220,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
     // 2. Process Standalone Movies / Videos
     for (const h of historyItems) {
-      if (h.completed || h.progressPercentage >= 90) continue;
+      if (h.completed) continue;
       // Must have at least 15s or 2% watched
       if (h.progressSeconds < 15 && h.progressPercentage < 2) continue;
 

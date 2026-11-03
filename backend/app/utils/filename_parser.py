@@ -82,6 +82,9 @@ def _strip_channel_tags(value: str) -> str:
     value = re.sub(r"(?<![A-Za-z0-9])@[A-Za-z0-9_]+", " ", value)
     value = re.sub(r"[\u2122\u00AE\u00A9]", " ", value)
     value = re.sub(r"(?i)\b(?:https?://)?(?:t\.me|telegram\.me)/[A-Za-z0-9_]+", " ", value)
+    # Strip stylized/homoglyph channel font markers like αηιмє, anime, аниме at start of string or standalone
+    value = re.sub(r"(?i)^(?:[\s\[({]*)(?:[αaа][ηnн][ιiи][мm][єeе]|anime|аниме|аnime|анимэ)[\s\])}._-]*", " ", value)
+    value = re.sub(r"(?i)(?<![A-Za-z0-9])(?:[αaа][ηnн][ιiи][мm][єeе]|аниме|аnime|анимэ)(?![A-Za-z0-9])", " ", value)
     return value
 
 
@@ -209,14 +212,22 @@ def parse_filename(filename: str) -> ParsedMedia:
                     working = prefix or suffix
                 break
 
-    # Separate season / episode parsing for noisy formats like "S1 - 10", "S01 ... EP03", etc.
+    # Separate season / episode parsing for noisy formats like "S1 - 10", "S01 ... EP03", ordinal seasons etc.
     if episode is None:
+        sep_ord_s = re.search(r"(?<![A-Za-z0-9])0*(\d{1,2})(?:st|nd|rd|th)\s+Season", working, re.I)
         sep_s = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*0*(\d{1,2})(?!\d)", working, re.I)
         sep_ep = re.search(r"(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*0*(\d{1,4})(?:v\d+)?(?!\d)", working, re.I)
         if sep_ep:
-            season = int(sep_s.group(1)) if sep_s else (season or 1)
+            if sep_ord_s:
+                season = int(sep_ord_s.group(1))
+            elif sep_s:
+                season = int(sep_s.group(1))
+            else:
+                season = season or 1
             episode = int(sep_ep.group(1))
             media_type = "tv"
+            if sep_ord_s:
+                working = re.sub(r"(?i)(?<![A-Za-z0-9])0*\d{1,2}(?:st|nd|rd|th)\s+Season", " ", working)
             if sep_s:
                 working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*0*\d{1,2}(?!\d)", " ", working)
             working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:EP|Episode|Ep|E)\s*[-_.]?\s*0*\d{1,4}(?:v\d+)?(?!\d)", " ", working)
@@ -232,6 +243,22 @@ def parse_filename(filename: str) -> ParsedMedia:
             episode = int(leading_episode.group(2))
             media_type = "tv"
             working = working[leading_episode.end():]
+        else:
+            # Bare leading episode numbers: "01. The Healer Starts Over", "01 - Title", "001 Isekai Maou", "01 Title"
+            leading_bare_ep = re.match(r"^\s*(?:0*(\d{1,4}))\s*(?:[.:–—\-]|v\d+\b)\s*([A-Za-z].*)$", working)
+            if not leading_bare_ep:
+                leading_space_ep = re.match(r"^\s*(?:0*(\d{2,4}))\s+([A-Za-z].*)$", working)
+                if leading_space_ep:
+                    num = int(leading_space_ep.group(1))
+                    if not (1900 <= num <= 2099):
+                        leading_bare_ep = leading_space_ep
+            if leading_bare_ep:
+                num = int(leading_bare_ep.group(1))
+                if 1 <= num <= 9999 and not (1900 <= num <= 2099):
+                    season = season or 1
+                    episode = num
+                    media_type = "tv"
+                    working = leading_bare_ep.group(2).strip(" -._|:,")
 
     if season is None and episode is None:
         leading_season = re.match(
@@ -289,6 +316,17 @@ def parse_filename(filename: str) -> ParsedMedia:
                 season = int(bare_s.group(1))
                 media_type = "tv"
                 working = rem
+
+    # Check if a season or ordinal season marker remains in working:
+    ord_s = re.search(r"(?<![A-Za-z0-9])0*(\d{1,2})(?:st|nd|rd|th)\s+Season\b", working, re.I)
+    if ord_s:
+        season = int(ord_s.group(1))
+        working = re.sub(r"(?i)(?<![A-Za-z0-9])0*\d{1,2}(?:st|nd|rd|th)\s+Season\b", " ", working)
+    elif season is None or season == 1:
+        explicit_s = re.search(r"(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*0*(\d{1,2})(?!\d)", working, re.I)
+        if explicit_s:
+            season = int(explicit_s.group(1))
+            working = re.sub(r"(?i)(?<![A-Za-z0-9])(?:Season|S)\s*[-_.]?\s*0*\d{1,2}(?!\d)", " ", working)
 
     # Remove episode title/release annotations after the first technical marker.
     noise_boundary = _NOISE_RE.search(working)

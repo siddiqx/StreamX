@@ -51,7 +51,7 @@ export async function launchVlcWithTracking(
 ): Promise<{ success: boolean; message: string }> {
   // Check existing watch progress for resume
   const progress = getWatchProgress(item.id);
-  const resumeSecs = (progress && !progress.completed && progress.progressSeconds >= 15 && progress.progressPercentage < 90)
+  const resumeSecs = (progress && !progress.completed && progress.progressSeconds >= 15)
     ? progress.progressSeconds
     : 0;
 

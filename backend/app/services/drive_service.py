@@ -169,6 +169,11 @@ class GoogleDriveService:
         """
         import re
         clean_name = re.sub(r'[\\/*?:"<>|]', '', show_name).strip()
+        # Strip season/part markers so all seasons of the same show share the exact same Google Drive folder
+        series_folder_name = re.sub(r"(?i)(?:season|\d+(?:st|nd|rd|th)\s+season|part|s\d+)\s*\d*", "", clean_name).strip()
+        series_folder_name = re.sub(r"\s+", " ", series_folder_name).strip(" -._|:,")
+        if series_folder_name and len(series_folder_name) >= 3:
+            clean_name = series_folder_name
         if not clean_name:
             return await self.get_folder_id(category)
 
